@@ -4,9 +4,12 @@
   "description": "AI-native IME Chrome extension",
   "scripts": {
     "build": "tsc && npm run copy-assets",
-    "copy-assets": "mkdir -p dist/icons && cp src/icons/* dist/icons/ 2>/dev/null || true && cp src/*.html dist/ 2>/dev/null || true && cp src/*.css dist/ 2>/dev/null || true && cp manifest.json dist/",
+    "copy-assets": "mkdir -p dist/icons && cp src/icons/*.png dist/icons/ 2>/dev/null || true && cp src/icons/icon.svg dist/icons/ 2>/dev/null || true && cp src/*.html dist/ 2>/dev/null || true && cp src/*.css dist/ 2>/dev/null || true && cp manifest.json dist/",
     "watch": "tsc --watch",
-    "dev": "npm run build && npm run watch"
+    "dev": "npm run build && npm run watch",
+    "icons": "python3 build-icons.py",
+    "package": "npm run build && cd dist && zip -r ../hime-extension.zip * && cd ..",
+    "release": "npm run icons && npm run package"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.246",

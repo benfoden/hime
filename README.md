@@ -16,10 +16,15 @@ AI-native IME Chrome extension — type English, get Japanese (or any language) 
 ### Developer Mode (Current)
 
 1. Clone/download this repo
-2. Run `npm install && npm run build`
-3. Open Chrome → Extensions → Developer mode ON
-4. Click "Load unpacked" → select the `dist` folder
-5. Click the hime icon → Settings → add your API key
+2. Install dependencies: `npm install`
+3. Build icons (requires Python with Pillow, or use `rsvg-convert`/`inkscape`):
+   ```bash
+   python3 build-icons.py
+   ```
+4. Build extension: `npm run build`
+5. Open Chrome → Extensions → Developer mode ON
+6. Click "Load unpacked" → select the `dist` folder
+7. Click the hime icon → Settings → add your API key
 
 ### Chrome Web Store
 
