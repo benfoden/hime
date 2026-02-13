@@ -1,0 +1,108 @@
+/* Popup styles */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  margin: 0;
+  padding: 0;
+  min-width: 220px;
+}
+
+.popup {
+  padding: 20px;
+}
+
+h1 {
+  margin: 0 0 4px 0;
+  font-size: 20px;
+  color: #4A90D9;
+}
+
+.subtitle {
+  margin: 0 0 20px 0;
+  font-size: 12px;
+  color: #888;
+}
+
+.direction {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 12px;
+  background: #f5f5f5;
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.arrow {
+  color: #4A90D9;
+}
+
+button {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: #4A90D9;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #3a7bc8;
+}
+
+.btn-secondary {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.btn-secondary:hover {
+  background: #e0e0e0;
+}
+
+.hotkeys {
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #eee;
+}
+
+.hotkeys h3 {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  color: #888;
+  text-transform: uppercase;
+}
+
+.hotkeys ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hotkeys li {
+  margin: 6px 0;
+  font-size: 12px;
+  color: #666;
+}
+
+kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 10px;
+}

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>hime Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <h1>hime Settings</h1>
+    <p class="subtitle">AI-native IME for seamless translation</p>
+    
+    <section>
+      <h2>API Configuration</h2>
+      
+      <div class="form-group">
+        <label for="provider">Provider</label>
+        <select id="provider">
+          <option value="openai">OpenAI</option>
+          <option value="gemini">Google Gemini</option>
+        </select>
+      </div>
+      
+      <div class="form-group">
+        <label for="apiKey">API Key</label>
+        <input type="password" id="apiKey" placeholder="Enter your API key">
+        <p class="help-text">Your API key is stored locally in your browser.</p>
+      </div>
+      
+      <div class="form-group">
+        <label for="model">Model</label>
+        <select id="model">
+          <!-- Populated dynamically based on provider -->
+        </select>
+      </div>
+      
+      <div class="form-group">
+        <label for="storageMode">Storage Mode</label>
+        <select id="storageMode">
+          <option value="persistent">Persistent (survives browser restart)</option>
+          <option value="session">Session only (cleared on browser close)</option>
+        </select>
+      </div>
+      
+      <button id="testConnection" class="btn-secondary">Test Connection</button>
+    </section>
+    
+    <section>
+      <h2>Translation</h2>
+      
+      <div class="form-row">
+        <div class="form-group">
+          <label for="sourceLanguage">Source Language</label>
+          <input type="text" id="sourceLanguage" value="English">
+        </div>
+        
+        <div class="form-group">
+          <label for="targetLanguage">Target Language</label>
+          <input type="text" id="targetLanguage" value="Japanese">
+        </div>
+      </div>
+      
+      <div class="form-group">
+        <label for="formality">Formality</label>
+        <select id="formality">
+          <option value="auto">Auto (match input tone)</option>
+          <option value="casual">Casual</option>
+          <option value="polite">Polite</option>
+          <option value="formal">Formal</option>
+        </select>
+        <p class="help-text">Auto mode matches formality to your input tone — casual English becomes casual Japanese, formal becomes formal.</p>
+      </div>
+    </section>
+    
+    <section>
+      <h2>Advanced</h2>
+      
+      <div class="form-group">
+        <label for="customPrompt">Custom System Prompt (optional)</label>
+        <textarea id="customPrompt" rows="4" placeholder="Add custom instructions for the translation model..."></textarea>
+      </div>
+    </section>
+    
+    <div class="actions">
+      <button id="save" class="btn-primary">Save Settings</button>
+      <div id="status" class="status" style="display: none;"></div>
+    </div>
+    
+    <section class="hotkeys">
+      <h2>Hotkeys</h2>
+      <ul>
+        <li><kbd>Ctrl+Shift+T</kbd> — Toggle compose mode</li>
+        <li><kbd>Ctrl+Shift+Y</kbd> — YOLO translate</li>
+        <li><kbd>Ctrl+Shift+S</kbd> — Swap language direction</li>
+        <li><kbd>Escape</kbd> — Cancel compose mode</li>
+        <li><kbd>Ctrl+Z</kbd> — Undo translation</li>
+      </ul>
+      <p class="help-text">Hotkeys can be customized in Chrome's extension shortcuts (chrome://extensions/shortcuts)</p>
+    </section>
+  </div>
+  
+  <script type="module" src="options.js"></script>
+</body>
+</html>
