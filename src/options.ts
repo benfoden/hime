@@ -22,7 +22,7 @@ async function loadSettings(): Promise<void> {
   const result = await chrome.storage.local.get(['himeSettings']);
   currentSettings = { ...DEFAULT_SETTINGS, ...result.himeSettings };
   populateForm();
-  updateModelOptions();
+  await updateModelOptions();
 }
 
 // Populate form with current settings
@@ -38,10 +38,63 @@ function populateForm(): void {
 }
 
 // Update model options based on selected provider
-function updateModelOptions(): void {
+async function updateModelOptions(): Promise<void> {
   const provider = providerSelect.value as keyof typeof PROVIDER_MODELS;
+
+  if (provider === 'openrouter') {
+    // D-01: Fetch models dynamically from OpenRouter API
+    modelSelect.innerHTML = '<option value="">Loading models...</option>';
+    modelSelect.disabled = true;
+    try {
+      const apiKey = apiKeyInput.value;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+      const response = await fetch('https://openrouter.ai/api/v1/models', { headers });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch models: ${response.status}`);
+      }
+      const data = await response.json();
+      const models: { id: string; name: string }[] = (data.data || [])
+        .sort((a: { id: string }, b: { id: string }) => (a.id as string).localeCompare(b.id as string));
+      modelSelect.innerHTML = '';
+      if (models.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No models available';
+        modelSelect.appendChild(option);
+      } else {
+        models.forEach((m) => {
+          const option = document.createElement('option');
+          option.value = m.id;
+          option.textContent = m.id;
+          modelSelect.appendChild(option);
+        });
+      }
+      // Restore selection if valid
+      const modelIds = models.map(m => m.id);
+      if (modelIds.includes(currentSettings.model)) {
+        modelSelect.value = currentSettings.model;
+      } else if (models.length > 0) {
+        currentSettings.model = models[0].id;
+        modelSelect.value = models[0].id;
+      }
+    } catch (err) {
+      modelSelect.innerHTML = '';
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'Failed to load models';
+      modelSelect.appendChild(option);
+      showStatus(`Could not fetch OpenRouter models: ${err instanceof Error ? err.message : 'unknown error'}`, 'error');
+    } finally {
+      modelSelect.disabled = false;
+    }
+    return;
+  }
+
+  // Static model list for openai/gemini (existing logic)
   const models = PROVIDER_MODELS[provider] || [];
-  
   modelSelect.innerHTML = '';
   models.forEach(model => {
     const option = document.createElement('option');
@@ -49,7 +102,7 @@ function updateModelOptions(): void {
     option.textContent = model;
     modelSelect.appendChild(option);
   });
-  
+
   // Restore selection if valid
   const validModels: readonly string[] = models;
   if (validModels.includes(currentSettings.model)) {
@@ -108,6 +161,12 @@ async function testConnection(): Promise<void> {
       response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
       );
+    } else if (provider === 'openrouter') {
+      response = await fetch('https://openrouter.ai/api/v1/models', {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+        },
+      });
     } else {
       throw new Error('Unknown provider');
     }
