@@ -27,7 +27,8 @@ export class OpenAIProvider implements TranslationProvider {
               { role: 'system', content: systemPrompt },
               { role: 'user', content: text },
             ],
-            temperature: 0.3,
+            // gpt-5 models (gpt-5-mini/nano) only accept the default temperature
+            // (1); sending any other value returns HTTP 400. Omit it.
           }),
           signal: controller.signal,
         });
