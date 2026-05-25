@@ -1,4 +1,5 @@
 // Types for hime Chrome extension
+export type { ErrorKind, ClassifiedError } from './errors.js';
 
 export interface TranslationConfig {
   sourceLanguage: string;
@@ -28,6 +29,7 @@ export interface TranslationRequest {
 export interface TranslationResponse {
   translatedText: string;
   error?: string;
+  kind?: import('./errors.js').ErrorKind;
 }
 
 export interface TranslationProvider {
@@ -65,6 +67,7 @@ export interface SetBadgeMessage extends Message {
   payload: {
     text: string;
     color?: string;
+    kind?: import('./errors.js').ErrorKind;
   };
 }
 

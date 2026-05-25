@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "AI-native IME Chrome extension",
   "scripts": {
+    "test": "tsc && node --test 'test/**/*.mjs'",
     "build": "tsc && npm run copy-assets",
     "copy-assets": "mkdir -p dist/icons && cp src/icons/*.png dist/icons/ 2>/dev/null || true && cp src/icons/icon.svg dist/icons/ 2>/dev/null || true && cp src/*.html dist/ 2>/dev/null || true && cp src/*.css dist/ 2>/dev/null || true && cp manifest.json dist/",
     "watch": "tsc --watch",
@@ -15,6 +16,7 @@
     "@types/chrome": "^0.0.246",
     "typescript": "^5.2.2"
   },
+  "type": "module",
   "keywords": ["chrome-extension", "ime", "translation", "ai"],
   "license": "MIT"
 }
