@@ -87,7 +87,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
         case 'translate': {
           const translateMsg = message as TranslateMessage;
           const s = await getSettings();
-          console.debug('[hime] translate request', { provider: s.provider, model: s.model, length: translateMsg.payload.text.length });
+          console.log('[hime] translate request', { provider: s.provider, model: s.model, length: translateMsg.payload.text.length });
           try {
             const translated = await translateText(translateMsg.payload.text);
             sendResponse({ translatedText: translated });
