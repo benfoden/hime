@@ -275,9 +275,11 @@ async function convertComposeMode(): Promise<void> {
   
   const snapshot = getElementText(element);
   try {
+    showLoadingOverlay(element);
     await setBadge('...', '#FFA500');
     const translated = await translateText(textToTranslate);
 
+    hideLoadingOverlay(element);
     // Replace the composed text with translation
     const newText = composeState.originalText + translated;
     setElementText(element, newText);
@@ -288,6 +290,7 @@ async function convertComposeMode(): Promise<void> {
 
     console.log('hime: Composed text translated');
   } catch (error) {
+    hideLoadingOverlay(element);
     setElementText(element, snapshot);
     const b = badgeForKind((error as any)?.kind);
     await setBadge(b.text, b.color);
@@ -304,20 +307,23 @@ async function yoloTranslate(): Promise<void> {
     console.log('hime: No valid input element focused');
     return;
   }
-  
+
   const text = getElementText(element);
   if (!text.trim()) {
-    return; // Empty field, nothing to do
+    return;
   }
-  
+
   const snapshot = text;
   try {
+    showLoadingOverlay(element);
     await setBadge('...', '#FFA500');
     const translated = await translateText(text);
+    hideLoadingOverlay(element);
     setElementText(element, translated);
     await setBadge('');
     console.log('hime: YOLO translation complete');
   } catch (error) {
+    hideLoadingOverlay(element);
     setElementText(element, snapshot);
     const b = badgeForKind((error as any)?.kind);
     await setBadge(b.text, b.color);
