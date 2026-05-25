@@ -12,6 +12,7 @@ let customPromptTextarea: HTMLTextAreaElement;
 let testConnectionBtn: HTMLButtonElement;
 let saveBtn: HTMLButtonElement;
 let statusDiv: HTMLDivElement;
+let testStatusDiv: HTMLDivElement;
 
 // Current settings
 let currentSettings: Settings = { ...DEFAULT_SETTINGS };
@@ -87,11 +88,11 @@ async function testConnection(): Promise<void> {
   const model = modelSelect.value;
   
   if (!apiKey) {
-    showStatus('Please enter an API key first', 'error');
+    showStatus('Please enter an API key first', 'error', testStatusDiv);
     return;
   }
-  
-  showStatus('Testing connection...', 'info');
+
+  showStatus('Testing connection...', 'info', testStatusDiv);
   testConnectionBtn.disabled = true;
   
   try {
@@ -112,27 +113,27 @@ async function testConnection(): Promise<void> {
     }
     
     if (response.ok) {
-      showStatus('Connection successful!', 'success');
+      showStatus('Connection successful!', 'success', testStatusDiv);
     } else {
       const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-      showStatus(`Connection failed: ${error.error?.message || response.statusText}`, 'error');
+      showStatus(`Connection failed: ${error.error?.message || response.statusText}`, 'error', testStatusDiv);
     }
   } catch (error) {
-    showStatus(`Connection error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    showStatus(`Connection error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error', testStatusDiv);
   } finally {
     testConnectionBtn.disabled = false;
   }
 }
 
 // Show status message
-function showStatus(message: string, type: 'success' | 'error' | 'info'): void {
-  statusDiv.textContent = message;
-  statusDiv.className = `status ${type}`;
-  statusDiv.style.display = 'block';
-  
+function showStatus(message: string, type: 'success' | 'error' | 'info', target: HTMLDivElement = statusDiv): void {
+  target.textContent = message;
+  target.className = `status ${type}`;
+  target.style.display = 'block';
+
   if (type === 'success' || type === 'info') {
     setTimeout(() => {
-      statusDiv.style.display = 'none';
+      target.style.display = 'none';
     }, 3000);
   }
 }
@@ -151,6 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
   testConnectionBtn = document.getElementById('testConnection') as HTMLButtonElement;
   saveBtn = document.getElementById('save') as HTMLButtonElement;
   statusDiv = document.getElementById('status') as HTMLDivElement;
+  testStatusDiv = document.getElementById('testStatus') as HTMLDivElement;
   
   // Event listeners
   providerSelect.addEventListener('change', updateModelOptions);
