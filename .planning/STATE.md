@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-stopped_at: Phase 2 context gathered
-last_updated: "2026-05-25T03:10:59.834Z"
-last_activity: 2026-05-24 — v1.0 build complete (tasks 1–7, 10); requirements + research finalized
+status: executing
+stopped_at: Phase 2 Plan 01 complete
+last_updated: "2026-05-24T00:18:00Z"
+last_activity: 2026-05-24 — Phase 2 Plan 01 (classifyError + stripWrappers + npm test) complete
 progress:
   total_phases: 4
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 14
+  total_plans: 4
+  completed_plans: 2
+  percent: 50
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-24)
 ## Current Position
 
 Phase: 2 of 4 (Prompt Quality & Error Hardening)
-Plan: 0 of ? in current phase
-Status: Ready to plan
-Last activity: 2026-05-24 — v1.0 build complete (tasks 1–7, 10); requirements + research finalized
+Plan: 1 of 3 in current phase (02-01 complete)
+Status: Executing
+Last activity: 2026-05-24 — Phase 2 Plan 01: classifyError + stripWrappers + npm test harness complete
 
-Progress: [██░░░░░░░░] ~14% (1/7+ plans)
+Progress: [████░░░░░░] ~50% (2/4 plans total)
 
 ## Performance Metrics
 
@@ -61,6 +61,9 @@ Recent decisions affecting current work:
 - **Phase 1**: `document.execCommand('insertText')` is deprecated but accepted — no undo-safe alternative exists; monitor Chrome releases
 - **Phase 2**: Auto-formality as default — LLM infers tone from input; needs validation testing before trusting
 - **Phase 3**: Google Docs contenteditable behavior is the highest-risk unknown — may require graceful "unsupported" message rather than a fix
+- **02-01**: node --test 'test/**/*.mjs' glob used (not bare directory) — Node 24 requires explicit file pattern for test runner
+- **02-01**: type:module added to package.json — compiled dist/*.js is ES module format, avoids reparsing overhead
+- **02-01**: ErrorKind re-exported from types.ts — single canonical import site for Plans 02 and 03
 
 ### Pending Todos
 
@@ -80,6 +83,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-25T03:10:59.831Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-prompt-quality-error-hardening/02-CONTEXT.md
+Last session: 2026-05-24T00:18:00Z
+Stopped at: Phase 2 Plan 01 complete — ready for Plan 02 (provider integration)
+Resume file: .planning/phases/02-prompt-quality-error-hardening/02-02-PLAN.md

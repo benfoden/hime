@@ -205,7 +205,7 @@
 | FORM-05 | Phase 1 | Complete |
 | FORM-06 | Phase 2 | Pending |
 | FORM-07 | Phase 2 | Pending |
-| FORM-08 | Phase 2 | Pending |
+| FORM-08 | Phase 2 | Complete |
 | PROV-01 | Phase 1 | Complete |
 | PROV-02 | Phase 1 | Complete |
 | PROV-03 | Phase 1 | Complete |
@@ -229,10 +229,10 @@
 | ERR-01 | Phase 1 | Complete |
 | ERR-02 | Phase 1 | Complete |
 | ERR-03 | Phase 2 | Pending |
-| ERR-04 | Phase 2 | Pending |
-| ERR-05 | Phase 2 | Pending |
+| ERR-04 | Phase 2 | Complete |
+| ERR-05 | Phase 2 | Complete |
 | LOG-01 | Phase 2 | Pending |
-| LOG-02 | Phase 2 | Pending |
+| LOG-02 | Phase 2 | Complete |
 
 **Coverage:**
 - v1 requirements: 67 total
