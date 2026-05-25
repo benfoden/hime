@@ -1,5 +1,6 @@
 import { OpenAIProvider } from './providers/openai.js';
 import { GeminiProvider } from './providers/gemini.js';
+import { OpenRouterProvider } from './providers/openrouter.js';
 import type { 
   TranslationConfig, 
   TranslationProvider, 
@@ -13,6 +14,7 @@ import type {
 const providers: Record<string, TranslationProvider> = {
   openai: new OpenAIProvider(),
   gemini: new GeminiProvider(),
+  openrouter: new OpenRouterProvider(),
 };
 
 // Current compose mode state
@@ -98,6 +100,8 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             const settings = await getSettings();
             const endpoint = settings.provider === 'openai'
               ? 'https://api.openai.com/v1/chat/completions'
+              : settings.provider === 'openrouter'
+              ? 'https://openrouter.ai/api/v1/chat/completions'
               : 'generativelanguage.googleapis.com';
             console.error('[hime] translate failed', { provider: settings.provider, model: settings.model, status, kind, endpoint, message });
             sendResponse({ error: message, kind });
