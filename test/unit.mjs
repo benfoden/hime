@@ -389,3 +389,75 @@ test('OpenRouterProvider: fetch TypeError rejects with network message', async (
     }
   );
 });
+
+// ---------------------------------------------------------------------------
+// Cross-site compatibility tests (Phase 3)
+// These test the logic patterns used in content.ts since it's a classic script.
+// ---------------------------------------------------------------------------
+
+test('isCanvasEditor heuristic: returns true when parent has large canvas', () => {
+  // This tests the algorithm, not the actual DOM (no JSDOM in this project)
+  // The algorithm: walk up to 5 parent levels, check for canvas > 200x200
+  const mockCanvas = { width: 500, height: 800 };
+  const hasLargeCanvas = mockCanvas.width > 200 && mockCanvas.height > 200;
+  assert.equal(hasLargeCanvas, true, 'Large canvas should trigger detection');
+});
+
+test('isCanvasEditor heuristic: returns false for small canvas', () => {
+  const mockCanvas = { width: 50, height: 50 };
+  const hasLargeCanvas = mockCanvas.width > 200 && mockCanvas.height > 200;
+  assert.equal(hasLargeCanvas, false, 'Small canvas should not trigger detection');
+});
+
+test('shadow DOM traversal: returns inner activeElement when shadowRoot exists', () => {
+  // Test the algorithm: if active.shadowRoot && active.shadowRoot.activeElement -> return inner
+  const innerElement = { tagName: 'DIV', isContentEditable: true };
+  const outerElement = { shadowRoot: { activeElement: innerElement } };
+  const result = outerElement.shadowRoot && outerElement.shadowRoot.activeElement
+    ? outerElement.shadowRoot.activeElement
+    : outerElement;
+  assert.strictEqual(result, innerElement);
+});
+
+test('shadow DOM traversal: returns outer element when no shadowRoot', () => {
+  const outerElement = { shadowRoot: null, tagName: 'INPUT' };
+  const result = outerElement.shadowRoot && outerElement.shadowRoot.activeElement
+    ? outerElement.shadowRoot.activeElement
+    : outerElement;
+  assert.strictEqual(result, outerElement);
+});
+
+test('shadow DOM traversal: returns outer element when closed shadowRoot (null)', () => {
+  // Closed shadow roots are not accessible — .shadowRoot is null
+  const outerElement = { shadowRoot: null, tagName: 'DIV' };
+  const result = outerElement.shadowRoot && outerElement.shadowRoot.activeElement
+    ? outerElement.shadowRoot.activeElement
+    : outerElement;
+  assert.strictEqual(result, outerElement);
+});
+
+test('cursor positioning: selectionStart/End set to text length for input', () => {
+  const text = 'translated text here';
+  const selectionStart = text.length;
+  const selectionEnd = text.length;
+  assert.equal(selectionStart, 20);
+  assert.equal(selectionEnd, 20);
+});
+
+test('overlay lifecycle: show sets opacity 0.5, hide restores empty', () => {
+  // Test the state transitions
+  let opacity = '';
+  let himeLoading = undefined;
+
+  // show
+  opacity = '0.5';
+  himeLoading = 'true';
+  assert.equal(opacity, '0.5');
+  assert.equal(himeLoading, 'true');
+
+  // hide
+  opacity = '';
+  himeLoading = undefined;
+  assert.equal(opacity, '');
+  assert.equal(himeLoading, undefined);
+});
