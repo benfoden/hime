@@ -1,60 +1,61 @@
 import type { TranslationConfig, TranslationProvider } from '../types.js';
+import { buildSystemPrompt } from './prompt.js';
+import { classifyError } from '../errors.js';
+import { stripWrappers } from '../output.js';
 
 export class GeminiProvider implements TranslationProvider {
   name = 'gemini';
 
   async translate(text: string, config: TranslationConfig, apiKey: string, model: string): Promise<string> {
-    const systemPrompt = this.buildSystemPrompt(config);
-    
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text }],
+    const systemPrompt = buildSystemPrompt(config);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    try {
+      let response: Response;
+      try {
+        response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
             },
-          ],
-          systemInstruction: {
-            parts: [{ text: systemPrompt }],
-          },
-        }),
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [{ text }],
+                },
+              ],
+              systemInstruction: {
+                parts: [{ text: systemPrompt }],
+              },
+            }),
+            signal: controller.signal,
+          }
+        );
+      } catch (err) {
+        const c = classifyError('gemini', err);
+        const e = new Error(c.message);
+        (e as any).kind = c.kind;
+        throw e;
       }
-    );
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-      throw new Error(error.error?.message || `Gemini API error: ${response.status}`);
-    }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        const bodyMessage = (body as any)?.error?.message;
+        const c = classifyError('gemini', null, { status: response.status, bodyMessage });
+        const e = new Error(c.message);
+        (e as any).kind = c.kind;
+        (e as any).status = c.status;
+        throw e;
+      }
 
-    const data = await response.json();
-    return data.candidates[0]?.content?.parts[0]?.text?.trim() || '';
-  }
-
-  private buildSystemPrompt(config: TranslationConfig): string {
-    const formalityInstruction = this.getFormalityInstruction(config.formality);
-    return `You are a translation engine. Translate the following text to ${config.targetLanguage}.
-Output ONLY the translated text — no explanations, no quotes, no markdown.
-Use natural, native-sounding phrasing that a native speaker would actually use.
-${formalityInstruction}
-${config.customPrompt || ''}`.trim();
-  }
-
-  private getFormalityInstruction(formality: string): string {
-    switch (formality) {
-      case 'casual':
-        return 'Use casual, informal language (e.g. for Japanese: タメ口、plain form).';
-      case 'polite':
-        return 'Use polite, standard language (e.g. for Japanese: です/ます form).';
-      case 'formal':
-        return 'Use formal, respectful language (e.g. for Japanese: 敬語/keigo).';
-      case 'auto':
-      default:
-        return 'Match the formality level to the tone of the input. Casual, informal input → casual output. Professional, formal input → polite/formal output.';
+      const data = await response.json();
+      return stripWrappers(data.candidates[0]?.content?.parts[0]?.text || '');
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }

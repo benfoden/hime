@@ -1,56 +1,57 @@
 import type { TranslationConfig, TranslationProvider } from '../types.js';
+import { buildSystemPrompt } from './prompt.js';
+import { classifyError } from '../errors.js';
+import { stripWrappers } from '../output.js';
 
 export class OpenAIProvider implements TranslationProvider {
   name = 'openai';
 
   async translate(text: string, config: TranslationConfig, apiKey: string, model: string): Promise<string> {
-    const systemPrompt = this.buildSystemPrompt(config);
-    
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: text },
-        ],
-        temperature: 0.3,
-      }),
-    });
+    const systemPrompt = buildSystemPrompt(config);
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-      throw new Error(error.error?.message || `OpenAI API error: ${response.status}`);
-    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
 
-    const data = await response.json();
-    return data.choices[0]?.message?.content?.trim() || '';
-  }
+    try {
+      let response: Response;
+      try {
+        response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: text },
+            ],
+            temperature: 0.3,
+          }),
+          signal: controller.signal,
+        });
+      } catch (err) {
+        const c = classifyError('openai', err);
+        const e = new Error(c.message);
+        (e as any).kind = c.kind;
+        throw e;
+      }
 
-  private buildSystemPrompt(config: TranslationConfig): string {
-    const formalityInstruction = this.getFormalityInstruction(config.formality);
-    return `You are a translation engine. Translate the following text to ${config.targetLanguage}.
-Output ONLY the translated text — no explanations, no quotes, no markdown.
-Use natural, native-sounding phrasing that a native speaker would actually use.
-${formalityInstruction}
-${config.customPrompt || ''}`.trim();
-  }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        const bodyMessage = (body as any)?.error?.message;
+        const c = classifyError('openai', null, { status: response.status, bodyMessage });
+        const e = new Error(c.message);
+        (e as any).kind = c.kind;
+        (e as any).status = c.status;
+        throw e;
+      }
 
-  private getFormalityInstruction(formality: string): string {
-    switch (formality) {
-      case 'casual':
-        return 'Use casual, informal language (e.g. for Japanese: タメ口、plain form).';
-      case 'polite':
-        return 'Use polite, standard language (e.g. for Japanese: です/ます form).';
-      case 'formal':
-        return 'Use formal, respectful language (e.g. for Japanese: 敬語/keigo).';
-      case 'auto':
-      default:
-        return 'Match the formality level to the tone of the input. Casual, informal input → casual output. Professional, formal input → polite/formal output.';
+      const data = await response.json();
+      return stripWrappers(data.choices[0]?.message?.content || '');
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }
