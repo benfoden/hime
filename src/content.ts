@@ -100,16 +100,18 @@ function getElementText(element: HTMLElement): string {
 // Utility: Set text in element (with undo support via execCommand)
 function setElementText(element: HTMLElement, text: string): void {
   const tag = element.tagName.toLowerCase();
-  
+
   // Focus the element first
   element.focus();
-  
+
   if (tag === 'input' || tag === 'textarea') {
     const inputEl = element as HTMLInputElement | HTMLTextAreaElement;
     // Select all text
     inputEl.select();
     // Use execCommand for undo-compatible replacement
     document.execCommand('insertText', false, text);
+    // D-08: Ensure cursor is at end of inserted text
+    inputEl.selectionStart = inputEl.selectionEnd = text.length;
   } else if (element.isContentEditable) {
     // For contenteditable, select all and replace
     const selection = window.getSelection();
@@ -118,6 +120,11 @@ function setElementText(element: HTMLElement, text: string): void {
     selection?.removeAllRanges();
     selection?.addRange(range);
     document.execCommand('insertText', false, text);
+    // D-08: Ensure cursor is at end of inserted text
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      sel.collapseToEnd();
+    }
   }
 }
 
