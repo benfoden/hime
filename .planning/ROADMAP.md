@@ -70,7 +70,7 @@ Plans:
 
 Plans:
 - [x] 03-01-PLAN.md — Core infrastructure: shadow DOM traversal, canvas-editor detection, loading overlay, focus-leave cleanup (Wave 1)
-- [ ] 03-02-PLAN.md — YOLO/Compose hardening: overlay wiring, failure restore, cursor positioning (Wave 2)
+- [x] 03-02-PLAN.md — YOLO/Compose hardening: overlay wiring, failure restore, cursor positioning (Wave 2)
 - [ ] 03-03-PLAN.md — Unit tests + manual verification on all 7 target editors (Wave 3)
 
 ### Phase 4: Web Store Distribution
