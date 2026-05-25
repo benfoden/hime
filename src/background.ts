@@ -86,8 +86,22 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
       switch (message.type) {
         case 'translate': {
           const translateMsg = message as TranslateMessage;
-          const translated = await translateText(translateMsg.payload.text);
-          sendResponse({ translatedText: translated });
+          const s = await getSettings();
+          console.debug('[hime] translate request', { provider: s.provider, model: s.model, length: translateMsg.payload.text.length });
+          try {
+            const translated = await translateText(translateMsg.payload.text);
+            sendResponse({ translatedText: translated });
+          } catch (err) {
+            const kind = (err as any)?.kind ?? 'unknown';
+            const status = (err as any)?.status;
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            const settings = await getSettings();
+            const endpoint = settings.provider === 'openai'
+              ? 'https://api.openai.com/v1/chat/completions'
+              : 'generativelanguage.googleapis.com';
+            console.error('[hime] translate failed', { provider: settings.provider, model: settings.model, status, kind, endpoint, message });
+            sendResponse({ error: message, kind });
+          }
           break;
         }
         
