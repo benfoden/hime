@@ -1,4 +1,9 @@
-import type { Message } from './types.js';
+// NOTE: no imports/exports in this file. content.js is loaded by the manifest
+// content_scripts as a CLASSIC script, not an ES module, so any top-level
+// import/export makes tsc emit `export {}` which throws
+// "Uncaught SyntaxError: Unexpected token 'export'" and the whole content
+// script fails to load. Keep Message defined locally here.
+type Message = { type: string; payload?: unknown };
 
 // Compose mode state
 let composeState: {
