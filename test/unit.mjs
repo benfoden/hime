@@ -143,3 +143,169 @@ test('buildSystemPrompt: no chrome. reference in output', () => {
   const result = buildSystemPrompt({ targetLanguage: 'Japanese', formality: 'auto', sourceLanguage: 'English' });
   assert.ok(!result.includes('chrome.'), `unexpected chrome. in prompt, got: ${result}`);
 });
+
+// ---------------------------------------------------------------------------
+// Provider hardening tests (Task 2) — fetch mocked globally
+// ---------------------------------------------------------------------------
+
+const { OpenAIProvider } = await import(path.join(__dirname, '../dist/providers/openai.js'));
+const { GeminiProvider } = await import(path.join(__dirname, '../dist/providers/gemini.js'));
+
+const BASE_CONFIG = { sourceLanguage: 'English', targetLanguage: 'Japanese', formality: 'auto' };
+
+// Helper: install a mock fetch, run async fn, restore
+async function withFetch(mockFn, fn) {
+  const orig = globalThis.fetch;
+  globalThis.fetch = mockFn;
+  try { return await fn(); } finally { globalThis.fetch = orig; }
+}
+
+// --- OpenAI: 401 → auth message ---
+test('OpenAIProvider: 401 rejects with auth message', async () => {
+  const provider = new OpenAIProvider();
+  await withFetch(
+    async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: { message: 'Incorrect API key provided' } }),
+    }),
+    async () => {
+      await assert.rejects(
+        () => provider.translate('hello', BASE_CONFIG, 'bad-key', 'gpt-5-mini'),
+        (err) => {
+          assert.ok(err.message.includes('Invalid or unauthorized API key'), `got: ${err.message}`);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+// --- OpenAI: 429 → rate_limit message ---
+test('OpenAIProvider: 429 rejects with rate limit message', async () => {
+  const provider = new OpenAIProvider();
+  await withFetch(
+    async () => ({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: { message: 'rate limit exceeded' } }),
+    }),
+    async () => {
+      await assert.rejects(
+        () => provider.translate('hello', BASE_CONFIG, 'key', 'gpt-5-mini'),
+        (err) => {
+          assert.ok(err.message.includes('Rate limited by openai'), `got: ${err.message}`);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+// --- OpenAI: stripWrappers applied on success ---
+test('OpenAIProvider: success response strips surrounding quotes', async () => {
+  const provider = new OpenAIProvider();
+  const result = await withFetch(
+    async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: '"こんにちは"' } }],
+      }),
+    }),
+    () => provider.translate('hello', BASE_CONFIG, 'key', 'gpt-5-mini')
+  );
+  assert.equal(result, 'こんにちは');
+});
+
+// --- OpenAI: TypeError (offline) → network message ---
+test('OpenAIProvider: fetch TypeError rejects with network message', async () => {
+  const provider = new OpenAIProvider();
+  await withFetch(
+    async () => { throw new TypeError('Failed to fetch'); },
+    async () => {
+      await assert.rejects(
+        () => provider.translate('hello', BASE_CONFIG, 'key', 'gpt-5-mini'),
+        (err) => {
+          assert.ok(err.message.includes('Network error'), `got: ${err.message}`);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+// --- Gemini: 401 → auth message ---
+test('GeminiProvider: 401 rejects with auth message', async () => {
+  const provider = new GeminiProvider();
+  await withFetch(
+    async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: { message: 'API_KEY_INVALID' } }),
+    }),
+    async () => {
+      await assert.rejects(
+        () => provider.translate('hello', BASE_CONFIG, 'bad-key', 'gemini-2.5-flash'),
+        (err) => {
+          assert.ok(err.message.includes('Invalid or unauthorized API key'), `got: ${err.message}`);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+// --- Gemini: 429 → rate_limit message ---
+test('GeminiProvider: 429 rejects with rate limit message', async () => {
+  const provider = new GeminiProvider();
+  await withFetch(
+    async () => ({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: { message: 'rate limit' } }),
+    }),
+    async () => {
+      await assert.rejects(
+        () => provider.translate('hello', BASE_CONFIG, 'key', 'gemini-2.5-flash'),
+        (err) => {
+          assert.ok(err.message.includes('Rate limited by gemini'), `got: ${err.message}`);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+// --- Gemini: stripWrappers applied on success ---
+test('GeminiProvider: success response strips surrounding quotes', async () => {
+  const provider = new GeminiProvider();
+  const result = await withFetch(
+    async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: '"こんにちは"' }] } }],
+      }),
+    }),
+    () => provider.translate('hello', BASE_CONFIG, 'key', 'gemini-2.5-flash')
+  );
+  assert.equal(result, 'こんにちは');
+});
+
+// --- Gemini: TypeError (offline) → network message ---
+test('GeminiProvider: fetch TypeError rejects with network message', async () => {
+  const provider = new GeminiProvider();
+  await withFetch(
+    async () => { throw new TypeError('Failed to fetch'); },
+    async () => {
+      await assert.rejects(
+        () => provider.translate('hello', BASE_CONFIG, 'key', 'gemini-2.5-flash'),
+        (err) => {
+          assert.ok(err.message.includes('Network error'), `got: ${err.message}`);
+          return true;
+        }
+      );
+    }
+  );
+});
