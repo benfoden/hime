@@ -26,11 +26,16 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 - ✓ Error states: badge turns red ("ERR") on failure, "Test Connection" in settings — v1.0
 - ✓ Skips password, readonly, hidden, and disabled fields — v1.0
 - ✓ Extension packaged as `hime-v1.0.0.tar.gz`, load-unpacked ready — v1.0
+- ✓ Cross-site compatibility on 7 editors (Gmail, GitHub, Twitter/X, Notion, Slack, Discord + Google Docs graceful degradation) — Phase 3
+- ✓ Shadow DOM traversal for Gmail compose input detection — Phase 3
+- ✓ Canvas-editor graceful degradation for Google Docs — Phase 3
+- ✓ Loading overlay with guaranteed cleanup on failure — Phase 3
+- ✓ Cursor-end positioning after translation — Phase 3
+- ✓ Focus-leave compose cleanup via focusout handler — Phase 3
 
 ### Active
 
 - [ ] Prompt engineering validation — test Auto formality with diverse inputs (casual slang, business formal, technical); confirm output contains no stray quotes or explanations
-- [ ] Cross-site testing — verify compose + YOLO + undo on Google Search, Gmail, GitHub, Google Docs, Notion, Slack web, Discord web, Twitter/X; document any contenteditable edge cases
 
 ### Out of Scope
 
@@ -50,7 +55,8 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 - Background service worker handles all LLM API calls; content script only manages DOM and UX state
 - `document.execCommand('insertText')` is deprecated but remains the only cross-site undo-safe replacement method in Chrome extensions — no better alternative exists
 - Chrome commands API limits extensions to 4 registered hotkeys; currently using 3 (`toggle-compose`, `yolo-translate`, `swap-language`)
-- The biggest open risk is `contenteditable` behavior on complex editors (Google Docs, Notion) — these intercept keyboard events and have non-standard DOM structures that may break text replacement
+- Google Docs uses canvas-based rendering; hime detects this and gracefully declines rather than corrupting the document — verified in Phase 3
+- Shadow DOM traversal confirmed working on Gmail compose; one-level open root check sufficient
 
 ## Constraints
 
@@ -74,6 +80,8 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 | Compose indicator: border + badge | Badge alone is easy to miss; border provides in-field feedback; together they're redundant-by-design | ✓ Good |
 | Hotkey rebinding via Chrome's built-in shortcuts | Avoids duplicating rebind UI; `chrome://extensions/shortcuts` already exists | ✓ Good |
 | Name: "hime" | Japanese for "princess" / sounds like IME; clean and memorable | ✓ Good |
+| Canvas-editor detection via DOM, not URL | URL matching is brittle; walking 5 ancestor levels for large canvas siblings is site-agnostic | ✓ Good — Phase 3 |
+| One-level Shadow DOM traversal | Closed roots are inaccessible per spec; multi-level traversal is over-engineering | ✓ Good — Phase 3 |
 
 ---
-*Last updated: 2026-05-24 after v1.0 build complete (tasks 1-7, 10 done; tasks 8-9 active)*
+*Last updated: 2026-05-25 after Phase 3 (cross-site compatibility verified on 7 editors)*
