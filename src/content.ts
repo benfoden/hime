@@ -135,6 +135,48 @@ function removeComposeIndicator(element: HTMLElement): void {
   delete element.dataset.himeCompose;
 }
 
+// D-05: Loading overlay — dims field to 50% opacity, shows "translating..." label
+function showLoadingOverlay(element: HTMLElement): void {
+  // Dim the field
+  element.style.opacity = '0.5';
+  element.dataset.himeLoading = 'true';
+
+  // Create floating overlay label
+  const overlay = document.createElement('div');
+  overlay.id = 'hime-loading-overlay';
+  overlay.textContent = 'translating...';
+  overlay.style.cssText = [
+    'position: absolute',
+    'pointer-events: none',
+    'font-family: monospace',
+    'font-size: 13px',
+    'color: #FFA500',
+    'background: rgba(0, 0, 0, 0.7)',
+    'padding: 2px 8px',
+    'border-radius: 3px',
+    'z-index: 2147483647',
+    'white-space: nowrap',
+  ].join(';');
+
+  // Position over the element
+  const rect = element.getBoundingClientRect();
+  overlay.style.top = `${rect.top + window.scrollY + 4}px`;
+  overlay.style.left = `${rect.left + window.scrollX + 4}px`;
+
+  document.body.appendChild(overlay);
+}
+
+// Remove loading overlay and restore opacity
+function hideLoadingOverlay(element: HTMLElement): void {
+  element.style.opacity = '';
+  delete element.dataset.himeLoading;
+
+  const overlay = document.getElementById('hime-loading-overlay');
+  if (overlay) {
+    overlay.remove();
+  }
+}
+
 // Update extension badge
 async function setBadge(text: string, color?: string): Promise<void> {
   try {
