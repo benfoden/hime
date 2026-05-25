@@ -24,22 +24,24 @@ export function stripWrappers(raw: string): string {
   }
 
   // Step 3: leading meta-commentary line
-  // Pattern: "here's|here is|translation|translated text|output" optionally followed by ":"
-  // Two sub-cases:
-  //   a) "Translation: こんにちは" — colon on same line, keep what's after the colon
-  //   b) "Here is the translation:\nこんにちは" — remainder on next line
-  const metaPattern = /^(here(?:'s| is)|translation(?:\s+text)?|translated text|output)\s*:?\s*/i;
-  const colonSameLine = s.match(/^(here(?:'s| is)|translation(?:\s+text)?|translated text|output)\s*:[ \t]*(\S[\s\S]*)/i);
-  if (colonSameLine) {
-    // e.g. "Translation: こんにちは" → keep "こんにちは"
-    s = colonSameLine[2].trim();
-  } else {
-    // e.g. "Here is the translation:\nこんにちは" → drop first line
-    const newlineIdx = s.indexOf('\n');
-    if (newlineIdx !== -1) {
-      const firstLine = s.slice(0, newlineIdx);
-      if (metaPattern.test(firstLine.trim())) {
-        s = s.slice(newlineIdx + 1).trim();
+  // Pattern matches phrases like:
+  //   "Translation:", "Here is the translation:", "Here's the translation:",
+  //   "Translated text:", "Output:"
+  // Then takes what comes after the colon (same line or next line).
+  const metaLinePattern = /^(?:here(?:'s| is)[\s\w]*|translation(?:\s+text)?|translated(?:\s+text)?|output)\s*:/i;
+
+  // Find where the colon is (end of the meta prefix)
+  const colonIdx = s.indexOf(':');
+  if (colonIdx !== -1) {
+    const prefix = s.slice(0, colonIdx);
+    // Check the prefix doesn't span multiple lines (it should be a single meta line)
+    if (!prefix.includes('\n') && metaLinePattern.test(prefix + ':')) {
+      const afterColon = s.slice(colonIdx + 1);
+      // Content may be on same line ("Translation: こんにちは")
+      // or on next line ("Here is the translation:\nこんにちは")
+      const trimmed = afterColon.trim();
+      if (trimmed.length > 0) {
+        s = trimmed;
       }
     }
   }

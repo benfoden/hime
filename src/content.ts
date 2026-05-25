@@ -296,4 +296,47 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+// In-page hotkey listener (capture phase so site handlers can't swallow it).
+// This is the reliable hotkey path — chrome.commands global shortcuts are
+// unreliable (reserved-key conflicts, unassigned defaults), so hotkeys are
+// handled here instead of via the manifest "commands" / background onCommand.
+//   Ctrl+Y        -> toggle compose mode (enter / convert)
+//   Ctrl+Shift+Y  -> YOLO translate the focused field
+//   Ctrl+Shift+S  -> swap translation direction (handled in background)
+document.addEventListener('keydown', (event) => {
+  const ctrl = event.ctrlKey || event.metaKey;
+  if (!ctrl || event.altKey) return;
+  const key = event.key.toLowerCase();
+
+  // Swap direction works regardless of focus.
+  if (event.shiftKey && key === 's') {
+    event.preventDefault();
+    event.stopPropagation();
+    chrome.runtime.sendMessage({ type: 'swapDirection' });
+    return;
+  }
+
+  // Compose / YOLO only act when a valid input field is focused, so we don't
+  // hijack Ctrl+Y (redo) etc. outside text fields.
+  const element = getActiveElement();
+  if (!element || !isValidInputElement(element)) return;
+
+  if (event.shiftKey && key === 'y') {
+    event.preventDefault();
+    event.stopPropagation();
+    void yoloTranslate();
+    return;
+  }
+
+  if (!event.shiftKey && key === 'y') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (composeState.isActive) {
+      void convertComposeMode();
+    } else {
+      void enterComposeMode();
+    }
+  }
+}, true);
+
 console.log('hime: Content script loaded');

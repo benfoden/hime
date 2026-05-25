@@ -37,7 +37,7 @@ function getDefaultSettings(): Settings {
     sourceLanguage: 'English',
     targetLanguage: 'Japanese',
     formality: 'auto',
-    composeHotkey: 'Ctrl+Shift+T',
+    composeHotkey: 'Ctrl+Y',
     yoloHotkey: 'Ctrl+Shift+Y',
     swapHotkey: 'Ctrl+Shift+S',
   };
@@ -138,35 +138,11 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
   return true; // Keep message channel open for async
 });
 
-// Command handler (hotkeys)
-chrome.commands.onCommand.addListener(async (command) => {
-  try {
-    // Get active tab
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) return;
-    
-    switch (command) {
-      case 'toggle-compose': {
-        await chrome.tabs.sendMessage(tab.id, { type: 'toggleCompose' });
-        break;
-      }
-      
-      case 'yolo-translate': {
-        await chrome.tabs.sendMessage(tab.id, { type: 'yoloTranslate' });
-        break;
-      }
-      
-      case 'swap-language': {
-        await swapLanguageDirection();
-        // Notify content script to update UI
-        await chrome.tabs.sendMessage(tab.id, { type: 'directionSwapped' });
-        break;
-      }
-    }
-  } catch (error) {
-    console.error('Command error:', error);
-  }
-});
+// Hotkeys are handled in the content script via an in-page keydown listener
+// (see src/content.ts). chrome.commands global shortcuts were removed because
+// reserved-key conflicts (e.g. Ctrl+Shift+T) and unassigned defaults made them
+// fire unreliably. The content script messages { type: 'swapDirection' } here
+// for the swap hotkey, handled by the onMessage listener above.
 
 // Initialize badge on startup
 chrome.runtime.onStartup.addListener(async () => {

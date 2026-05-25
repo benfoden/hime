@@ -80,7 +80,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sourceLanguage: 'English',
   targetLanguage: 'Japanese',
   formality: 'auto',
-  composeHotkey: 'Ctrl+Shift+T',
+  composeHotkey: 'Ctrl+Y',
   yoloHotkey: 'Ctrl+Shift+Y',
   swapHotkey: 'Ctrl+Shift+S',
 };
