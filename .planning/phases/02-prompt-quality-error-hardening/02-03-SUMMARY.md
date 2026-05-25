@@ -83,3 +83,19 @@ None — no new network endpoints, auth paths, or schema changes introduced. The
 - `/home/ben/code/hime/src/background.ts` — modified, committed 730a1f3
 - `/home/ben/code/hime/src/content.ts` — modified, committed 05ad94a
 - Commits verified in git log
+
+## Checkpoint: human-verify APPROVED (2026-05-25)
+
+Task 3 (ERR-03/04/05 failure recovery + distinct badges + LOG-01/02) verified live:
+- Bad key → field restored, badge `KEY`, SW log `translate failed {kind:'auth'}` ✅
+- Offline → ~10s, field restored, badge `NET`, `kind:'network'` ✅
+- Compose restore on failure (Ctrl+Y flow) ✅
+- Error badge clears on next success ✅
+User approved ("B approved").
+
+### Deviations found & fixed during live verify (post-execute)
+- Hotkeys moved to in-page keydown listener; compose = **Ctrl+Y** (commit 4b2e10c). Plan text still says Ctrl+Shift+T — superseded.
+- content.js loads as classic script, not ES module (commit 44bd8cb).
+- Options Test Connection status now renders under the button (commit 4cb6dbb).
+- translate-request log raised debug→log so it shows by default (commit dc7231b).
+- OpenAI `temperature` param dropped — gpt-5-mini/nano reject non-default (commit 8d201ae).

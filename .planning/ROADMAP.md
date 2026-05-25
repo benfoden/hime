@@ -7,7 +7,7 @@ Hime v1.0 is fully built and functional — a keyboard-native Chrome extension t
 ## Phases
 
 - [x] **Phase 1: Core Extension Build** - Full v1.0 scaffold, translate modes, settings, providers, BYOK
-- [ ] **Phase 2: Prompt Quality & Error Hardening** - Clean output, formality validation, actionable error surfaces
+- [x] **Phase 2: Prompt Quality & Error Hardening** - Clean output, formality validation, actionable error surfaces
 - [ ] **Phase 3: Cross-Site Compatibility** - Verified operation on 7 major contenteditable editors
 - [ ] **Phase 4: Web Store Distribution** - Store listing, screenshots, privacy policy, submission
 

@@ -119,6 +119,14 @@ None - no external service configuration required.
 - FOUND commit: 65b930c (Task 1 GREEN)
 - FOUND commit: 654962e (Task 1 RED)
 
+## Checkpoint: human-verify APPROVED (2026-05-25)
+
+Task 3 (FORM-06/07 register inference + FORM-08 clean output) verified live on unpacked extension:
+- Casual input `hey what's up` → casual/plain-form JP ✅
+- Business input `Thank you for your help with this matter` → polite/formal JP ✅
+- Both outputs clean: no quotes, no preamble, no fences ✅
+User approved ("A1-3 all good").
+
 ---
 *Phase: 02-prompt-quality-error-hardening*
 *Completed: 2026-05-24*
