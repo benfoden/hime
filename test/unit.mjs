@@ -99,3 +99,47 @@ test('stripWrappers: clean text passes through untouched', () => {
   const clean = 'こんにちは。元気ですか？';
   assert.equal(stripWrappers(clean), clean);
 });
+
+// ---------------------------------------------------------------------------
+// buildSystemPrompt tests (Task 1)
+// ---------------------------------------------------------------------------
+
+const { buildSystemPrompt } = await import(path.join(__dirname, '../dist/providers/prompt.js'));
+
+test('buildSystemPrompt: contains "Output ONLY the translated text"', () => {
+  const result = buildSystemPrompt({ targetLanguage: 'Japanese', formality: 'auto', sourceLanguage: 'English' });
+  assert.ok(result.includes('Output ONLY the translated text'), `missing core instruction, got: ${result}`);
+});
+
+test('buildSystemPrompt: auto formality contains tuned register cues', () => {
+  const result = buildSystemPrompt({ targetLanguage: 'Japanese', formality: 'auto', sourceLanguage: 'English' });
+  assert.ok(result.includes('Detect the register of the input'), `missing detect instruction, got: ${result}`);
+  assert.ok(result.includes("hey what's up"), `missing casual example, got: ${result}`);
+  assert.ok(result.includes('Thank you for your help with this matter'), `missing business example, got: ${result}`);
+});
+
+test('buildSystemPrompt: casual formality contains タメ口 / plain form instruction', () => {
+  const result = buildSystemPrompt({ targetLanguage: 'Japanese', formality: 'casual', sourceLanguage: 'English' });
+  assert.ok(result.includes('タメ口'), `missing タメ口, got: ${result}`);
+  assert.ok(result.includes('plain form'), `missing plain form, got: ${result}`);
+});
+
+test('buildSystemPrompt: polite formality contains です/ます instruction', () => {
+  const result = buildSystemPrompt({ targetLanguage: 'Japanese', formality: 'polite', sourceLanguage: 'English' });
+  assert.ok(result.includes('です/ます'), `missing です/ます, got: ${result}`);
+});
+
+test('buildSystemPrompt: formal formality contains 敬語 instruction', () => {
+  const result = buildSystemPrompt({ targetLanguage: 'Japanese', formality: 'formal', sourceLanguage: 'English' });
+  assert.ok(result.includes('敬語'), `missing 敬語, got: ${result}`);
+});
+
+test('buildSystemPrompt: customPrompt is appended at end', () => {
+  const result = buildSystemPrompt({ targetLanguage: 'Japanese', formality: 'auto', sourceLanguage: 'English', customPrompt: 'EXTRA' });
+  assert.ok(result.endsWith('EXTRA'), `customPrompt not at end, got: ${result}`);
+});
+
+test('buildSystemPrompt: no chrome. reference in output', () => {
+  const result = buildSystemPrompt({ targetLanguage: 'Japanese', formality: 'auto', sourceLanguage: 'English' });
+  assert.ok(!result.includes('chrome.'), `unexpected chrome. in prompt, got: ${result}`);
+});
