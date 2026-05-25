@@ -66,8 +66,12 @@ Plans:
   3. Extension operates correctly in Notion, Slack web, Discord web, Twitter/X, and GitHub
   4. Cursor position is preserved after translation completes
   5. Compose mode border and badge clear when focus leaves the active field
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Core infrastructure: shadow DOM traversal, canvas-editor detection, loading overlay, focus-leave cleanup (Wave 1)
+- [ ] 03-02-PLAN.md — YOLO/Compose hardening: overlay wiring, failure restore, cursor positioning (Wave 2)
+- [ ] 03-03-PLAN.md — Unit tests + manual verification on all 7 target editors (Wave 3)
 
 ### Phase 4: Web Store Distribution
 **Goal**: Extension is submitted to the Chrome Web Store
@@ -85,5 +89,5 @@ Plans:
 | 1. Core Extension Build | 1/1 | Complete | 2026-05-24 |
 | 2. Prompt Quality & Error Hardening | 0/? | Not started | - |
 | 02.1. OpenRouter Provider Support | 2/2 | Complete    | 2026-05-25 |
-| 3. Cross-Site Compatibility | 0/? | Not started | - |
+| 3. Cross-Site Compatibility | 0/3 | Planned | - |
 | 4. Web Store Distribution | 0/? | Not started | - |
