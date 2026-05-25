@@ -24,16 +24,56 @@ const COMPOSE_BORDER_RADIUS = '3px';
 function getActiveElement(): HTMLElement | null {
   const active = document.activeElement as HTMLElement;
   if (!active || active === document.body) return null;
+  // D-01: one-level shadow root traversal (open roots only)
+  if (active.shadowRoot && active.shadowRoot.activeElement) {
+    return active.shadowRoot.activeElement as HTMLElement;
+  }
   return active;
+}
+
+// D-03/D-04: Feature-detect canvas-based editors (e.g. Google Docs).
+// Heuristic: the focused element is a contenteditable with no meaningful
+// textContent AND a sibling/ancestor canvas element is rendering the actual doc.
+function isCanvasEditor(element: HTMLElement): boolean {
+  // Check if element is inside a container with a canvas that occupies the viewport
+  const parent = element.closest('.kix-appview-editor') as HTMLElement
+    || element.closest('[role="textbox"]')?.closest('[data-canvas]') as HTMLElement;
+  // Broader heuristic: nearby canvas sibling with large dimensions
+  const container = element.parentElement;
+  if (container) {
+    const canvas = container.querySelector('canvas');
+    if (canvas && canvas.width > 200 && canvas.height > 200) {
+      return true;
+    }
+  }
+  // Walk up a few levels to find canvas siblings (Google Docs structure)
+  let walk: HTMLElement | null = element;
+  for (let i = 0; i < 5 && walk; i++) {
+    walk = walk.parentElement;
+    if (walk) {
+      const canvas = walk.querySelector(':scope > canvas');
+      if (canvas && (canvas as HTMLCanvasElement).width > 200 && (canvas as HTMLCanvasElement).height > 200) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 // Utility: Check if element is an input field we can work with
 function isValidInputElement(element: HTMLElement): boolean {
+  // D-03/D-04: Detect canvas-based editors (Google Docs) via feature detection.
+  // Google Docs renders into a canvas element and uses a hidden contenteditable
+  // as a key-event sink — there are no real text nodes to manipulate.
+  if (isCanvasEditor(element)) {
+    console.log('hime: Unsupported editor (canvas-based rendering). hime does not support this editor.');
+    return false;
+  }
+
   const tag = element.tagName.toLowerCase();
   const isInput = tag === 'input' || tag === 'textarea';
   const isContentEditable = element.isContentEditable;
-  
-  // Skip password fields, hidden fields, readonly fields
+
   if (isInput) {
     const inputEl = element as HTMLInputElement;
     if (inputEl.type === 'password') return false;
@@ -41,7 +81,7 @@ function isValidInputElement(element: HTMLElement): boolean {
     if (inputEl.readOnly) return false;
     if (inputEl.hidden) return false;
   }
-  
+
   return isInput || isContentEditable;
 }
 
@@ -93,6 +133,48 @@ function removeComposeIndicator(element: HTMLElement): void {
   element.style.border = '';
   element.style.borderRadius = '';
   delete element.dataset.himeCompose;
+}
+
+// D-05: Loading overlay — dims field to 50% opacity, shows "translating..." label
+function showLoadingOverlay(element: HTMLElement): void {
+  // Dim the field
+  element.style.opacity = '0.5';
+  element.dataset.himeLoading = 'true';
+
+  // Create floating overlay label
+  const overlay = document.createElement('div');
+  overlay.id = 'hime-loading-overlay';
+  overlay.textContent = 'translating...';
+  overlay.style.cssText = [
+    'position: absolute',
+    'pointer-events: none',
+    'font-family: monospace',
+    'font-size: 13px',
+    'color: #FFA500',
+    'background: rgba(0, 0, 0, 0.7)',
+    'padding: 2px 8px',
+    'border-radius: 3px',
+    'z-index: 2147483647',
+    'white-space: nowrap',
+  ].join(';');
+
+  // Position over the element
+  const rect = element.getBoundingClientRect();
+  overlay.style.top = `${rect.top + window.scrollY + 4}px`;
+  overlay.style.left = `${rect.left + window.scrollX + 4}px`;
+
+  document.body.appendChild(overlay);
+}
+
+// Remove loading overlay and restore opacity
+function hideLoadingOverlay(element: HTMLElement): void {
+  element.style.opacity = '';
+  delete element.dataset.himeLoading;
+
+  const overlay = document.getElementById('hime-loading-overlay');
+  if (overlay) {
+    overlay.remove();
+  }
 }
 
 // Update extension badge
@@ -293,6 +375,10 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
 
 // Listen for focus changes
 document.addEventListener('focusin', handleFocusChange);
+document.addEventListener('focusout', () => {
+  // Delay check to allow focusin to fire on the new target first
+  setTimeout(handleFocusChange, 0);
+});
 
 // Listen for Escape key to cancel compose mode
 document.addEventListener('keydown', (event) => {
