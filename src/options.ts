@@ -54,16 +54,16 @@ function updateModelOptions(): void {
   const validModels: readonly string[] = models;
   if (validModels.includes(currentSettings.model)) {
     modelSelect.value = currentSettings.model;
-  } else {
-    currentSettings.model = models[0];
-    modelSelect.value = models[0];
+  } else if (models.length > 0) {
+    currentSettings.model = models[0] as string;
+    modelSelect.value = models[0] as string;
   }
 }
 
 // Save settings to storage
 async function saveSettings(): Promise<void> {
   const newSettings: Settings = {
-    provider: providerSelect.value as 'openai' | 'gemini',
+    provider: providerSelect.value as 'openai' | 'gemini' | 'openrouter',
     apiKey: apiKeyInput.value,
     model: modelSelect.value,
     storageMode: storageModeSelect.value as 'persistent' | 'session',
