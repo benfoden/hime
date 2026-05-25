@@ -47,13 +47,14 @@ Plans:
 
 ### Phase 02.1: OpenRouter Provider Support (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
+**Goal:** Add OpenRouter as a third provider, enabling access to Claude, Llama, Mistral and other models through a single API key with dynamic model fetching
+**Requirements**: PROV-05
 **Depends on:** Phase 2
-**Plans:** 0 plans
+**Plans:** 2 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 02.1 to break down)
+- [ ] 02.1-01-PLAN.md — OpenRouter provider class, type extensions, background registry, manifest permissions, unit tests (Wave 1)
+- [ ] 02.1-02-PLAN.md — Settings UI: OpenRouter dropdown option, dynamic model fetching, test connection support (Wave 2)
 
 ### Phase 3: Cross-Site Compatibility
 **Goal**: Extension works reliably on the 7 highest-traffic complex editors
@@ -83,5 +84,6 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Core Extension Build | 1/1 | Complete | 2026-05-24 |
 | 2. Prompt Quality & Error Hardening | 0/? | Not started | - |
+| 02.1. OpenRouter Provider Support | 0/2 | Not started | - |
 | 3. Cross-Site Compatibility | 0/? | Not started | - |
 | 4. Web Store Distribution | 0/? | Not started | - |
