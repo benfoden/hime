@@ -45,6 +45,16 @@ Plans:
 - [ ] 02-02-PLAN.md — Provider hardening: 10s timeout, classifyError throws, output sanitization, tuned Auto-formality (Wave 2)
 - [ ] 02-03-PLAN.md — UI/orchestration hardening: snapshot/restore on failure, kind-aware badge, structured logging (Wave 2)
 
+### Phase 02.1: OpenRouter Provider Support (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 2
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 02.1 to break down)
+
 ### Phase 3: Cross-Site Compatibility
 **Goal**: Extension works reliably on the 7 highest-traffic complex editors
 **Depends on**: Phase 2

@@ -4,10 +4,10 @@ milestone: v1.0
 milestone_name: milestone
 status: Ready to start Phase 3 (Cross-Site Compatibility)
 stopped_at: Phase 3 context gathered
-last_updated: "2026-05-25T04:37:33.466Z"
+last_updated: "2026-05-25T04:40:58.906Z"
 last_activity: 2026-05-25
 progress:
-  total_phases: 4
+  total_phases: 5
   completed_phases: 1
   total_plans: 3
   completed_plans: 3
@@ -51,6 +51,10 @@ Progress: [█████░░░░░] 50% (2 of 4 phases)
 *Updated after each plan completion*
 
 ## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 02.1 inserted after Phase 2: OpenRouter Provider Support (URGENT)
 
 ### Decisions
 
