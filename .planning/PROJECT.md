@@ -35,28 +35,35 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 
 ### Active
 
-- [ ] Prompt engineering validation — test Auto formality with diverse inputs (casual slang, business formal, technical); confirm output contains no stray quotes or explanations
+(Fresh requirements defined per milestone — see REQUIREMENTS.md when next milestone starts)
 
-### Out of Scope
+### Out of Scope (v1.0)
 
 - System-wide (non-browser) IME support — requires native OS integration, separate product
 - Offline / local model support — BYOK API model; no local inference in scope
 - Streaming / translate-as-you-type — complexity not justified by UX gain for short inputs
 - Multiple simultaneous language pairs — one pair, swappable; adding rotation adds cognitive overhead
 - Non-Chrome browsers — MV3 APIs differ enough to be a separate port; Firefox/Safari deferred
-- Chrome Web Store submission — deferred until v1 is stable; load-unpacked for dev iteration (review takes 1-3 days per submission, requires screenshots + privacy policy)
+- Chrome Web Store submission — deferred; dev load-unpacked sufficient for v1.0
 - Backend / server-side proxy — eliminated in favor of BYOK direct API calls; no hosting needed
-- Learning / spaced repetition features — out of scope for v1; different product dimension
-- Hotkey rebinding in options page — Chrome commands API handles this at `chrome://extensions/shortcuts`; duplicating it in the options UI adds complexity without value
+- Learning / spaced repetition features — different product dimension
+- Hotkey rebinding in options page — Chrome commands API handles this at `chrome://extensions/shortcuts`
+
+## Current State
+
+**Shipped:** v1.0 MVP (2026-05-25) — 5 phases, 8 plans, 63 commits
+**Codebase:** ~2,000 LOC TypeScript + 480 LOC tests (40 passing)
+**Providers:** OpenAI, Gemini, OpenRouter (3 providers via abstraction layer)
+**Compatibility:** Verified on Gmail, GitHub, Twitter/X, Notion, Slack, Discord; Google Docs graceful degradation
 
 ## Context
 
-- Greenfield build completed to v1.0 in one pass (tasks 1-7 and 10 done)
 - Background service worker handles all LLM API calls; content script only manages DOM and UX state
-- `document.execCommand('insertText')` is deprecated but remains the only cross-site undo-safe replacement method in Chrome extensions — no better alternative exists
+- `document.execCommand('insertText')` is deprecated but remains the only cross-site undo-safe replacement method — no better alternative exists
 - Chrome commands API limits extensions to 4 registered hotkeys; currently using 3 (`toggle-compose`, `yolo-translate`, `swap-language`)
-- Google Docs uses canvas-based rendering; hime detects this and gracefully declines rather than corrupting the document — verified in Phase 3
+- Google Docs uses canvas-based rendering; hime detects this and gracefully declines
 - Shadow DOM traversal confirmed working on Gmail compose; one-level open root check sufficient
+- `Ctrl+Shift+T` conflicts with Chrome's reopen-closed-tab — known issue, not yet resolved
 
 ## Constraints
 
@@ -82,6 +89,8 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 | Name: "hime" | Japanese for "princess" / sounds like IME; clean and memorable | ✓ Good |
 | Canvas-editor detection via DOM, not URL | URL matching is brittle; walking 5 ancestor levels for large canvas siblings is site-agnostic | ✓ Good — Phase 3 |
 | One-level Shadow DOM traversal | Closed roots are inaccessible per spec; multi-level traversal is over-engineering | ✓ Good — Phase 3 |
+| OpenRouter via OpenAI-compatible API | Single integration pattern, dynamic model fetching, minimal code | ✓ Good — Phase 02.1 |
+| Skip Web Store for v1.0 | Dev load-unpacked sufficient; store submission deferred to future milestone | ✓ Good — Phase 4 |
 
 ---
-*Last updated: 2026-05-25 after Phase 3 (cross-site compatibility verified on 7 editors)*
+*Last updated: 2026-05-25 after v1.0 milestone complete*
