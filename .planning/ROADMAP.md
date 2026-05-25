@@ -38,7 +38,12 @@ Plans:
   3. Network timeout surfaces a user-visible error within 15 seconds — no silent hangs
   4. Invalid API key shows a specific error message, not a generic failure
   5. Rate-limit errors are distinguishable from network or auth failures
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Error/output foundation: classifyError, stripWrappers, ErrorKind types + Node test harness (Wave 1)
+- [ ] 02-02-PLAN.md — Provider hardening: 10s timeout, classifyError throws, output sanitization, tuned Auto-formality (Wave 2)
+- [ ] 02-03-PLAN.md — UI/orchestration hardening: snapshot/restore on failure, kind-aware badge, structured logging (Wave 2)
 
 ### Phase 3: Cross-Site Compatibility
 **Goal**: Extension works reliably on the 7 highest-traffic complex editors
