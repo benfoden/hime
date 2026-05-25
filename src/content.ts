@@ -102,6 +102,16 @@ async function setBadge(text: string, color?: string): Promise<void> {
   }
 }
 
+// Map error kind to badge text and color
+function badgeForKind(kind?: string): { text: string; color: string } {
+  switch (kind) {
+    case 'auth':       return { text: 'KEY',  color: '#FF0000' };
+    case 'rate_limit': return { text: 'RATE', color: '#FF8C00' };
+    case 'network':    return { text: 'NET',  color: '#FF0000' };
+    default:           return { text: 'ERR',  color: '#FF0000' };
+  }
+}
+
 // Translate text via background script
 async function translateText(text: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -114,7 +124,9 @@ async function translateText(text: string): Promise<string> {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
         } else if (response?.error) {
-          reject(new Error(response.error));
+          const e = new Error(response.error);
+          (e as any).kind = response.kind ?? 'unknown';
+          reject(e);
         } else {
           resolve(response?.translatedText || '');
         }
@@ -174,23 +186,27 @@ async function convertComposeMode(): Promise<void> {
     return;
   }
   
+  const snapshot = getElementText(element);
   try {
     await setBadge('...', '#FFA500');
     const translated = await translateText(textToTranslate);
-    
+
     // Replace the composed text with translation
     const newText = composeState.originalText + translated;
     setElementText(element, newText);
-    
+
     removeComposeIndicator(element);
     composeState = { isActive: false, element: null, originalText: '' };
     await setBadge('');
-    
+
     console.log('hime: Composed text translated');
   } catch (error) {
-    console.error('hime: Translation failed', error);
-    await setBadge('ERR', '#FF0000');
-    setTimeout(() => setBadge('ON', '#4A90D9'), 2000);
+    setElementText(element, snapshot);
+    const b = badgeForKind((error as any)?.kind);
+    await setBadge(b.text, b.color);
+    removeComposeIndicator(element);
+    composeState = { isActive: false, element: null, originalText: '' };
+    console.error('hime: compose translation failed', { kind: (error as any)?.kind, message: (error as any)?.message });
   }
 }
 
@@ -207,6 +223,7 @@ async function yoloTranslate(): Promise<void> {
     return; // Empty field, nothing to do
   }
   
+  const snapshot = text;
   try {
     await setBadge('...', '#FFA500');
     const translated = await translateText(text);
@@ -214,9 +231,10 @@ async function yoloTranslate(): Promise<void> {
     await setBadge('');
     console.log('hime: YOLO translation complete');
   } catch (error) {
-    console.error('hime: YOLO translation failed', error);
-    await setBadge('ERR', '#FF0000');
-    setTimeout(() => setBadge(''), 2000);
+    setElementText(element, snapshot);
+    const b = badgeForKind((error as any)?.kind);
+    await setBadge(b.text, b.color);
+    console.error('hime: YOLO translation failed', { kind: (error as any)?.kind, message: (error as any)?.message });
   }
 }
 
