@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 02.1 context gathered
-last_updated: "2026-05-25T04:58:20.174Z"
-last_activity: 2026-05-25 -- Phase 02.1 planning complete
+last_updated: "2026-05-25T04:59:53.612Z"
+last_activity: 2026-05-25 -- Phase 02.1 execution started
 progress:
   total_phases: 5
   completed_phases: 1
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-24)
 
 **Core value:** Type English, get natural Japanese inline — without breaking your keyboard flow.
-**Current focus:** Phase 2 — Prompt Quality & Error Hardening
+**Current focus:** Phase 02.1 — OpenRouter Provider Support
 
 ## Current Position
 
-Phase: 2 of 4 COMPLETE (Prompt Quality & Error Hardening) → next Phase 3
-Plan: 3 of 3 in phase 2 complete; both human-verify checkpoints approved
-Status: Ready to execute
-Last activity: 2026-05-25 -- Phase 02.1 planning complete
+Phase: 02.1 (OpenRouter Provider Support) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 02.1
+Last activity: 2026-05-25 -- Phase 02.1 execution started
 
 Progress: [█████░░░░░] 50% (2 of 4 phases)
 

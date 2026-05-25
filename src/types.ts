@@ -9,7 +9,7 @@ export interface TranslationConfig {
 }
 
 export interface ProviderConfig {
-  provider: 'openai' | 'gemini';
+  provider: 'openai' | 'gemini' | 'openrouter';
   apiKey: string;
   model: string;
   storageMode: 'persistent' | 'session';
@@ -89,4 +89,5 @@ export const DEFAULT_SETTINGS: Settings = {
 export const PROVIDER_MODELS = {
   openai: ['gpt-5-mini', 'gpt-5-nano'],
   gemini: ['gemini-2.5-flash'],
+  openrouter: [],
 } as const;

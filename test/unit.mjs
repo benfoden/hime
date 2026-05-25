@@ -150,6 +150,7 @@ test('buildSystemPrompt: no chrome. reference in output', () => {
 
 const { OpenAIProvider } = await import(path.join(__dirname, '../dist/providers/openai.js'));
 const { GeminiProvider } = await import(path.join(__dirname, '../dist/providers/gemini.js'));
+const { OpenRouterProvider } = await import(path.join(__dirname, '../dist/providers/openrouter.js'));
 
 const BASE_CONFIG = { sourceLanguage: 'English', targetLanguage: 'Japanese', formality: 'auto' };
 
@@ -301,6 +302,85 @@ test('GeminiProvider: fetch TypeError rejects with network message', async () =>
     async () => {
       await assert.rejects(
         () => provider.translate('hello', BASE_CONFIG, 'key', 'gemini-2.5-flash'),
+        (err) => {
+          assert.ok(err.message.includes('Network error'), `got: ${err.message}`);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// OpenRouter provider tests (Plan 02.1-01)
+// ---------------------------------------------------------------------------
+
+// --- OpenRouter: 401 → auth message ---
+test('OpenRouterProvider: 401 rejects with auth message', async () => {
+  const provider = new OpenRouterProvider();
+  await withFetch(
+    async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: { message: 'Invalid API key' } }),
+    }),
+    async () => {
+      await assert.rejects(
+        () => provider.translate('hello', BASE_CONFIG, 'bad-key', 'anthropic/claude-3.5-sonnet'),
+        (err) => {
+          assert.ok(err.message.includes('Invalid or unauthorized API key'), `got: ${err.message}`);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+// --- OpenRouter: 429 → rate_limit message ---
+test('OpenRouterProvider: 429 rejects with rate limit message', async () => {
+  const provider = new OpenRouterProvider();
+  await withFetch(
+    async () => ({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: { message: 'rate limit' } }),
+    }),
+    async () => {
+      await assert.rejects(
+        () => provider.translate('hello', BASE_CONFIG, 'key', 'anthropic/claude-3.5-sonnet'),
+        (err) => {
+          assert.ok(err.message.includes('Rate limited by openrouter'), `got: ${err.message}`);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+// --- OpenRouter: stripWrappers applied on success ---
+test('OpenRouterProvider: success response strips surrounding quotes', async () => {
+  const provider = new OpenRouterProvider();
+  const result = await withFetch(
+    async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: '"こんにちは"' } }],
+      }),
+    }),
+    () => provider.translate('hello', BASE_CONFIG, 'key', 'anthropic/claude-3.5-sonnet')
+  );
+  assert.equal(result, 'こんにちは');
+});
+
+// --- OpenRouter: TypeError (offline) → network message ---
+test('OpenRouterProvider: fetch TypeError rejects with network message', async () => {
+  const provider = new OpenRouterProvider();
+  await withFetch(
+    async () => { throw new TypeError('Failed to fetch'); },
+    async () => {
+      await assert.rejects(
+        () => provider.translate('hello', BASE_CONFIG, 'key', 'anthropic/claude-3.5-sonnet'),
         (err) => {
           assert.ok(err.message.includes('Network error'), `got: ${err.message}`);
           return true;
