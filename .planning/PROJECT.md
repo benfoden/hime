@@ -8,6 +8,16 @@ A Chrome extension that lets you type in English and get inline Japanese (or any
 
 Type English, get natural Japanese inline — without breaking your keyboard flow.
 
+## Current Milestone: v1.1 Inline Predictions
+
+**Goal:** Live 2-3 word inline completions in any text field, any language, with cycleable alternate variations.
+
+**Target features:**
+- Ghost-text inline prediction engine — debounced context capture → provider call → render 2-3 word suggestion as inline ghost text
+- Multiple alternate variations per prediction, cycled via in-field keybinding
+- Tab/Enter to accept (undo-safe `execCommand insertText`), Esc to dismiss
+- Settings: enable/disable, debounce timing, max variations, trigger behavior, keybindings
+
 ## Requirements
 
 ### Validated
@@ -35,7 +45,7 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 
 ### Active
 
-(Fresh requirements defined per milestone — see REQUIREMENTS.md when next milestone starts)
+- v1.1 Inline Predictions — see REQUIREMENTS.md (ghost-text completions, alternate variations, cycle keybinding, settings)
 
 ### Out of Scope (v1.0)
 
@@ -92,5 +102,22 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 | OpenRouter via OpenAI-compatible API | Single integration pattern, dynamic model fetching, minimal code | ✓ Good — Phase 02.1 |
 | Skip Web Store for v1.0 | Dev load-unpacked sufficient; store submission deferred to future milestone | ✓ Good — Phase 4 |
 
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd-transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd-complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
 ---
-*Last updated: 2026-05-25 after v1.0 milestone complete*
+*Last updated: 2026-05-30 — milestone v1.1 Inline Predictions started*

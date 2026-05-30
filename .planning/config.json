@@ -8,5 +8,11 @@
     "auto_advance": true,
     "skip_discuss": false
   },
-  "granularity": "coarse"
+  "granularity": "coarse",
+  "git": {
+    "branching_strategy": "phase",
+    "phase_branch_template": "gsd/phase-{phase}-{slug}",
+    "milestone_branch_template": "gsd/{milestone}-{slug}",
+    "quick_branch_template": null
+  }
 }
