@@ -38,7 +38,13 @@ created: 2026-05-30
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| (filled by planner per PLAN.md) | — | — | PRED-01..06 / LANG-01..02 | — | — | unit | `node --test test/unit.mjs` | ❌ W0 | ⬜ pending |
+| 01-T1 | 01 | 1 | PRED-04, LANG-02 | T-05-02 | sanitizeSuggestion strips ctrl/newlines; prompt has no target-lang | unit | `npm test` | ❌ W0 | ⬜ pending |
+| 01-T2 | 01 | 1 | PRED-04 | — | provider predict() returns 2-3 word completion | unit | `npm test` | ❌ W0 | ⬜ pending |
+| 01-T3 | 01 | 1 | PRED-04 | T-05-01, T-05-04 | input clipped to 500 chars; errors → {suggestion:''} | unit | `npm test` | ❌ W0 | ⬜ pending |
+| 02-T1 | 02 | 2 | PRED-04, PRED-05, LANG-01 | T-05-06, T-05-09 | caret/seq/element guard + min-chars; eligibility | unit | `npm test` | ❌ W0 | ⬜ pending |
+| 02-T2 | 02 | 2 | PRED-01, PRED-02, PRED-06 | T-05-07, T-05-08 | textContent-only render; execCommand accept | unit (logic) + manual | `npm test` | ❌ W0 | ⬜ pending |
+| 02-T3 | 02 | 2 | PRED-01, PRED-03, PRED-05, PRED-06 | T-05-05, T-05-09 | key gating; blur abort+clear | unit (logic) + manual | `npm test` | ❌ W0 | ⬜ pending |
+| 02-T4 | 02 | 2 | PRED-01..06, LANG-01..02 | T-05-05..09 | manual: overlay align, undo, supersede, suppression | manual | checkpoint | n/a | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 

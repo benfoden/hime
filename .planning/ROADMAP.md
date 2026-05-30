@@ -36,7 +36,9 @@
   3. The user can press Esc to dismiss the suggestion, leaving committed text unchanged.
   4. Continuing to type immediately clears the stale suggestion and never blocks, duplicates, or corrupts the typed characters; a fresh suggestion appears after the user pauses.
   5. The suggestion is generated from text before the cursor in the field's own language and clears completely on blur/focus-leave; password, readonly, hidden, and disabled fields never trigger predictions.
-**Plans**: TBD
+**Plans**: 2 plans
+- [ ] 05-01-PLAN.md — predict message contract + prompt + provider predict() + background dispatch + sanitize (PRED-04, LANG-02)
+- [ ] 05-02-PLAN.md — content-script ghost engine: render, accept/dismiss/supersede, keydown wiring, blur cleanup (PRED-01..06, LANG-01/02)
 **UI hint**: yes
 
 ### Phase 6: Alternate Variations & Cycling
