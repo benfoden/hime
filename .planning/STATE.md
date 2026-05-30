@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-05-30T20:34:25.054Z"
 last_activity: 2026-05-30
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,17 +17,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-25)
+See: .planning/PROJECT.md (updated 2026-05-30)
 
 **Core value:** Type English, get natural Japanese inline — without breaking your keyboard flow.
-**Current focus:** Phase 4 — web-store-distribution
+**Current focus:** Phase 5 — ghost-text-prediction-engine
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Not started (roadmap complete, planning pending)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-30 — Milestone v1.1 started
+Status: Roadmap complete — ready to plan Phase 5
+Last activity: 2026-05-30 — v1.1 roadmap created (Phases 5-7)
 
 ## Performance Metrics
 
@@ -45,6 +45,9 @@ Last activity: 2026-05-30 — Milestone v1.1 started
 | 02.1 | 2 | - | - |
 | 03 | 3 | - | - |
 | 04 | 0 | - | - |
+| 5. Ghost-Text Engine | 0 | - | - |
+| 6. Variations & Cycling | 0 | - | - |
+| 7. Prediction Settings | 0 | - | - |
 
 **Recent Trend:** Baseline (no post-GSD plans yet)
 
@@ -55,6 +58,7 @@ Last activity: 2026-05-30 — Milestone v1.1 started
 ### Roadmap Evolution
 
 - Phase 02.1 inserted after Phase 2: OpenRouter Provider Support (URGENT)
+- v1.1 Inline Predictions roadmapped: Phase 5 (engine), Phase 6 (variations), Phase 7 (settings)
 
 ### Decisions
 
@@ -68,6 +72,7 @@ Recent decisions affecting current work:
 - **02-01**: node --test 'test/**/*.mjs' glob used (not bare directory) — Node 24 requires explicit file pattern for test runner
 - **02-01**: type:module added to package.json — compiled dist/*.js is ES module format, avoids reparsing overhead
 - **02-01**: ErrorKind re-exported from types.ts — single canonical import site for Plans 02 and 03
+- **v1.1**: Cycle keybinding handled in content script (VAR-02), not Chrome commands — preserves the 4-hotkey cap (3 already used)
 
 ### Pending Todos
 
@@ -87,6 +92,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-25T20:44:25.125Z
-Stopped at: Milestone v1.0 complete — all phases done
+Last session: 2026-05-30T20:34:25.054Z
+Stopped at: v1.1 roadmap created — ready to plan Phase 5
 Resume file: 

@@ -2,7 +2,7 @@
 
 **Milestone goal:** Live 2-3 word inline completions in any text field, any language, with cycleable alternate variations.
 
-**Status:** Defining → Roadmap pending
+**Status:** Roadmap complete → Planning pending
 
 ---
 
@@ -60,4 +60,21 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| _(filled by roadmap)_ | | |
+| PRED-01 | Phase 5 | Pending |
+| PRED-02 | Phase 5 | Pending |
+| PRED-03 | Phase 5 | Pending |
+| PRED-04 | Phase 5 | Pending |
+| PRED-05 | Phase 5 | Pending |
+| PRED-06 | Phase 5 | Pending |
+| LANG-01 | Phase 5 | Pending |
+| LANG-02 | Phase 5 | Pending |
+| VAR-01 | Phase 6 | Pending |
+| VAR-02 | Phase 6 | Pending |
+| VAR-03 | Phase 6 | Pending |
+| SET-01 | Phase 7 | Pending |
+| SET-02 | Phase 7 | Pending |
+| SET-03 | Phase 7 | Pending |
+| SET-04 | Phase 7 | Pending |
+| SET-05 | Phase 7 | Pending |
+
+**Coverage:** 16/16 requirements mapped ✓
