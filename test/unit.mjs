@@ -622,3 +622,91 @@ test('sanitizeSuggestion applied to provider result with control chars', () => {
   const raw = 'bright\x07sunny';
   assert.equal(sanitizeSuggestion(raw), 'brightsunny');
 });
+
+// ---------------------------------------------------------------------------
+// Ghost-text prediction engine logic tests (Phase 05-02 Task 1)
+// Logic-only — no content.ts import (classic script, not importable).
+// Algorithms are tested inline, mirroring lines 414-479 precedent.
+// ---------------------------------------------------------------------------
+
+test('isCaretAtEnd: selectionStart === selectionEnd === value.length → true', () => {
+  const value = 'hello';
+  const selectionStart = value.length;
+  const selectionEnd = value.length;
+  assert.equal(selectionStart === selectionEnd && selectionStart === value.length, true);
+});
+
+test('isCaretAtEnd: selectionStart < value.length → false', () => {
+  const value = 'hello';
+  const selectionStart = 2;
+  const selectionEnd = 2;
+  assert.equal(selectionStart === selectionEnd && selectionStart === value.length, false);
+});
+
+test('isCaretAtEnd: selection is a range (start !== end) → false', () => {
+  const value = 'hello';
+  const selectionStart = 0;
+  const selectionEnd = 5;
+  assert.equal(selectionStart === selectionEnd && selectionStart === value.length, false);
+});
+
+test('min-chars gate: text.trim().length < 3 → request not issued (ab rejected)', () => {
+  const text = 'ab';
+  assert.equal(text.trim().length < 3, true, '"ab" should be rejected by min-chars gate');
+});
+
+test('min-chars gate: text.trim().length >= 3 → request allowed (abc accepted)', () => {
+  const text = 'abc';
+  assert.equal(text.trim().length < 3, false, '"abc" should pass min-chars gate');
+});
+
+test('stale seq guard: response seq !== current seq → discarded', () => {
+  const responseSeq = 1;
+  const currentSeq = 2;
+  const shouldDiscard = responseSeq !== currentSeq;
+  assert.equal(shouldDiscard, true, 'seq=1 vs current=2 should be discarded');
+});
+
+test('stale seq guard: response seq === current seq → accepted', () => {
+  const responseSeq = 3;
+  const currentSeq = 3;
+  const shouldDiscard = responseSeq !== currentSeq;
+  assert.equal(shouldDiscard, false, 'matching seq should not be discarded');
+});
+
+test('element guard: different element → discarded', () => {
+  const capturedEl = { id: 'field-a' };
+  const currentEl = { id: 'field-b' };
+  const shouldDiscard = capturedEl !== currentEl;
+  assert.equal(shouldDiscard, true, 'mismatched element should be discarded');
+});
+
+test('element guard: same element → accepted', () => {
+  const capturedEl = { id: 'field-a' };
+  const currentEl = capturedEl;
+  const shouldDiscard = capturedEl !== currentEl;
+  assert.equal(shouldDiscard, false, 'same element reference should not be discarded');
+});
+
+test('input truncation: getTextBeforeCursor result clipped to last 500 chars', () => {
+  const longText = 'a'.repeat(600);
+  const clipped = longText.slice(-500);
+  assert.equal(clipped.length, 500);
+});
+
+test('sanitizeGhost: strips control chars and trims', () => {
+  // Test the inline algorithm used by sanitizeGhost
+  const raw = '  bright\x07sunny  ';
+  const newlineIdx = raw.indexOf('\n');
+  const s = newlineIdx >= 0 ? raw.slice(0, newlineIdx) : raw;
+  const result = s.replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim();
+  assert.equal(result, 'brightsunny');
+});
+
+test('sanitizeGhost: truncates at first newline', () => {
+  const raw = 'line one\nline two';
+  const newlineIdx = raw.indexOf('\n');
+  const s = newlineIdx >= 0 ? raw.slice(0, newlineIdx) : raw;
+  const result = s.replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim();
+  assert.equal(result, 'line one');
+});

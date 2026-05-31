@@ -16,6 +16,152 @@ let composeState: {
   originalText: '',
 };
 
+// ---------------------------------------------------------------------------
+// Prediction engine state and helpers (Phase 05-02)
+// ---------------------------------------------------------------------------
+
+// D-01 default: manual trigger only; auto (predict-as-you-type) is opt-in.
+// Phase 7 (SET-01/SET-02) will expose this in options.
+const PREDICT_TRIGGER_MODE: 'manual' | 'auto' = 'manual';
+const DEFAULT_DEBOUNCE_MS = 400;  // D-02 — Phase 7 makes configurable
+const DEFAULT_MIN_CHARS = 3;      // D-02 — Phase 7 makes configurable
+
+let predictionState: {
+  suggestion: string;
+  element: HTMLElement | null;
+  requestSeq: number;
+  abortController: AbortController | null;
+  debounceTimer: ReturnType<typeof setTimeout> | null;
+} = {
+  suggestion: '',
+  element: null,
+  requestSeq: 0,
+  abortController: null,
+  debounceTimer: null,
+};
+
+// Caret-at-end detection — D-04: only trigger prediction when caret is at field end.
+// Source: MDN HTMLInputElement.selectionStart
+function isCaretAtEnd(element: HTMLElement): boolean {
+  const tag = element.tagName.toLowerCase();
+  if (tag === 'input' || tag === 'textarea') {
+    const el = element as HTMLInputElement | HTMLTextAreaElement;
+    return el.selectionStart === el.selectionEnd && el.selectionStart === el.value.length;
+  }
+  if (element.isContentEditable) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed) return false;
+    const lastChild = element.lastChild;
+    if (!lastChild) return true; // empty element
+    if (lastChild.nodeType === Node.TEXT_NODE) {
+      return range.endContainer === lastChild && range.endOffset === (lastChild as Text).length;
+    }
+    // Nested structure: check if selection is at structural end of element
+    const endRange = document.createRange();
+    endRange.selectNodeContents(element);
+    endRange.collapse(false);
+    return range.compareBoundaryPoints(Range.END_TO_END, endRange) === 0;
+  }
+  return false;
+}
+
+// Get the text before the cursor — returned value is clipped to last 500 chars (T-05-01).
+// Source: MDN HTMLInputElement.selectionStart + Selection API
+function getTextBeforeCursor(element: HTMLElement): string {
+  const tag = element.tagName.toLowerCase();
+  if (tag === 'input' || tag === 'textarea') {
+    const el = element as HTMLInputElement | HTMLTextAreaElement;
+    const pos = el.selectionStart ?? el.value.length;
+    return el.value.slice(0, pos).slice(-500);
+  }
+  if (element.isContentEditable) {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return (element.innerText || '').slice(-500);
+    const range = sel.getRangeAt(0).cloneRange();
+    range.setStart(element, 0);
+    return range.toString().slice(-500);
+  }
+  return '';
+}
+
+// Defense-in-depth sanitization before writing ghost text to DOM.
+// Server (Plan 01 sanitizeSuggestion) already sanitizes; this is a local guard.
+// content.ts is a classic script — cannot import from predict-util.ts.
+function sanitizeGhost(raw: string): string {
+  if (!raw) return '';
+  // Truncate at first newline
+  const newlineIdx = raw.indexOf('\n');
+  const s = newlineIdx >= 0 ? raw.slice(0, newlineIdx) : raw;
+  // Strip C0/C1 control characters
+  return s.replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim();
+}
+
+// Promise wrapper for chrome.runtime.sendMessage — mirrors translateText pattern (lines 220-240).
+// AbortSignal is used client-side: if aborted before resolve, result is discarded.
+function sendPredictMessage(text: string, signal: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: 'predict', payload: { text } } as Message,
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        // Check abort before resolving — the sendMessage itself isn't abortable
+        if (signal.aborted) {
+          resolve('');
+          return;
+        }
+        resolve(response?.suggestion || '');
+      }
+    );
+  });
+}
+
+// Forward declaration — full implementation in Task 2 (renderGhostOverlay + renderGhostSpan).
+// Defined as a function declaration so it is hoisted in JS execution order.
+// eslint-disable-next-line prefer-const
+// noinspection JSUnusedLocalSymbols
+// (stub replaced below by the real implementation)
+function renderGhost(_element: HTMLElement, _suggestion: string): void { /* stub — see Task 2 */ }
+
+// Race-guarded prediction request — Pattern 5 from RESEARCH.md.
+// Increments requestSeq; any response with a different seq is stale and discarded.
+// Element guard (Pitfall 3): seq alone can collide across fields — check element too.
+async function requestPrediction(element: HTMLElement): Promise<void> {
+  // D-07: suppress during compose mode or while a loading overlay is showing
+  if (composeState.isActive) return;
+  if ((element as HTMLElement & { dataset: DOMStringMap }).dataset.himeLoading) return;
+
+  if (!isValidInputElement(element)) return;
+  if (!isCaretAtEnd(element)) return;
+
+  const text = getTextBeforeCursor(element);
+  if (!text || text.trim().length < DEFAULT_MIN_CHARS) return;
+
+  // Abort any in-flight request for this or a previous element
+  predictionState.abortController?.abort();
+  predictionState.abortController = new AbortController();
+
+  const seq = ++predictionState.requestSeq;
+  predictionState.element = element;
+
+  try {
+    const suggestion = await sendPredictMessage(text, predictionState.abortController.signal);
+    // Stale guard: seq or element mismatch → discard (Pitfall 3, D-10)
+    if (seq !== predictionState.requestSeq || element !== predictionState.element) return;
+    const clean = sanitizeGhost(suggestion);
+    if (!clean) return;
+    renderGhost(element, clean);
+  } catch (err) {
+    if ((err as { name?: string }).name === 'AbortError') return; // expected — not an error
+    // All other errors are silent per D-10 (no badge, no indicator)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CSS for compose mode indicator
 const COMPOSE_BORDER_STYLE = '2px solid #4A90D9';
 const COMPOSE_BORDER_RADIUS = '3px';
