@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, PROVIDER_MODELS, type Settings } from './types.js';
+import { DEFAULT_SETTINGS, PROVIDER_MODELS, OPENROUTER_ALLOWLIST, MODEL_META, migrateSettings, metaLabel, type Settings, type UsageRecord } from './types.js';
 
 // DOM Elements
 let providerSelect: HTMLSelectElement;
@@ -13,6 +13,8 @@ let testConnectionBtn: HTMLButtonElement;
 let saveBtn: HTMLButtonElement;
 let statusDiv: HTMLDivElement;
 let testStatusDiv: HTMLDivElement;
+let usageContentDiv: HTMLDivElement;
+let resetUsageBtn: HTMLButtonElement;
 
 // Current settings
 let currentSettings: Settings = { ...DEFAULT_SETTINGS };
@@ -20,7 +22,7 @@ let currentSettings: Settings = { ...DEFAULT_SETTINGS };
 // Load settings from storage
 async function loadSettings(): Promise<void> {
   const result = await chrome.storage.local.get(['himeSettings']);
-  currentSettings = { ...DEFAULT_SETTINGS, ...result.himeSettings };
+  currentSettings = migrateSettings(result.himeSettings || {});
   populateForm();
   await updateModelOptions();
 }
@@ -28,7 +30,7 @@ async function loadSettings(): Promise<void> {
 // Populate form with current settings
 function populateForm(): void {
   providerSelect.value = currentSettings.provider;
-  apiKeyInput.value = currentSettings.apiKey;
+  apiKeyInput.value = currentSettings.apiKeys[currentSettings.provider] || '';
   modelSelect.value = currentSettings.model;
   storageModeSelect.value = currentSettings.storageMode;
   sourceLanguageInput.value = currentSettings.sourceLanguage;
@@ -42,7 +44,6 @@ async function updateModelOptions(): Promise<void> {
   const provider = providerSelect.value as keyof typeof PROVIDER_MODELS;
 
   if (provider === 'openrouter') {
-    // D-01: Fetch models dynamically from OpenRouter API
     modelSelect.innerHTML = '<option value="">Loading models...</option>';
     modelSelect.disabled = true;
     try {
@@ -56,23 +57,28 @@ async function updateModelOptions(): Promise<void> {
         throw new Error(`Failed to fetch models: ${response.status}`);
       }
       const data = await response.json();
-      const models: { id: string; name: string }[] = (data.data || [])
-        .sort((a: { id: string }, b: { id: string }) => (a.id as string).localeCompare(b.id as string));
+      const allModels: { id: string; name: string }[] = data.data || [];
+      const availableIds = new Set(allModels.map((m: { id: string }) => m.id));
+
+      // Filter to curated allowlist, preserving allowlist order (best first)
+      const models = OPENROUTER_ALLOWLIST
+        .filter(id => availableIds.has(id))
+        .map(id => ({ id, name: id }));
+
       modelSelect.innerHTML = '';
       if (models.length === 0) {
         const option = document.createElement('option');
         option.value = '';
-        option.textContent = 'No models available';
+        option.textContent = 'No compatible models found';
         modelSelect.appendChild(option);
       } else {
         models.forEach((m) => {
           const option = document.createElement('option');
           option.value = m.id;
-          option.textContent = m.id;
+          option.textContent = metaLabel(m.id);
           modelSelect.appendChild(option);
         });
       }
-      // Restore selection if valid
       const modelIds = models.map(m => m.id);
       if (modelIds.includes(currentSettings.model)) {
         modelSelect.value = currentSettings.model;
@@ -99,7 +105,7 @@ async function updateModelOptions(): Promise<void> {
   models.forEach(model => {
     const option = document.createElement('option');
     option.value = model;
-    option.textContent = model;
+    option.textContent = metaLabel(model);
     modelSelect.appendChild(option);
   });
 
@@ -115,9 +121,12 @@ async function updateModelOptions(): Promise<void> {
 
 // Save settings to storage
 async function saveSettings(): Promise<void> {
+  const provider = providerSelect.value as Settings['provider'];
+  const updatedKeys = { ...currentSettings.apiKeys, [provider]: apiKeyInput.value };
+
   const newSettings: Settings = {
-    provider: providerSelect.value as 'openai' | 'gemini' | 'openrouter',
-    apiKey: apiKeyInput.value,
+    provider,
+    apiKeys: updatedKeys,
     model: modelSelect.value,
     storageMode: storageModeSelect.value as 'persistent' | 'session',
     sourceLanguage: sourceLanguageInput.value,
@@ -128,7 +137,7 @@ async function saveSettings(): Promise<void> {
     yoloHotkey: currentSettings.yoloHotkey,
     swapHotkey: currentSettings.swapHotkey,
   };
-  
+
   await chrome.storage.local.set({ himeSettings: newSettings });
   currentSettings = newSettings;
   showStatus('Settings saved!', 'success');
@@ -184,6 +193,61 @@ async function testConnection(): Promise<void> {
   }
 }
 
+function formatNumber(n: number): string {
+  return n.toLocaleString();
+}
+
+function estimateCost(model: string, rec: UsageRecord): number | null {
+  const meta = MODEL_META[model];
+  if (!meta) return null;
+  return (rec.inputTokens * meta.inPrice + rec.outputTokens * meta.outPrice) / 1_000_000;
+}
+
+async function loadUsage(): Promise<void> {
+  const response = await chrome.runtime.sendMessage({ type: 'getUsage' });
+  const usage: Record<string, UsageRecord> = response?.usage || {};
+  const models = Object.keys(usage);
+
+  if (models.length === 0) {
+    usageContentDiv.innerHTML = '<p class="help-text">No usage data yet.</p>';
+    return;
+  }
+
+  let totalIn = 0, totalOut = 0, totalReqs = 0, totalCost = 0;
+  let hasCost = false;
+
+  const rows = models.map(model => {
+    const r = usage[model];
+    totalIn += r.inputTokens;
+    totalOut += r.outputTokens;
+    totalReqs += r.requests;
+    const cost = estimateCost(model, r);
+    if (cost !== null) { totalCost += cost; hasCost = true; }
+    const costCell = cost !== null ? `$${cost.toFixed(4)}` : '—';
+    return `<tr>
+      <td>${model}</td>
+      <td class="num">${formatNumber(r.requests)}</td>
+      <td class="num">${formatNumber(r.inputTokens)}</td>
+      <td class="num">${formatNumber(r.outputTokens)}</td>
+      <td class="num">${costCell}</td>
+    </tr>`;
+  }).join('');
+
+  usageContentDiv.innerHTML = `<table class="usage-table">
+    <thead><tr>
+      <th>Model</th><th>Requests</th><th>Input tokens</th><th>Output tokens</th><th>Est. cost</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr>
+      <td>Total</td>
+      <td class="num">${formatNumber(totalReqs)}</td>
+      <td class="num">${formatNumber(totalIn)}</td>
+      <td class="num">${formatNumber(totalOut)}</td>
+      <td class="num">${hasCost ? '$' + totalCost.toFixed(4) : '—'}</td>
+    </tr></tfoot>
+  </table>`;
+}
+
 // Show status message
 function showStatus(message: string, type: 'success' | 'error' | 'info', target: HTMLDivElement = statusDiv): void {
   target.textContent = message;
@@ -212,12 +276,30 @@ document.addEventListener('DOMContentLoaded', () => {
   saveBtn = document.getElementById('save') as HTMLButtonElement;
   statusDiv = document.getElementById('status') as HTMLDivElement;
   testStatusDiv = document.getElementById('testStatus') as HTMLDivElement;
-  
+  usageContentDiv = document.getElementById('usageContent') as HTMLDivElement;
+  resetUsageBtn = document.getElementById('resetUsage') as HTMLButtonElement;
+
   // Event listeners
-  providerSelect.addEventListener('change', updateModelOptions);
+  providerSelect.addEventListener('change', () => {
+    // Save current key before switching, load new provider's key
+    const prev = currentSettings.provider;
+    const currentKey = apiKeyInput.value;
+    if (currentKey) {
+      currentSettings.apiKeys[prev] = currentKey;
+    }
+    currentSettings.provider = providerSelect.value as Settings['provider'];
+    apiKeyInput.value = currentSettings.apiKeys[currentSettings.provider] || '';
+    updateModelOptions();
+  });
   testConnectionBtn.addEventListener('click', testConnection);
   saveBtn.addEventListener('click', saveSettings);
-  
-  // Load settings
+  resetUsageBtn.addEventListener('click', async () => {
+    await chrome.runtime.sendMessage({ type: 'resetUsage' });
+    await loadUsage();
+    showStatus('Usage data reset', 'success');
+  });
+
+  // Load settings and usage
   loadSettings();
+  loadUsage();
 });

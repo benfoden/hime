@@ -1,14 +1,17 @@
 import { OpenAIProvider } from './providers/openai.js';
 import { GeminiProvider } from './providers/gemini.js';
 import { OpenRouterProvider } from './providers/openrouter.js';
-import type { 
-  TranslationConfig, 
-  TranslationProvider, 
-  Settings, 
+import type {
+  TranslationConfig,
+  TranslationProvider,
+  TranslationResult,
+  UsageRecord,
+  Settings,
   Message,
   TranslateMessage,
-  SetBadgeMessage 
+  SetBadgeMessage
 } from './types.js';
+import { migrateSettings } from './types.js';
 
 // Provider registry
 const providers: Record<string, TranslationProvider> = {
@@ -27,22 +30,7 @@ let composeState: {
 // Get settings from storage
 async function getSettings(): Promise<Settings> {
   const result = await chrome.storage.local.get(['himeSettings']);
-  return result.himeSettings || getDefaultSettings();
-}
-
-function getDefaultSettings(): Settings {
-  return {
-    provider: 'openai',
-    apiKey: '',
-    model: 'gpt-5-mini',
-    storageMode: 'persistent',
-    sourceLanguage: 'English',
-    targetLanguage: 'Japanese',
-    formality: 'auto',
-    composeHotkey: 'Ctrl+Y',
-    yoloHotkey: 'Ctrl+Shift+Y',
-    swapHotkey: 'Ctrl+Shift+S',
-  };
+  return migrateSettings(result.himeSettings || {});
 }
 
 // Swap language direction
@@ -58,27 +46,51 @@ async function swapLanguageDirection(): Promise<void> {
   await chrome.action.setBadgeText({ text: badgeText });
 }
 
+// Record token usage per model
+async function recordUsage(model: string, usage: { inputTokens: number; outputTokens: number }): Promise<void> {
+  const result = await chrome.storage.local.get(['himeUsage']);
+  const stats: Record<string, UsageRecord> = result.himeUsage || {};
+  const prev = stats[model] || { inputTokens: 0, outputTokens: 0, requests: 0 };
+  stats[model] = {
+    inputTokens: prev.inputTokens + usage.inputTokens,
+    outputTokens: prev.outputTokens + usage.outputTokens,
+    requests: prev.requests + 1,
+  };
+  await chrome.storage.local.set({ himeUsage: stats });
+}
+
 // Translate text
-async function translateText(text: string): Promise<string> {
+async function translateText(text: string): Promise<TranslationResult> {
   const settings = await getSettings();
-  
-  if (!settings.apiKey) {
-    throw new Error('API key not configured. Please set it in the extension options.');
+
+  const apiKey = settings.apiKeys[settings.provider] || '';
+  if (!apiKey) {
+    throw new Error(`API key not configured for ${settings.provider}. Please set it in the extension options.`);
   }
-  
+
   const provider = providers[settings.provider];
   if (!provider) {
     throw new Error(`Unknown provider: ${settings.provider}`);
   }
-  
+
+  // Auto-detect: if input contains Japanese, flip direction
+  const jpPattern = /[぀-ゟ゠-ヿ一-鿿]/;
+  const inputIsJP = jpPattern.test(text);
+  const source = inputIsJP ? settings.targetLanguage : settings.sourceLanguage;
+  const target = inputIsJP ? settings.sourceLanguage : settings.targetLanguage;
+
   const config: TranslationConfig = {
-    sourceLanguage: settings.sourceLanguage,
-    targetLanguage: settings.targetLanguage,
+    sourceLanguage: source,
+    targetLanguage: target,
     formality: settings.formality,
     customPrompt: settings.customPrompt,
   };
-  
-  return await provider.translate(text, config, settings.apiKey, settings.model);
+
+  const result = await provider.translate(text, config, apiKey, settings.model);
+  if (result.usage) {
+    await recordUsage(settings.model, result.usage);
+  }
+  return result;
 }
 
 // Message handler
@@ -91,20 +103,14 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           const s = await getSettings();
           console.log('[hime] translate request', { provider: s.provider, model: s.model, length: translateMsg.payload.text.length });
           try {
-            const translated = await translateText(translateMsg.payload.text);
-            sendResponse({ translatedText: translated });
+            const result = await translateText(translateMsg.payload.text);
+            sendResponse({ translatedText: result.text });
           } catch (err) {
             const kind = (err as any)?.kind ?? 'unknown';
             const status = (err as any)?.status;
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            const settings = await getSettings();
-            const endpoint = settings.provider === 'openai'
-              ? 'https://api.openai.com/v1/chat/completions'
-              : settings.provider === 'openrouter'
-              ? 'https://openrouter.ai/api/v1/chat/completions'
-              : 'generativelanguage.googleapis.com';
-            console.error('[hime] translate failed', { provider: settings.provider, model: settings.model, status, kind, endpoint, message });
-            sendResponse({ error: message, kind });
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            console.error('[hime] translate failed', { provider: s.provider, model: s.model, status, kind, message: errorMessage });
+            sendResponse({ error: errorMessage, kind });
           }
           break;
         }
@@ -130,7 +136,19 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           sendResponse({ success: true });
           break;
         }
-        
+
+        case 'getUsage': {
+          const usage = await chrome.storage.local.get(['himeUsage']);
+          sendResponse({ usage: usage.himeUsage || {} });
+          break;
+        }
+
+        case 'resetUsage': {
+          await chrome.storage.local.remove('himeUsage');
+          sendResponse({ success: true });
+          break;
+        }
+
         default:
           sendResponse({ error: 'Unknown message type' });
       }

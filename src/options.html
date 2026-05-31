@@ -24,9 +24,9 @@
       </div>
       
       <div class="form-group">
-        <label for="apiKey">API Key</label>
+        <label for="apiKey" id="apiKeyLabel">API Key</label>
         <input type="password" id="apiKey" placeholder="Enter your API key">
-        <p class="help-text">Your API key is stored locally in your browser.</p>
+        <p class="help-text">Each provider's key is saved separately. Switching providers loads that provider's key.</p>
       </div>
       
       <div class="form-group">
@@ -89,6 +89,14 @@
       <div id="status" class="status" style="display: none;"></div>
     </div>
     
+    <section>
+      <h2>Usage</h2>
+      <div id="usageContent">
+        <p class="help-text">No usage data yet.</p>
+      </div>
+      <button id="resetUsage" class="btn-secondary" style="margin-top: 12px;">Reset Usage</button>
+    </section>
+
     <section class="hotkeys">
       <h2>Hotkeys</h2>
       <ul>

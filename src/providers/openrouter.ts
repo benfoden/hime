@@ -1,4 +1,4 @@
-import type { TranslationConfig, TranslationProvider } from '../types.js';
+import type { TranslationConfig, TranslationProvider, TranslationResult } from '../types.js';
 import { buildSystemPrompt } from './prompt.js';
 import { classifyError } from '../errors.js';
 import { stripWrappers } from '../output.js';
@@ -6,7 +6,7 @@ import { stripWrappers } from '../output.js';
 export class OpenRouterProvider implements TranslationProvider {
   name = 'openrouter';
 
-  async translate(text: string, config: TranslationConfig, apiKey: string, model: string): Promise<string> {
+  async translate(text: string, config: TranslationConfig, apiKey: string, model: string): Promise<TranslationResult> {
     const systemPrompt = buildSystemPrompt(config);
 
     const controller = new AbortController();
@@ -50,7 +50,11 @@ export class OpenRouterProvider implements TranslationProvider {
       }
 
       const data = await response.json();
-      return stripWrappers(data.choices[0]?.message?.content || '');
+      const usage = data.usage ? {
+        inputTokens: data.usage.prompt_tokens ?? 0,
+        outputTokens: data.usage.completion_tokens ?? 0,
+      } : undefined;
+      return { text: stripWrappers(data.choices[0]?.message?.content || ''), usage };
     } finally {
       clearTimeout(timeout);
     }

@@ -1,4 +1,4 @@
-import type { TranslationConfig, TranslationProvider } from '../types.js';
+import type { TranslationConfig, TranslationProvider, TranslationResult } from '../types.js';
 import { buildSystemPrompt } from './prompt.js';
 import { classifyError } from '../errors.js';
 import { stripWrappers } from '../output.js';
@@ -6,7 +6,7 @@ import { stripWrappers } from '../output.js';
 export class GeminiProvider implements TranslationProvider {
   name = 'gemini';
 
-  async translate(text: string, config: TranslationConfig, apiKey: string, model: string): Promise<string> {
+  async translate(text: string, config: TranslationConfig, apiKey: string, model: string): Promise<TranslationResult> {
     const systemPrompt = buildSystemPrompt(config);
 
     const controller = new AbortController();
@@ -53,7 +53,12 @@ export class GeminiProvider implements TranslationProvider {
       }
 
       const data = await response.json();
-      return stripWrappers(data.candidates[0]?.content?.parts[0]?.text || '');
+      const meta = data.usageMetadata;
+      const usage = meta ? {
+        inputTokens: meta.promptTokenCount ?? 0,
+        outputTokens: meta.candidatesTokenCount ?? 0,
+      } : undefined;
+      return { text: stripWrappers(data.candidates[0]?.content?.parts[0]?.text || ''), usage };
     } finally {
       clearTimeout(timeout);
     }

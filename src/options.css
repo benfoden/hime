@@ -153,6 +153,38 @@ button:disabled {
   color: #0c5460;
 }
 
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.usage-table th,
+.usage-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.usage-table th {
+  font-weight: 500;
+  color: #666;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.usage-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-table tfoot td {
+  font-weight: 600;
+  border-top: 2px solid #ddd;
+  border-bottom: none;
+}
+
 .hotkeys {
   margin-top: 30px;
   padding: 20px;

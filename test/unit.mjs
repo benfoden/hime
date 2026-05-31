@@ -32,6 +32,13 @@ test('classifyError: 403 → auth kind (gemini)', () => {
   assert.equal(result.message, 'Invalid or unauthorized API key — check it in options');
 });
 
+test('classifyError: 402 → credits kind', () => {
+  const result = classifyError('openrouter', null, { status: 402 });
+  assert.equal(result.kind, 'credits');
+  assert.match(result.message, /out of credits/i);
+  assert.equal(result.status, 402);
+});
+
 test('classifyError: 429 → rate_limit kind', () => {
   const result = classifyError('openai', new Error('rate limited'), { status: 429 });
   assert.equal(result.kind, 'rate_limit');
@@ -212,11 +219,14 @@ test('OpenAIProvider: success response strips surrounding quotes', async () => {
       status: 200,
       json: async () => ({
         choices: [{ message: { content: '"こんにちは"' } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
       }),
     }),
     () => provider.translate('hello', BASE_CONFIG, 'key', 'gpt-5-mini')
   );
-  assert.equal(result, 'こんにちは');
+  assert.equal(result.text, 'こんにちは');
+  assert.equal(result.usage.inputTokens, 10);
+  assert.equal(result.usage.outputTokens, 5);
 });
 
 // --- OpenAI: TypeError (offline) → network message ---
@@ -287,11 +297,14 @@ test('GeminiProvider: success response strips surrounding quotes', async () => {
       status: 200,
       json: async () => ({
         candidates: [{ content: { parts: [{ text: '"こんにちは"' }] } }],
+        usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 7 },
       }),
     }),
     () => provider.translate('hello', BASE_CONFIG, 'key', 'gemini-2.5-flash')
   );
-  assert.equal(result, 'こんにちは');
+  assert.equal(result.text, 'こんにちは');
+  assert.equal(result.usage.inputTokens, 12);
+  assert.equal(result.usage.outputTokens, 7);
 });
 
 // --- Gemini: TypeError (offline) → network message ---
@@ -366,11 +379,14 @@ test('OpenRouterProvider: success response strips surrounding quotes', async () 
       status: 200,
       json: async () => ({
         choices: [{ message: { content: '"こんにちは"' } }],
+        usage: { prompt_tokens: 15, completion_tokens: 8 },
       }),
     }),
     () => provider.translate('hello', BASE_CONFIG, 'key', 'anthropic/claude-3.5-sonnet')
   );
-  assert.equal(result, 'こんにちは');
+  assert.equal(result.text, 'こんにちは');
+  assert.equal(result.usage.inputTokens, 15);
+  assert.equal(result.usage.outputTokens, 8);
 });
 
 // --- OpenRouter: TypeError (offline) → network message ---

@@ -1,6 +1,6 @@
 // Error classification for hime — no Chrome API imports.
 
-export type ErrorKind = 'auth' | 'rate_limit' | 'network' | 'unknown';
+export type ErrorKind = 'auth' | 'rate_limit' | 'credits' | 'network' | 'unknown';
 
 export interface ClassifiedError {
   kind: ErrorKind;
@@ -13,7 +13,7 @@ export interface ClassifiedError {
  *
  * Classification order:
  *  1. AbortError / fetch TypeError → network
- *  2. HTTP status → auth (401/403), rate_limit (429), unknown (other)
+ *  2. HTTP status → auth (401/403), credits (402), rate_limit (429), unknown (other)
  *  3. No status, not network → unknown with error message
  */
 export function classifyError(
@@ -40,6 +40,13 @@ export function classifyError(
       return {
         kind: 'auth',
         message: 'Invalid or unauthorized API key — check it in options',
+        status,
+      };
+    }
+    if (status === 402) {
+      return {
+        kind: 'credits',
+        message: `Out of credits on ${provider} — add funds or switch provider`,
         status,
       };
     }

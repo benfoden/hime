@@ -142,30 +142,35 @@ function removeComposeIndicator(element: HTMLElement): void {
   delete element.dataset.himeCompose;
 }
 
-// D-05: Loading overlay — dims field to 50% opacity, shows "translating..." label
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+let spinnerInterval: ReturnType<typeof setInterval> | null = null;
+
 function showLoadingOverlay(element: HTMLElement): void {
-  // Dim the field
   element.style.opacity = '0.5';
   element.dataset.himeLoading = 'true';
 
-  // Create floating overlay label
   const overlay = document.createElement('div');
   overlay.id = 'hime-loading-overlay';
-  overlay.textContent = 'translating...';
   overlay.style.cssText = [
     'position: absolute',
     'pointer-events: none',
     'font-family: monospace',
-    'font-size: 13px',
+    'font-size: 11px',
     'color: #FFA500',
     'background: rgba(0, 0, 0, 0.7)',
-    'padding: 2px 8px',
+    'padding: 1px 6px',
     'border-radius: 3px',
     'z-index: 2147483647',
     'white-space: nowrap',
   ].join(';');
 
-  // Position over the element
+  let frame = 0;
+  overlay.textContent = SPINNER_FRAMES[0];
+  spinnerInterval = setInterval(() => {
+    frame = (frame + 1) % SPINNER_FRAMES.length;
+    overlay.textContent = SPINNER_FRAMES[frame];
+  }, 80);
+
   const rect = element.getBoundingClientRect();
   overlay.style.top = `${rect.top + window.scrollY + 4}px`;
   overlay.style.left = `${rect.left + window.scrollX + 4}px`;
@@ -173,10 +178,14 @@ function showLoadingOverlay(element: HTMLElement): void {
   document.body.appendChild(overlay);
 }
 
-// Remove loading overlay and restore opacity
 function hideLoadingOverlay(element: HTMLElement): void {
   element.style.opacity = '';
   delete element.dataset.himeLoading;
+
+  if (spinnerInterval) {
+    clearInterval(spinnerInterval);
+    spinnerInterval = null;
+  }
 
   const overlay = document.getElementById('hime-loading-overlay');
   if (overlay) {
@@ -200,6 +209,7 @@ async function setBadge(text: string, color?: string): Promise<void> {
 function badgeForKind(kind?: string): { text: string; color: string } {
   switch (kind) {
     case 'auth':       return { text: 'KEY',  color: '#FF0000' };
+    case 'credits':    return { text: '$$$',  color: '#FF0000' };
     case 'rate_limit': return { text: 'RATE', color: '#FF8C00' };
     case 'network':    return { text: 'NET',  color: '#FF0000' };
     default:           return { text: 'ERR',  color: '#FF0000' };
