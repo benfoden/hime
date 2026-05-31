@@ -4,14 +4,14 @@ milestone: v1.1
 milestone_name: Inline Predictions
 status: executing
 stopped_at: Phase 5 context gathered
-last_updated: "2026-05-31T13:45:38.672Z"
-last_activity: 2026-05-31 -- Phase 05 execution started
+last_updated: "2026-05-31T13:54:22.216Z"
+last_activity: 2026-05-31
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 2
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 50
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-05-30)
 ## Current Position
 
 Phase: 05 (ghost-text-prediction-engine) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 05
-Last activity: 2026-05-31 -- Phase 05 execution started
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-05-31
 
 ## Performance Metrics
 
@@ -46,7 +46,7 @@ Last activity: 2026-05-31 -- Phase 05 execution started
 | 02.1 | 2 | - | - |
 | 03 | 3 | - | - |
 | 04 | 0 | - | - |
-| 5. Ghost-Text Engine | 0 | - | - |
+| 5. Ghost-Text Engine | 1 | 4m 15s | 4m 15s |
 | 6. Variations & Cycling | 0 | - | - |
 | 7. Prediction Settings | 0 | - | - |
 
@@ -74,6 +74,9 @@ Recent decisions affecting current work:
 - **02-01**: type:module added to package.json — compiled dist/*.js is ES module format, avoids reparsing overhead
 - **02-01**: ErrorKind re-exported from types.ts — single canonical import site for Plans 02 and 03
 - **v1.1**: Cycle keybinding handled in content script (VAR-02), not Chrome commands — preserves the 4-hotkey cap (3 already used)
+- **05-01**: predict() implemented alongside interface types — TypeScript compilation requires all interface members at once; all three providers received predict() in Task 1 GREEN phase
+- **05-01**: sanitizeSuggestion uses /[\x00-\x1F\x7F-\x9F]/g for C0/C1 control char stripping (plan had garbled regex)
+- **05-01**: max_tokens:8 chosen for provider predict() calls — CJK-friendly per research recommendation
 
 ### Pending Todos
 
@@ -93,7 +96,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-30T22:37:42.936Z
-Stopped at: Phase 5 context gathered
+Last session: 2026-05-31T13:54:22.212Z
+Stopped at: Completed 05-01-PLAN.md — ready for 05-02
 Resume file: 
-.planning/phases/05-ghost-text-prediction-engine/05-CONTEXT.md
+None
