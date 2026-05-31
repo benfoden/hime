@@ -120,12 +120,175 @@ function sendPredictMessage(text: string, signal: AbortSignal): Promise<string> 
   });
 }
 
-// Forward declaration — full implementation in Task 2 (renderGhostOverlay + renderGhostSpan).
-// Defined as a function declaration so it is hoisted in JS execution order.
-// eslint-disable-next-line prefer-const
-// noinspection JSUnusedLocalSymbols
-// (stub replaced below by the real implementation)
-function renderGhost(_element: HTMLElement, _suggestion: string): void { /* stub — see Task 2 */ }
+// ---------------------------------------------------------------------------
+// Ghost text rendering — Task 2 (Phase 05-02)
+// ---------------------------------------------------------------------------
+
+const GHOST_OVERLAY_ID = 'hime-ghost-overlay';
+const GHOST_SPAN_CLASS = 'hime-ghost-span';
+
+// CSS properties copied from source element to mirror div for pixel measurement.
+// Source: component/textarea-caret-position algorithm (inline — not imported)
+const MIRROR_PROPS: ReadonlyArray<string> = [
+  'fontFamily', 'fontSize', 'fontWeight', 'fontStyle',
+  'letterSpacing', 'wordSpacing', 'lineHeight', 'textIndent',
+  'textTransform', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+  'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+  'boxSizing', 'overflowX',
+];
+
+// Mirror-div pixel measurement of the X offset at the end of the text.
+// Handles Pitfall 6: if lineHeight === 'normal', fall back to fontSize * 1.2.
+// Source: component/textarea-caret-position (inlined — classic script, no import)
+function getTextEndX(element: HTMLInputElement | HTMLTextAreaElement): number {
+  const cs = window.getComputedStyle(element);
+  const mirror = document.createElement('div');
+  mirror.style.position = 'absolute';
+  mirror.style.visibility = 'hidden';
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.wordWrap = 'break-word';
+  for (const prop of MIRROR_PROPS) {
+    // Pitfall 6: lineHeight 'normal' → compute from fontSize
+    if (prop === 'lineHeight' && cs.lineHeight === 'normal') {
+      mirror.style.lineHeight = `${parseFloat(cs.fontSize) * 1.2}px`;
+    } else {
+      (mirror.style as unknown as Record<string, string>)[prop] = cs[prop as keyof CSSStyleDeclaration] as string;
+    }
+  }
+  // Single-line inputs: prevent wrapping
+  if (element.tagName.toLowerCase() === 'input') {
+    mirror.style.whiteSpace = 'pre';
+  }
+  mirror.style.width = cs.width;
+  const text = document.createTextNode(element.value);
+  const cursor = document.createElement('span');
+  cursor.textContent = '​'; // zero-width space to measure end position
+  mirror.appendChild(text);
+  mirror.appendChild(cursor);
+  document.body.appendChild(mirror);
+  const x = cursor.offsetLeft;
+  document.body.removeChild(mirror);
+  return x;
+}
+
+// Absolutely-positioned ghost overlay for input/textarea.
+// Mimics v1.0 showLoadingOverlay positioning: getBoundingClientRect + scrollX/Y.
+// textContent only — never innerHTML (T-05-07 XSS guard).
+function renderGhostOverlay(element: HTMLInputElement | HTMLTextAreaElement, suggestion: string): void {
+  document.getElementById(GHOST_OVERLAY_ID)?.remove(); // clear any previous
+  const cs = window.getComputedStyle(element);
+  const rect = element.getBoundingClientRect();
+  const textEndX = getTextEndX(element);
+
+  // Pitfall 6: fallback for lineHeight 'normal'
+  const lineHeight = cs.lineHeight === 'normal'
+    ? `${parseFloat(cs.fontSize) * 1.2}px`
+    : cs.lineHeight;
+
+  const overlay = document.createElement('div');
+  overlay.id = GHOST_OVERLAY_ID;
+  overlay.textContent = suggestion; // textContent — never innerHTML (T-05-07)
+  overlay.style.cssText = [
+    'position: absolute',
+    'pointer-events: none',
+    `font-family: ${cs.fontFamily}`,
+    `font-size: ${cs.fontSize}`,
+    `font-weight: ${cs.fontWeight}`,
+    `line-height: ${lineHeight}`,
+    'color: rgba(120,120,120,0.6)',
+    'z-index: 2147483647',
+    'white-space: pre',
+    'overflow: hidden',
+    `top: ${rect.top + window.scrollY + parseFloat(cs.paddingTop)}px`,
+    `left: ${rect.left + window.scrollX + parseFloat(cs.paddingLeft) + textEndX}px`,
+  ].join(';');
+  document.body.appendChild(overlay);
+}
+
+// Inline ghost span for contenteditable.
+// Span is [contenteditable=false] so typing supersedes it naturally.
+// Source: MDN Selection/Range API
+function renderGhostSpan(element: HTMLElement, suggestion: string): void {
+  document.querySelectorAll('.' + GHOST_SPAN_CLASS).forEach(el => el.remove()); // clear previous
+  const span = document.createElement('span');
+  span.className = GHOST_SPAN_CLASS;
+  span.contentEditable = 'false';
+  span.textContent = suggestion; // textContent — never innerHTML (T-05-07)
+  span.style.cssText = 'color:rgba(120,120,120,0.6);pointer-events:none;user-select:none;';
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0).cloneRange();
+    range.collapse(false); // collapse to end
+    range.insertNode(span);
+    // Move caret back before the ghost span so typing supersedes it (PRED-05)
+    range.setStartBefore(span);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } else {
+    element.appendChild(span);
+  }
+}
+
+// Dispatch ghost rendering by element type.
+function renderGhost(element: HTMLElement, suggestion: string): void {
+  const tag = element.tagName.toLowerCase();
+  if (tag === 'input' || tag === 'textarea') {
+    renderGhostOverlay(element as HTMLInputElement | HTMLTextAreaElement, suggestion);
+  } else if (element.isContentEditable) {
+    renderGhostSpan(element, suggestion);
+  }
+  predictionState.suggestion = suggestion;
+  predictionState.element = element;
+}
+
+// Remove all ghost UI and clear the suggestion state.
+function removeGhost(): void {
+  document.getElementById(GHOST_OVERLAY_ID)?.remove();
+  document.querySelectorAll('.' + GHOST_SPAN_CLASS).forEach(el => el.remove());
+  predictionState.suggestion = '';
+}
+
+// Accept the current ghost suggestion via undo-safe execCommand (PRED-02, D-06).
+// Tab or Enter triggers this; cursor lands after inserted text.
+function acceptGhost(element: HTMLElement): void {
+  const s = predictionState.suggestion;
+  if (!s) return;
+  removeGhost();
+  element.focus();
+  document.execCommand('insertText', false, s);
+  // For contenteditable, collapse selection to end after insert
+  if (element.isContentEditable) {
+    window.getSelection()?.collapseToEnd();
+  }
+  predictionState.element = null;
+}
+
+// Dismiss the ghost without altering committed text (PRED-03, D-09).
+function dismissGhost(): void {
+  removeGhost();
+  predictionState.element = null;
+}
+
+// Schedule a prediction request (D-01/D-02: manual fires immediately; auto debounces).
+// Source: Pattern 7 from RESEARCH.md
+function schedulePrediction(element: HTMLElement, mode: 'manual' | 'auto'): void {
+  if (mode === 'manual') {
+    void requestPrediction(element);
+    return;
+  }
+  // Auto mode — debounce
+  if (predictionState.debounceTimer !== null) {
+    clearTimeout(predictionState.debounceTimer);
+    predictionState.debounceTimer = null;
+  }
+  const text = getTextBeforeCursor(element);
+  if (!text || text.trim().length < DEFAULT_MIN_CHARS) return;
+  predictionState.debounceTimer = setTimeout(() => {
+    predictionState.debounceTimer = null;
+    void requestPrediction(element);
+  }, DEFAULT_DEBOUNCE_MS);
+}
 
 // Race-guarded prediction request — Pattern 5 from RESEARCH.md.
 // Increments requestSeq; any response with a different seq is stale and discarded.
