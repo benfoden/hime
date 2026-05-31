@@ -521,3 +521,81 @@ test('buildPredictionPrompt: contains "language"', () => {
 test('buildPredictionPrompt: does NOT contain "translate" (LANG-02)', () => {
   assert.ok(!/translate/i.test(buildPredictionPrompt()), `unexpected "translate" in prompt, got: ${buildPredictionPrompt()}`);
 });
+
+// ---------------------------------------------------------------------------
+// Provider predict() tests (Phase 05-01 Task 2)
+// ---------------------------------------------------------------------------
+
+// --- OpenAI predict: success ---
+test('OpenAIProvider predict: success returns suggestion text and usage', async () => {
+  const provider = new OpenAIProvider();
+  const result = await withFetch(
+    async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: 'bright and sunny' } }],
+        usage: { prompt_tokens: 8, completion_tokens: 3 },
+      }),
+    }),
+    () => provider.predict('The weather is', 'key', 'gpt-5-mini')
+  );
+  assert.equal(result.text, 'bright and sunny');
+  assert.equal(result.usage.inputTokens, 8);
+  assert.equal(result.usage.outputTokens, 3);
+});
+
+// --- OpenAI predict: 401 → auth error ---
+test('OpenAIProvider predict: 401 rejects with auth kind', async () => {
+  const provider = new OpenAIProvider();
+  await withFetch(
+    async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: { message: 'Incorrect API key' } }),
+    }),
+    async () => {
+      await assert.rejects(
+        () => provider.predict('hello', 'bad-key', 'gpt-5-mini'),
+        (err) => {
+          assert.equal(err.kind, 'auth');
+          return true;
+        }
+      );
+    }
+  );
+});
+
+// --- Gemini predict: success ---
+test('GeminiProvider predict: success returns suggestion text', async () => {
+  const provider = new GeminiProvider();
+  const result = await withFetch(
+    async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: '晴れです' }] } }],
+        usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2 },
+      }),
+    }),
+    () => provider.predict('今日の天気は', 'key', 'gemini-2.5-flash')
+  );
+  assert.equal(result.text, '晴れです');
+});
+
+// --- OpenRouter predict: success ---
+test('OpenRouterProvider predict: success returns suggestion text', async () => {
+  const provider = new OpenRouterProvider();
+  const result = await withFetch(
+    async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: 'and bright' } }],
+        usage: { prompt_tokens: 6, completion_tokens: 2 },
+      }),
+    }),
+    () => provider.predict('The weather is', 'key', 'openai/gpt-4.1-mini')
+  );
+  assert.equal(result.text, 'and bright');
+});
