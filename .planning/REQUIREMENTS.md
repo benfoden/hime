@@ -10,12 +10,12 @@
 
 ### Prediction Engine (PRED)
 
-- [ ] **PRED-01**: While typing in an editable field, user sees a 2-3 word completion rendered as inline ghost text after a configurable debounce.
-- [ ] **PRED-02**: User can accept the current suggestion with Tab (or Enter), inserting it undo-safely via `document.execCommand('insertText')`.
-- [ ] **PRED-03**: User can dismiss the current suggestion with Esc without altering field content.
+- [x] **PRED-01**: While typing in an editable field, user sees a 2-3 word completion rendered as inline ghost text after a configurable debounce.
+- [x] **PRED-02**: User can accept the current suggestion with Tab (or Enter), inserting it undo-safely via `document.execCommand('insertText')`.
+- [x] **PRED-03**: User can dismiss the current suggestion with Esc without altering field content.
 - [x] **PRED-04**: Predictions are generated from surrounding field context (text before the cursor) via the existing background service-worker provider layer.
-- [ ] **PRED-05**: Continuing to type supersedes the showing suggestion (ghost text never blocks or corrupts normal typing); a new prediction refreshes after debounce.
-- [ ] **PRED-06**: Ghost text renders inline at the cursor without shifting or mutating the user's committed text, and clears cleanly on blur/focus-leave.
+- [x] **PRED-05**: Continuing to type supersedes the showing suggestion (ghost text never blocks or corrupts normal typing); a new prediction refreshes after debounce.
+- [x] **PRED-06**: Ghost text renders inline at the cursor without shifting or mutating the user's committed text, and clears cleanly on blur/focus-leave.
 
 ### Variations (VAR)
 
@@ -33,7 +33,7 @@
 
 ### Language-Agnostic (LANG)
 
-- [ ] **LANG-01**: Inline prediction works in `<input>`, `<textarea>`, and `contenteditable` elements, reusing v1.0 field detection (skips password, readonly, hidden, disabled fields).
+- [x] **LANG-01**: Inline prediction works in `<input>`, `<textarea>`, and `contenteditable` elements, reusing v1.0 field detection (skips password, readonly, hidden, disabled fields).
 - [x] **LANG-02**: Predictions complete in the field's own language/context and are independent of the translate target-language setting (no forced translation of the completion).
 
 ---
@@ -60,13 +60,13 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PRED-01 | Phase 5 | Pending |
-| PRED-02 | Phase 5 | Pending |
-| PRED-03 | Phase 5 | Pending |
+| PRED-01 | Phase 5 | Complete |
+| PRED-02 | Phase 5 | Complete |
+| PRED-03 | Phase 5 | Complete |
 | PRED-04 | Phase 5 | Complete |
-| PRED-05 | Phase 5 | Pending |
-| PRED-06 | Phase 5 | Pending |
-| LANG-01 | Phase 5 | Pending |
+| PRED-05 | Phase 5 | Complete |
+| PRED-06 | Phase 5 | Complete |
+| LANG-01 | Phase 5 | Complete |
 | LANG-02 | Phase 5 | Complete |
 | VAR-01 | Phase 6 | Pending |
 | VAR-02 | Phase 6 | Pending |

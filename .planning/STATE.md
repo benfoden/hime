@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Inline Predictions
-status: executing
-stopped_at: Phase 5 context gathered
-last_updated: "2026-05-31T13:54:22.216Z"
+status: verifying
+stopped_at: Completed 05-01-PLAN.md — ready for 05-02
+last_updated: "2026-05-31T14:03:29.911Z"
 last_activity: 2026-05-31
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
-  percent: 50
+  completed_plans: 2
+  percent: 100
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-05-30)
 
 Phase: 05 (ghost-text-prediction-engine) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-05-31
 
 ## Performance Metrics
@@ -53,6 +53,7 @@ Last activity: 2026-05-31
 **Recent Trend:** Baseline (no post-GSD plans yet)
 
 *Updated after each plan completion*
+| Phase 05 P02 | 5m 26s | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,9 @@ Recent decisions affecting current work:
 - **05-01**: predict() implemented alongside interface types — TypeScript compilation requires all interface members at once; all three providers received predict() in Task 1 GREEN phase
 - **05-01**: sanitizeSuggestion uses /[\x00-\x1F\x7F-\x9F]/g for C0/C1 control char stripping (plan had garbled regex)
 - **05-01**: max_tokens:8 chosen for provider predict() calls — CJK-friendly per research recommendation
+- **05-02**: PREDICT_TRIGGER_MODE changed from const to let — TypeScript narrows const literals causing TS2367; let allows Phase 7 to assign from storage at runtime
+- **05-02**: Ghost Esc wired in non-capture keydown listener alongside compose-Esc — capture-phase listener is ctrl-gated so Esc lives in the non-capture listener per D-09 precedence rule
+- **05-02**: renderGhost stub used in Task 1 then replaced in Task 2 — TypeScript requires all called functions declared at compile time; stub kept each task independently compilable
 
 ### Pending Todos
 
@@ -96,7 +100,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-31T13:54:22.212Z
+Last session: 2026-05-31T14:03:29.908Z
 Stopped at: Completed 05-01-PLAN.md — ready for 05-02
 Resume file: 
 None

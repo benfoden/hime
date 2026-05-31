@@ -20,7 +20,7 @@
 
 ### v1.1 Inline Predictions (Phases 5-7)
 
-- [ ] **Phase 5: Ghost-Text Prediction Engine** - Inline 2-3 word completions render at the cursor, accept/dismiss/supersede, across all editable field types
+- [x] **Phase 5: Ghost-Text Prediction Engine** - Inline 2-3 word completions render at the cursor, accept/dismiss/supersede, across all editable field types (completed 2026-05-31)
 - [ ] **Phase 6: Alternate Variations & Cycling** - Each prediction offers multiple alternates the user can cycle through and accept in-field
 - [ ] **Phase 7: Prediction Settings** - Options page controls for enable/disable, debounce, max variations, trigger behavior, and cycle keybinding
 
@@ -38,7 +38,7 @@
   5. The suggestion is generated from text before the cursor in the field's own language and clears completely on blur/focus-leave; password, readonly, hidden, and disabled fields never trigger predictions.
 **Plans**: 2 plans
 - [x] 05-01-PLAN.md — predict message contract + prompt + provider predict() + background dispatch + sanitize (PRED-04, LANG-02)
-- [ ] 05-02-PLAN.md — content-script ghost engine: render, accept/dismiss/supersede, keydown wiring, blur cleanup (PRED-01..06, LANG-01/02)
+- [x] 05-02-PLAN.md — content-script ghost engine: render, accept/dismiss/supersede, keydown wiring, blur cleanup (PRED-01..06, LANG-01/02)
 **UI hint**: yes
 
 ### Phase 6: Alternate Variations & Cycling
@@ -75,6 +75,6 @@
 | 02.1. OpenRouter Provider Support | v1.0 | 2/2 | Complete | 2026-05-25 |
 | 3. Cross-Site Compatibility | v1.0 | 3/3 | Complete | 2026-05-25 |
 | 4. Web Store Distribution | v1.0 | 0/0 | Skipped | 2026-05-25 |
-| 5. Ghost-Text Prediction Engine | v1.1 | 1/2 | In Progress|  |
+| 5. Ghost-Text Prediction Engine | v1.1 | 2/2 | Complete   | 2026-05-31 |
 | 6. Alternate Variations & Cycling | v1.1 | 0/0 | Not started | - |
 | 7. Prediction Settings | v1.1 | 0/0 | Not started | - |
