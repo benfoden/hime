@@ -477,3 +477,47 @@ test('overlay lifecycle: show sets opacity 0.5, hide restores empty', () => {
   assert.equal(opacity, '');
   assert.equal(himeLoading, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// sanitizeSuggestion tests (Phase 05-01 Task 1)
+// ---------------------------------------------------------------------------
+
+const { sanitizeSuggestion } = await import(path.join(__dirname, '../dist/predict-util.js'));
+
+test('sanitizeSuggestion: trims surrounding whitespace', () => {
+  assert.equal(sanitizeSuggestion('  bright and sunny  '), 'bright and sunny');
+});
+
+test('sanitizeSuggestion: truncates at first newline', () => {
+  assert.equal(sanitizeSuggestion('line one\nline two'), 'line one');
+});
+
+test('sanitizeSuggestion: strips control chars (ASCII BEL)', () => {
+  assert.equal(sanitizeSuggestion('foo\x07bar'), 'foobar');
+});
+
+test('sanitizeSuggestion: empty string returns empty', () => {
+  assert.equal(sanitizeSuggestion(''), '');
+});
+
+test('sanitizeSuggestion: only newlines returns empty', () => {
+  assert.equal(sanitizeSuggestion('\n\n'), '');
+});
+
+// ---------------------------------------------------------------------------
+// buildPredictionPrompt tests (Phase 05-01 Task 1)
+// ---------------------------------------------------------------------------
+
+const { buildPredictionPrompt } = await import(path.join(__dirname, '../dist/providers/prompt.js'));
+
+test('buildPredictionPrompt: contains "2 to 3 words"', () => {
+  assert.ok(buildPredictionPrompt().includes('2 to 3 words'), `missing "2 to 3 words", got: ${buildPredictionPrompt()}`);
+});
+
+test('buildPredictionPrompt: contains "language"', () => {
+  assert.ok(buildPredictionPrompt().includes('language'), `missing "language", got: ${buildPredictionPrompt()}`);
+});
+
+test('buildPredictionPrompt: does NOT contain "translate" (LANG-02)', () => {
+  assert.ok(!/translate/i.test(buildPredictionPrompt()), `unexpected "translate" in prompt, got: ${buildPredictionPrompt()}`);
+});

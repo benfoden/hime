@@ -40,6 +40,7 @@ export interface TranslationResult {
 export interface TranslationProvider {
   name: string;
   translate(text: string, config: TranslationConfig, apiKey: string, model: string): Promise<TranslationResult>;
+  predict(text: string, apiKey: string, model: string): Promise<TranslationResult>;
 }
 
 export interface UsageRecord {
@@ -49,18 +50,19 @@ export interface UsageRecord {
 }
 
 // Message types for content script <-> background communication
-export type MessageType = 
-  | 'translate' 
-  | 'translateResponse' 
-  | 'setBadge' 
-  | 'getSettings' 
-  | 'settingsResponse' 
+export type MessageType =
+  | 'translate'
+  | 'translateResponse'
+  | 'setBadge'
+  | 'getSettings'
+  | 'settingsResponse'
   | 'swapDirection'
   | 'toggleCompose'
   | 'yoloTranslate'
   | 'directionSwapped'
   | 'getUsage'
-  | 'resetUsage';
+  | 'resetUsage'
+  | 'predict';
 
 export interface Message {
   type: MessageType;
@@ -73,6 +75,11 @@ export interface TranslateMessage extends Message {
     text: string;
     targetElement?: string;
   };
+}
+
+export interface PredictMessage extends Message {
+  type: 'predict';
+  payload: { text: string };
 }
 
 export interface SetBadgeMessage extends Message {

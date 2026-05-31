@@ -16,6 +16,21 @@ export function buildSystemPrompt(config: TranslationConfig): string {
   ].join('\n').trim();
 }
 
+/**
+ * Build the system prompt for an inline text prediction request.
+ * No config parameter — LANG-02: completion is in the field's own language,
+ * independent of the translate target-language setting.
+ */
+export function buildPredictionPrompt(): string {
+  return [
+    'You are an inline text completion engine.',
+    'Continue the text with 2 to 3 words only.',
+    'Match the exact language and register of the input.',
+    'Output ONLY the continuation words — no explanation, no punctuation at the start, no quotes.',
+    'If the text ends mid-word, complete that word as one of your words.',
+  ].join('\n');
+}
+
 function getFormalityInstruction(formality: string): string {
   switch (formality) {
     case 'casual':
