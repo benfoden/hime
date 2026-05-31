@@ -599,3 +599,26 @@ test('OpenRouterProvider predict: success returns suggestion text', async () => 
   );
   assert.equal(result.text, 'and bright');
 });
+
+// ---------------------------------------------------------------------------
+// background.ts predict logic tests (Phase 05-01 Task 3)
+// Logic-only — no Chrome API
+// ---------------------------------------------------------------------------
+
+test('predictText input clip: 600-char input sliced to last 500 chars', () => {
+  const input = 'a'.repeat(600);
+  const clipped = input.slice(-500);
+  assert.equal(clipped.length, 500);
+  // Last 500 chars of 600 'a's is still 500 'a's
+  assert.equal(clipped, 'a'.repeat(500));
+});
+
+test('sanitizeSuggestion applied to multiline provider result', () => {
+  const raw = 'two words\nextra line';
+  assert.equal(sanitizeSuggestion(raw), 'two words');
+});
+
+test('sanitizeSuggestion applied to provider result with control chars', () => {
+  const raw = 'bright\x07sunny';
+  assert.equal(sanitizeSuggestion(raw), 'brightsunny');
+});

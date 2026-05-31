@@ -9,9 +9,11 @@ import type {
   Settings,
   Message,
   TranslateMessage,
-  SetBadgeMessage
+  SetBadgeMessage,
+  PredictMessage
 } from './types.js';
 import { migrateSettings } from './types.js';
+import { sanitizeSuggestion } from './predict-util.js';
 
 // Provider registry
 const providers: Record<string, TranslationProvider> = {
@@ -93,6 +95,28 @@ async function translateText(text: string): Promise<TranslationResult> {
   return result;
 }
 
+// Predict text — silent, no usage recording (D-10)
+async function predictText(text: string): Promise<TranslationResult> {
+  const settings = await getSettings();
+
+  const apiKey = settings.apiKeys[settings.provider] || '';
+  if (!apiKey) {
+    throw new Error(`API key not configured for ${settings.provider}. Please set it in the extension options.`);
+  }
+
+  const provider = providers[settings.provider];
+  if (!provider) {
+    throw new Error(`Unknown provider: ${settings.provider}`);
+  }
+
+  // T-05-01: Clip to last 500 chars — bounds token cost and limits pre-cursor text transmitted
+  const clipped = text.slice(-500);
+
+  // LANG-02: No source/target config — prompt instructs model to continue in the field's own language
+  // D-10: No recordUsage() — prediction is silent, no badge updates in Phase 5
+  return provider.predict(clipped, apiKey, settings.model);
+}
+
 // Message handler
 chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
   (async () => {
@@ -115,6 +139,18 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           break;
         }
         
+        case 'predict': {
+          const predictMsg = message as PredictMessage;
+          try {
+            const result = await predictText(predictMsg.payload.text);
+            sendResponse({ suggestion: sanitizeSuggestion(result.text) });
+          } catch (err) {
+            // D-10: silent — never an error badge for predictions
+            sendResponse({ suggestion: '' });
+          }
+          break;
+        }
+
         case 'getSettings': {
           const settings = await getSettings();
           sendResponse({ settings });
