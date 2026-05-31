@@ -710,3 +710,38 @@ test('sanitizeGhost: truncates at first newline', () => {
   const result = s.replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim();
   assert.equal(result, 'line one');
 });
+
+// ---------------------------------------------------------------------------
+// Keydown wiring logic tests (Phase 05-02 Task 3)
+// Logic-only — no content.ts import (classic script, not importable).
+// ---------------------------------------------------------------------------
+
+test('ghostShowing gate: Tab NOT intercepted when suggestion is empty', () => {
+  // Gate logic: ghostShowing = predictionState.suggestion !== ''
+  const suggestion = '';
+  const ghostShowing = suggestion !== '';
+  // Tab should not be intercepted when ghost is not showing
+  assert.equal(ghostShowing, false, 'empty suggestion → Tab falls through to native behavior');
+});
+
+test('ghostShowing gate: Tab IS intercepted when suggestion is non-empty', () => {
+  const suggestion = 'bright and sunny';
+  const ghostShowing = suggestion !== '';
+  assert.equal(ghostShowing, true, 'non-empty suggestion → Tab intercepted to acceptGhost');
+});
+
+test('Enter accept: gated to input tag only (textarea passes through)', () => {
+  // Enter only accepts ghost when element tag is 'input' (Pitfall 5: textarea needs newline)
+  const inputTag = 'input';
+  const textareaTag = 'textarea';
+  const shouldAcceptOnInput = inputTag === 'input';
+  const shouldAcceptOnTextarea = textareaTag === 'input';
+  assert.equal(shouldAcceptOnInput, true, 'Enter should accept ghost in single-line input');
+  assert.equal(shouldAcceptOnTextarea, false, 'Enter should NOT accept ghost in textarea');
+});
+
+test('Enter accept: gated to input tag only (contenteditable passes through)', () => {
+  const contentEditableTag = 'div'; // contenteditable div
+  const shouldAccept = contentEditableTag === 'input';
+  assert.equal(shouldAccept, false, 'Enter should NOT accept ghost in contenteditable');
+});

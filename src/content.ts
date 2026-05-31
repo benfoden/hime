@@ -21,8 +21,9 @@ let composeState: {
 // ---------------------------------------------------------------------------
 
 // D-01 default: manual trigger only; auto (predict-as-you-type) is opt-in.
-// Phase 7 (SET-01/SET-02) will expose this in options.
-const PREDICT_TRIGGER_MODE: 'manual' | 'auto' = 'manual';
+// Phase 7 (SET-01/SET-02) will expose this in options and set it from storage.
+// Using let (not const) so Phase 7 can update it without a code change.
+let PREDICT_TRIGGER_MODE: 'manual' | 'auto' = 'manual';
 const DEFAULT_DEBOUNCE_MS = 400;  // D-02 — Phase 7 makes configurable
 const DEFAULT_MIN_CHARS = 3;      // D-02 — Phase 7 makes configurable
 
@@ -710,12 +711,32 @@ document.addEventListener('focusin', handleFocusChange);
 document.addEventListener('focusout', () => {
   // Delay check to allow focusin to fire on the new target first
   setTimeout(handleFocusChange, 0);
+  // PRED-06: clear ghost on blur + abort any in-flight prediction.
+  // Do this immediately (not deferred) so a late response can't render into the wrong field.
+  removeGhost();
+  predictionState.abortController?.abort();
+  predictionState.abortController = null;
+  predictionState.suggestion = '';
+  predictionState.element = null;
+  if (predictionState.debounceTimer !== null) {
+    clearTimeout(predictionState.debounceTimer);
+    predictionState.debounceTimer = null;
+  }
 });
 
-// Listen for Escape key to cancel compose mode
+// Listen for Escape key — ghost dismiss takes precedence over compose cancel (D-09).
+// Ghost showing → Esc dismisses ghost; no ghost + compose active → Esc cancels compose.
+// Prediction is suppressed during compose (D-07), so these paths don't collide.
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && composeState.isActive) {
-    exitComposeMode();
+  if (event.key === 'Escape') {
+    if (predictionState.suggestion !== '') {
+      // D-09: ghost showing → dismiss ghost first; do NOT cancel compose
+      event.preventDefault();
+      event.stopPropagation();
+      dismissGhost();
+    } else if (composeState.isActive) {
+      exitComposeMode();
+    }
   }
 });
 
@@ -723,10 +744,39 @@ document.addEventListener('keydown', (event) => {
 // This is the reliable hotkey path — chrome.commands global shortcuts are
 // unreliable (reserved-key conflicts, unassigned defaults), so hotkeys are
 // handled here instead of via the manifest "commands" / background onCommand.
+//   Ctrl+Space    -> trigger prediction (manual mode, D-03)
+//   Tab / Enter   -> accept ghost suggestion (PRED-02, D-12)
+//   Esc           -> dismiss ghost (PRED-03, D-09) — also handled in the non-capture listener
+//   typing        -> supersede ghost (PRED-05)
 //   Ctrl+Y        -> toggle compose mode (enter / convert)
 //   Ctrl+Shift+Y  -> YOLO translate the focused field
 //   Ctrl+Shift+S  -> swap translation direction (handled in background)
 document.addEventListener('keydown', (event) => {
+  // --- Ghost accept / dismiss / supersede (NOT ctrl-gated — must come before early-out) ---
+  const ghostShowing = predictionState.suggestion !== '';
+  const activeEl = getActiveElement();
+  if (ghostShowing && activeEl && activeEl === predictionState.element) {
+    if (event.key === 'Tab' ||
+        (event.key === 'Enter' && activeEl.tagName.toLowerCase() === 'input')) {
+      // PRED-02, D-12: Tab accepts any field; Enter only accepts single-line input
+      // (Pitfall 4: Tab falls through to native focus-move when no ghost)
+      // (Pitfall 5: Enter in textarea/contenteditable is newline — let it pass)
+      event.preventDefault();
+      event.stopPropagation();
+      acceptGhost(activeEl);
+      return;
+    }
+    // Note: Esc is handled in the non-capture keydown listener above for ghost-first precedence.
+    // Supersede: any printable character, Backspace, or Delete clears ghost (PRED-05)
+    if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') {
+      removeGhost();
+      if (PREDICT_TRIGGER_MODE === 'auto') {
+        schedulePrediction(activeEl, 'auto'); // reschedule after debounce (PRED-05)
+      }
+      // do NOT preventDefault — let the character commit normally
+    }
+  }
+
   const ctrl = event.ctrlKey || event.metaKey;
   if (!ctrl || event.altKey) return;
   const key = event.key.toLowerCase();
@@ -739,10 +789,23 @@ document.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Compose / YOLO only act when a valid input field is focused, so we don't
-  // hijack Ctrl+Y (redo) etc. outside text fields.
+  // Compose / YOLO / Predict only act when a valid input field is focused, so we don't
+  // hijack Ctrl+Y (redo) or Ctrl+Space etc. outside text fields.
   const element = getActiveElement();
   if (!element || !isValidInputElement(element)) return;
+
+  // Ctrl+Space — manual prediction trigger (D-03).
+  // NOTE: Ctrl+Space conflicts with the CJK IME toggle on Linux (fcitx/ibus) at the OS level.
+  // The OS may capture Ctrl+Space before the browser sees it, so users with CJK IME configured
+  // may find this key "does nothing". This is a known limitation documented here; the trigger
+  // key will be configurable in Phase 7 (SET-03). Suggested alternatives for CJK users: Ctrl+/
+  // See 05-RESEARCH.md Pitfall 1 for the full analysis.
+  if (!event.shiftKey && event.code === 'Space') {
+    event.preventDefault();
+    event.stopPropagation();
+    schedulePrediction(element, 'manual');
+    return;
+  }
 
   if (event.shiftKey && key === 'y') {
     event.preventDefault();
