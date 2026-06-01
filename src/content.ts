@@ -54,16 +54,19 @@ function isCaretAtEnd(element: HTMLElement): boolean {
     if (!sel || sel.rangeCount === 0) return false;
     const range = sel.getRangeAt(0);
     if (!range.collapsed) return false;
-    const lastChild = element.lastChild;
-    if (!lastChild) return true; // empty element
-    if (lastChild.nodeType === Node.TEXT_NODE) {
-      return range.endContainer === lastChild && range.endOffset === (lastChild as Text).length;
+    // Build a range spanning from the caret to the end of the element's contents.
+    // The caret is "at the end" when nothing but whitespace follows it. This
+    // tolerates the trailing <br>/<div> scaffolding rich editors like Gmail compose
+    // insert — the earlier strict compareBoundaryPoints check failed there because
+    // the structural end sits after that scaffolding, which the caret never reaches.
+    const tail = document.createRange();
+    tail.selectNodeContents(element);
+    try {
+      tail.setStart(range.endContainer, range.endOffset);
+    } catch {
+      return false; // caret container outside element — treat as not-at-end
     }
-    // Nested structure: check if selection is at structural end of element
-    const endRange = document.createRange();
-    endRange.selectNodeContents(element);
-    endRange.collapse(false);
-    return range.compareBoundaryPoints(Range.END_TO_END, endRange) === 0;
+    return tail.toString().replace(/\s+/g, '') === '';
   }
   return false;
 }
@@ -850,8 +853,13 @@ document.addEventListener('keydown', (event) => {
       return;
     }
     // Note: Esc is handled in the non-capture keydown listener above for ghost-first precedence.
-    // Supersede: any printable character, Backspace, or Delete clears ghost (PRED-05)
-    if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') {
+    // Supersede: any printable character, Backspace, or Delete clears ghost (PRED-05).
+    // Modifier chords (Ctrl/Cmd/Alt) are NOT supersede input — they pass through
+    // untouched so native shortcuts like Ctrl+Z (undo) work normally. The accepted
+    // ghost text is already committed via execCommand('insertText'), which is itself
+    // part of the native undo stack, so Ctrl+Z undoes real edits with no special-casing.
+    const modifierChord = event.ctrlKey || event.metaKey || event.altKey;
+    if (!modifierChord && (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete')) {
       removeGhost();
       if (PREDICT_TRIGGER_MODE === 'auto') {
         schedulePrediction(activeEl, 'auto'); // reschedule after debounce (PRED-05)
