@@ -99,14 +99,29 @@
 
     <section class="hotkeys">
       <h2>Hotkeys</h2>
+      <p class="help-text">Click a field, then press the key combination you want (must include Ctrl, Shift, or Alt). Press Esc to cancel.</p>
+      <div class="hotkey-row">
+        <label for="predictHotkey">Predict (inline completion)</label>
+        <button type="button" class="hotkey-capture" id="predictHotkey"></button>
+      </div>
+      <div class="hotkey-row">
+        <label for="composeHotkey">Toggle compose mode</label>
+        <button type="button" class="hotkey-capture" id="composeHotkey"></button>
+      </div>
+      <div class="hotkey-row">
+        <label for="yoloHotkey">YOLO translate</label>
+        <button type="button" class="hotkey-capture" id="yoloHotkey"></button>
+      </div>
+      <div class="hotkey-row">
+        <label for="swapHotkey">Swap language direction</label>
+        <button type="button" class="hotkey-capture" id="swapHotkey"></button>
+      </div>
       <ul>
-        <li><kbd>Ctrl+Y</kbd> — Toggle compose mode</li>
-        <li><kbd>Ctrl+Shift+Y</kbd> — YOLO translate</li>
-        <li><kbd>Ctrl+Shift+S</kbd> — Swap language direction</li>
-        <li><kbd>Escape</kbd> — Cancel compose mode</li>
+        <li><kbd>Tab</kbd> / <kbd>Enter</kbd> — Accept inline suggestion</li>
+        <li><kbd>Escape</kbd> — Dismiss suggestion / cancel compose</li>
         <li><kbd>Ctrl+Z</kbd> — Undo translation</li>
       </ul>
-      <p class="help-text">Hotkeys can be customized in Chrome's extension shortcuts (chrome://extensions/shortcuts)</p>
+      <p class="help-text">Click <strong>Save Settings</strong> to apply. Changes take effect immediately in open tabs.</p>
     </section>
   </div>
   

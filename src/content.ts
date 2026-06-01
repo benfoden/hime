@@ -740,17 +740,100 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Configurable hotkeys (SET-03) — read from chrome.storage.local, live-updated.
+// content.ts is a classic script and cannot import DEFAULT_SETTINGS, so the
+// defaults below mirror types.ts DEFAULT_SETTINGS. They are overwritten by
+// stored settings on load and on any chrome.storage change.
+// ---------------------------------------------------------------------------
+const hotkeyStrings: { predict: string; compose: string; yolo: string; swap: string } = {
+  predict: 'Ctrl+/',
+  compose: 'Ctrl+Y',
+  yolo: 'Ctrl+Shift+Y',
+  swap: 'Ctrl+Shift+S',
+};
+
+type ParsedHotkey = { ctrl: boolean; shift: boolean; alt: boolean; key: string; code: string | null };
+
+// Parse a hotkey string like "Ctrl+Shift+Y" into modifier flags + key.
+// "Ctrl"/"Cmd"/"Meta" all map to ctrl (matched against ctrlKey || metaKey).
+// "Space" is matched by event.code (event.key for space is a literal space).
+function parseHotkey(str: string): ParsedHotkey | null {
+  if (!str) return null;
+  const hk: ParsedHotkey = { ctrl: false, shift: false, alt: false, key: '', code: null };
+  for (const raw of str.split('+')) {
+    const p = raw.trim();
+    if (!p) continue;
+    const low = p.toLowerCase();
+    if (low === 'ctrl' || low === 'control' || low === 'cmd' || low === 'command' || low === 'meta') hk.ctrl = true;
+    else if (low === 'shift') hk.shift = true;
+    else if (low === 'alt' || low === 'option') hk.alt = true;
+    else hk.key = p;
+  }
+  if (!hk.key) return null;
+  if (hk.key.toLowerCase() === 'space') hk.code = 'Space';
+  return hk;
+}
+
+let parsedHotkeys: { predict: ParsedHotkey | null; compose: ParsedHotkey | null; yolo: ParsedHotkey | null; swap: ParsedHotkey | null } = {
+  predict: parseHotkey(hotkeyStrings.predict),
+  compose: parseHotkey(hotkeyStrings.compose),
+  yolo: parseHotkey(hotkeyStrings.yolo),
+  swap: parseHotkey(hotkeyStrings.swap),
+};
+
+function reparseHotkeys(): void {
+  parsedHotkeys = {
+    predict: parseHotkey(hotkeyStrings.predict),
+    compose: parseHotkey(hotkeyStrings.compose),
+    yolo: parseHotkey(hotkeyStrings.yolo),
+    swap: parseHotkey(hotkeyStrings.swap),
+  };
+}
+
+// Exact-match a KeyboardEvent against a parsed hotkey. Modifiers must match
+// exactly (so Ctrl+Y does not also fire for Ctrl+Shift+Y). Ctrl token matches
+// ctrlKey OR metaKey (Mac Cmd). Key compared case-insensitively, except Space
+// which is matched by event.code.
+function matchesHotkey(event: KeyboardEvent, hk: ParsedHotkey | null): boolean {
+  if (!hk) return false;
+  const ctrl = event.ctrlKey || event.metaKey;
+  if (ctrl !== hk.ctrl) return false;
+  if (event.shiftKey !== hk.shift) return false;
+  if (event.altKey !== hk.alt) return false;
+  if (hk.code) return event.code === hk.code;
+  return event.key.toLowerCase() === hk.key.toLowerCase();
+}
+
+function loadHotkeySettings(): void {
+  chrome.storage.local.get(['himeSettings'], (result) => {
+    const s = (result.himeSettings || {}) as Record<string, unknown>;
+    if (typeof s.predictHotkey === 'string' && s.predictHotkey) hotkeyStrings.predict = s.predictHotkey;
+    if (typeof s.composeHotkey === 'string' && s.composeHotkey) hotkeyStrings.compose = s.composeHotkey;
+    if (typeof s.yoloHotkey === 'string' && s.yoloHotkey) hotkeyStrings.yolo = s.yoloHotkey;
+    if (typeof s.swapHotkey === 'string' && s.swapHotkey) hotkeyStrings.swap = s.swapHotkey;
+    reparseHotkeys();
+  });
+}
+
+loadHotkeySettings();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.himeSettings) loadHotkeySettings();
+});
+
 // In-page hotkey listener (capture phase so site handlers can't swallow it).
 // This is the reliable hotkey path — chrome.commands global shortcuts are
 // unreliable (reserved-key conflicts, unassigned defaults), so hotkeys are
 // handled here instead of via the manifest "commands" / background onCommand.
-//   Ctrl+Space    -> trigger prediction (manual mode, D-03)
+// All four action hotkeys are user-configurable (parsedHotkeys, above):
+//   predict       -> trigger prediction (manual mode, D-03); default Ctrl+/
+//   compose       -> toggle compose mode (enter / convert); default Ctrl+Y
+//   yolo          -> YOLO translate the focused field; default Ctrl+Shift+Y
+//   swap          -> swap translation direction (handled in background); default Ctrl+Shift+S
+// Fixed (not configurable):
 //   Tab / Enter   -> accept ghost suggestion (PRED-02, D-12)
 //   Esc           -> dismiss ghost (PRED-03, D-09) — also handled in the non-capture listener
 //   typing        -> supersede ghost (PRED-05)
-//   Ctrl+Y        -> toggle compose mode (enter / convert)
-//   Ctrl+Shift+Y  -> YOLO translate the focused field
-//   Ctrl+Shift+S  -> swap translation direction (handled in background)
 document.addEventListener('keydown', (event) => {
   // --- Ghost accept / dismiss / supersede (NOT ctrl-gated — must come before early-out) ---
   const ghostShowing = predictionState.suggestion !== '';
@@ -777,12 +860,8 @@ document.addEventListener('keydown', (event) => {
     }
   }
 
-  const ctrl = event.ctrlKey || event.metaKey;
-  if (!ctrl || event.altKey) return;
-  const key = event.key.toLowerCase();
-
   // Swap direction works regardless of focus.
-  if (event.shiftKey && key === 's') {
+  if (matchesHotkey(event, parsedHotkeys.swap)) {
     event.preventDefault();
     event.stopPropagation();
     chrome.runtime.sendMessage({ type: 'swapDirection' });
@@ -790,31 +869,31 @@ document.addEventListener('keydown', (event) => {
   }
 
   // Compose / YOLO / Predict only act when a valid input field is focused, so we don't
-  // hijack Ctrl+Y (redo) or Ctrl+Space etc. outside text fields.
+  // hijack the configured keys (e.g. Ctrl+Y redo) outside text fields.
   const element = getActiveElement();
   if (!element || !isValidInputElement(element)) return;
 
-  // Ctrl+Space — manual prediction trigger (D-03).
-  // NOTE: Ctrl+Space conflicts with the CJK IME toggle on Linux (fcitx/ibus) at the OS level.
-  // The OS may capture Ctrl+Space before the browser sees it, so users with CJK IME configured
-  // may find this key "does nothing". This is a known limitation documented here; the trigger
-  // key will be configurable in Phase 7 (SET-03). Suggested alternatives for CJK users: Ctrl+/
-  // See 05-RESEARCH.md Pitfall 1 for the full analysis.
-  if (!event.shiftKey && event.code === 'Space') {
+  // Manual prediction trigger (D-03). Default Ctrl+/ — chosen because Ctrl+Space
+  // conflicts with the CJK IME toggle on Linux (fcitx/ibus) at the OS level; the
+  // OS may capture it before the browser sees it. Key is now user-configurable
+  // (SET-03). See 05-RESEARCH.md Pitfall 1 for the full analysis.
+  if (matchesHotkey(event, parsedHotkeys.predict)) {
     event.preventDefault();
     event.stopPropagation();
     schedulePrediction(element, 'manual');
     return;
   }
 
-  if (event.shiftKey && key === 'y') {
+  // YOLO checked before compose: with exact modifier matching the default
+  // Ctrl+Shift+Y and Ctrl+Y are disjoint, but order-independence is cheap insurance.
+  if (matchesHotkey(event, parsedHotkeys.yolo)) {
     event.preventDefault();
     event.stopPropagation();
     void yoloTranslate();
     return;
   }
 
-  if (!event.shiftKey && key === 'y') {
+  if (matchesHotkey(event, parsedHotkeys.compose)) {
     event.preventDefault();
     event.stopPropagation();
     if (composeState.isActive) {

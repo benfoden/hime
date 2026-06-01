@@ -15,9 +15,73 @@ let statusDiv: HTMLDivElement;
 let testStatusDiv: HTMLDivElement;
 let usageContentDiv: HTMLDivElement;
 let resetUsageBtn: HTMLButtonElement;
+let predictHotkeyBtn: HTMLButtonElement;
+let composeHotkeyBtn: HTMLButtonElement;
+let yoloHotkeyBtn: HTMLButtonElement;
+let swapHotkeyBtn: HTMLButtonElement;
 
 // Current settings
 let currentSettings: Settings = { ...DEFAULT_SETTINGS };
+
+// True while a hotkey-capture button is recording a key combo.
+let capturingHotkey = false;
+
+// Keys of Settings that hold a hotkey string.
+type HotkeyKey = 'predictHotkey' | 'composeHotkey' | 'yoloHotkey' | 'swapHotkey';
+
+// Format a captured KeyboardEvent into a hotkey string ("Ctrl+Shift+Y").
+// Returns null for a pure-modifier press (caller keeps recording). Ctrl/Cmd
+// both normalize to "Ctrl" to match content.ts matchesHotkey().
+function formatHotkey(event: KeyboardEvent): string | null {
+  const k = event.key;
+  if (k === 'Control' || k === 'Shift' || k === 'Alt' || k === 'Meta') return null;
+  const parts: string[] = [];
+  if (event.ctrlKey || event.metaKey) parts.push('Ctrl');
+  if (event.shiftKey) parts.push('Shift');
+  if (event.altKey) parts.push('Alt');
+  let keyName: string;
+  if (k === ' ' || event.code === 'Space') keyName = 'Space';
+  else if (k.length === 1) keyName = k.toUpperCase();
+  else keyName = k; // Enter, ArrowUp, etc.
+  parts.push(keyName);
+  return parts.join('+');
+}
+
+// Wire a capture button: click → record next combo → write to currentSettings.
+// Esc cancels and restores the previous value. A modifier (Ctrl/Shift/Alt) is
+// required so a bare key can't hijack normal typing on every page.
+function setupHotkeyCapture(btn: HTMLButtonElement, key: HotkeyKey): void {
+  btn.addEventListener('click', () => {
+    if (capturingHotkey) return;
+    capturingHotkey = true;
+    const previous = currentSettings[key];
+    btn.textContent = 'Press keys…';
+    btn.classList.add('capturing');
+
+    const finish = (text: string): void => {
+      capturingHotkey = false;
+      btn.textContent = text;
+      btn.classList.remove('capturing');
+      document.removeEventListener('keydown', onKey, true);
+    };
+
+    const onKey = (e: KeyboardEvent): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') { finish(previous); return; }
+      const formatted = formatHotkey(e);
+      if (!formatted) return; // pure modifier — keep waiting
+      if (!(e.ctrlKey || e.metaKey || e.shiftKey || e.altKey)) {
+        btn.textContent = 'Need Ctrl/Shift/Alt…';
+        return;
+      }
+      currentSettings[key] = formatted;
+      finish(formatted);
+    };
+
+    document.addEventListener('keydown', onKey, true);
+  });
+}
 
 // Load settings from storage
 async function loadSettings(): Promise<void> {
@@ -37,6 +101,10 @@ function populateForm(): void {
   targetLanguageInput.value = currentSettings.targetLanguage;
   formalitySelect.value = currentSettings.formality;
   customPromptTextarea.value = currentSettings.customPrompt || '';
+  predictHotkeyBtn.textContent = currentSettings.predictHotkey;
+  composeHotkeyBtn.textContent = currentSettings.composeHotkey;
+  yoloHotkeyBtn.textContent = currentSettings.yoloHotkey;
+  swapHotkeyBtn.textContent = currentSettings.swapHotkey;
 }
 
 // Update model options based on selected provider
@@ -133,6 +201,7 @@ async function saveSettings(): Promise<void> {
     targetLanguage: targetLanguageInput.value,
     formality: formalitySelect.value as 'auto' | 'casual' | 'polite' | 'formal',
     customPrompt: customPromptTextarea.value || undefined,
+    predictHotkey: currentSettings.predictHotkey,
     composeHotkey: currentSettings.composeHotkey,
     yoloHotkey: currentSettings.yoloHotkey,
     swapHotkey: currentSettings.swapHotkey,
@@ -278,6 +347,15 @@ document.addEventListener('DOMContentLoaded', () => {
   testStatusDiv = document.getElementById('testStatus') as HTMLDivElement;
   usageContentDiv = document.getElementById('usageContent') as HTMLDivElement;
   resetUsageBtn = document.getElementById('resetUsage') as HTMLButtonElement;
+  predictHotkeyBtn = document.getElementById('predictHotkey') as HTMLButtonElement;
+  composeHotkeyBtn = document.getElementById('composeHotkey') as HTMLButtonElement;
+  yoloHotkeyBtn = document.getElementById('yoloHotkey') as HTMLButtonElement;
+  swapHotkeyBtn = document.getElementById('swapHotkey') as HTMLButtonElement;
+
+  setupHotkeyCapture(predictHotkeyBtn, 'predictHotkey');
+  setupHotkeyCapture(composeHotkeyBtn, 'composeHotkey');
+  setupHotkeyCapture(yoloHotkeyBtn, 'yoloHotkey');
+  setupHotkeyCapture(swapHotkeyBtn, 'swapHotkey');
 
   // Event listeners
   providerSelect.addEventListener('change', () => {

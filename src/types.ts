@@ -16,6 +16,7 @@ export interface ProviderConfig {
 }
 
 export interface Settings extends TranslationConfig, ProviderConfig {
+  predictHotkey: string;
   composeHotkey: string;
   yoloHotkey: string;
   swapHotkey: string;
@@ -100,6 +101,8 @@ export const DEFAULT_SETTINGS: Settings = {
   sourceLanguage: 'English',
   targetLanguage: 'Japanese',
   formality: 'auto',
+  // Ctrl+/ default avoids the CJK IME Ctrl+Space conflict (D-03 / 05-RESEARCH Pitfall 1).
+  predictHotkey: 'Ctrl+/',
   composeHotkey: 'Ctrl+Y',
   yoloHotkey: 'Ctrl+Shift+Y',
   swapHotkey: 'Ctrl+Shift+S',
