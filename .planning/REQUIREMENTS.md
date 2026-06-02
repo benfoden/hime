@@ -1,58 +1,62 @@
-# Requirements: hime — Milestone v1.1 Inline Predictions
+# Requirements: hime — Milestone v1.2 Translated Search
 
-**Milestone goal:** Live 2-3 word inline completions in any text field, any language, with cycleable alternate variations.
+**Milestone goal:** An extension page where the user searches in their own language, the query runs against Brave Search in the target language, and results render as a classic Google-style SERP translated back into the user's language, each linking to the original page.
 
-**Status:** Roadmap complete → Planning pending
+**Status:** Requirements defined → Roadmap pending
 
 ---
 
-## v1.1 Requirements
+## v1.2 Requirements
 
-### Prediction Engine (PRED)
+### Search & Query (SRCH)
 
-- [x] **PRED-01**: While typing in an editable field, user sees a 2-3 word completion rendered as inline ghost text after a configurable debounce.
-- [x] **PRED-02**: User can accept the current suggestion with Tab (or Enter), inserting it undo-safely via `document.execCommand('insertText')`.
-- [x] **PRED-03**: User can dismiss the current suggestion with Esc without altering field content.
-- [x] **PRED-04**: Predictions are generated from surrounding field context (text before the cursor) via the existing background service-worker provider layer.
-- [x] **PRED-05**: Continuing to type supersedes the showing suggestion (ghost text never blocks or corrupts normal typing); a new prediction refreshes after debounce.
-- [x] **PRED-06**: Ghost text renders inline at the cursor without shifting or mutating the user's committed text, and clears cleanly on blur/focus-leave.
+- [ ] **SRCH-01**: From the toolbar popup, the user can open a bundled Translated Search page (`search.html`) via `chrome.tabs.create(getURL(...))`.
+- [ ] **SRCH-02**: The user enters a query in their own (source) language; on submit it is translated to the configured target language using an explicit source→target direction (NOT the auto-flip used by in-field translate).
+- [ ] **SRCH-03**: The translated query is shown to the user as a read-only disclosure line (e.g. "Searching in Japanese for: …") above the results — not editable.
+- [ ] **SRCH-04**: The translated query is sent to the Brave Search API and web results are retrieved.
+- [ ] **SRCH-05**: When source language == target language, all translation is skipped (no-op short-circuit) and the search runs directly, with a notice that it searched directly in that language.
+- [ ] **SRCH-06**: Submit is debounced (~1s) to avoid duplicate Brave calls / rate-limit waste.
 
-### Variations (VAR)
+### Results SERP (SERP)
 
-- [ ] **VAR-01**: Each prediction request yields multiple alternate completions, up to a configurable maximum.
-- [ ] **VAR-02**: User can cycle through alternates with an in-field keybinding while a suggestion is showing (content-script handler — does not consume a Chrome commands hotkey slot).
-- [ ] **VAR-03**: Accepting inserts whichever alternate is currently displayed.
+- [ ] **SERP-01**: Results render as a classic Google-style SERP: each row shows favicon + hostname, a translated title that links to the result, and a translated snippet.
+- [ ] **SERP-02**: Each result link's `href` is the original Brave-provided URL verbatim — never translated, never mutated, never proxied.
+- [ ] **SERP-03**: Result snippet/title text is rendered XSS-safely — Brave `description` HTML (e.g. `<strong>` highlights) is stripped to plain text; content is never assigned to `innerHTML`.
+- [ ] **SERP-04**: While the async pipeline runs, skeleton rows are shown (no blank screen during the 2–8s latency).
+- [ ] **SERP-05**: Empty results, invalid/missing API key, network failure, and quota-exceeded (HTTP 429) each show a distinct, human-readable state — 429 reads as "search quota exceeded" and does not auto-retry.
 
-### Settings (SET)
+### Result Translation Pipeline (XLT)
 
-- [ ] **SET-01**: User can enable/disable inline prediction globally in the options page.
-- [ ] **SET-02**: User can configure the debounce delay (ms before a prediction fires).
-- [ ] **SET-03**: User can configure the maximum number of alternate variations.
-- [ ] **SET-04**: User can configure trigger behavior (minimum characters before predicting; auto vs. manual trigger).
-- [ ] **SET-05**: User can configure the in-field cycle keybinding.
+- [ ] **XLT-01**: All network calls (Brave Search and LLM translation) are routed through the background service worker via a single `searchTranslated` message type; no API key is ever read or fetched from the search page itself.
+- [ ] **XLT-02**: Result titles and snippets are translated in one batched LLM call using a keyed JSON object (`{"0": …, "1": …}`), reusing the existing OpenAI/Gemini/OpenRouter provider abstraction.
+- [ ] **XLT-03**: After the batch translation returns, the result count is asserted against the input count; on mismatch the affected items fall back to raw untranslated text (never blank, never mismapped).
+- [ ] **XLT-04**: Only `title` and `description` fields are sent to the translation prompt — URLs/hostnames are never passed to translation.
+- [ ] **XLT-05**: The pipeline renders progressively (skeleton → raw Brave results → translated overlay) so a service-worker timeout or translation failure still leaves usable untranslated results.
 
-### Language-Agnostic (LANG)
+### Settings (SSET)
 
-- [x] **LANG-01**: Inline prediction works in `<input>`, `<textarea>`, and `contenteditable` elements, reusing v1.0 field detection (skips password, readonly, hidden, disabled fields).
-- [x] **LANG-02**: Predictions complete in the field's own language/context and are independent of the translate target-language setting (no forced translation of the completion).
+- [ ] **SSET-01**: The options page has a Brave Search API key field (BYOK), stored in `chrome.storage` alongside the existing LLM keys.
+- [ ] **SSET-02**: The options page can test/validate the Brave key (consistent with the existing "Test Connection" pattern), or surfaces a clear "key required" message when absent.
 
 ---
 
 ## Future Requirements (deferred, not this milestone)
 
-- Streaming token-by-token ghost text (current scope: single debounced 2-3 word block)
-- Per-site enable/disable allowlist for prediction
-- Acceptance telemetry / suggestion quality tuning
-- Multi-line / paragraph-level completion
+- Pagination / "load more" results
+- Image / video / news result tabs
+- Editable translated query (re-run on edit)
+- Per-result "show original" hover/toggle
+- Auto-detect source language (v1.2 uses the settings value)
+- Caching of recent searches/translations
 
 ---
 
-## Out of Scope (v1.1)
+## Out of Scope (v1.2)
 
-- **Local/offline prediction model** — BYOK API model only; no on-device inference (consistent with v1.0).
-- **Prediction in canvas editors (Google Docs)** — same canvas limitation as v1.0; graceful decline.
-- **Rebinding accept/dismiss keys (Tab/Enter/Esc)** — these are fixed editor-idiomatic keys; only the cycle key is configurable.
-- **Predicting from text after the cursor** — context window is text-before-cursor only for v1.1.
+- **Backend / hosted web app** — search page is a bundled extension page; BYOK, no server, no proxy.
+- **Link proxying / click-to-translated-page** — links always go to the original untranslated source.
+- **Non-Brave search providers** — Brave only for v1.2; abstraction can come later if needed.
+- **Translate-as-you-type query translation** — query translates on submit, not per keystroke.
 
 ---
 
@@ -60,21 +64,34 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PRED-01 | Phase 5 | Complete |
-| PRED-02 | Phase 5 | Complete |
-| PRED-03 | Phase 5 | Complete |
-| PRED-04 | Phase 5 | Complete |
-| PRED-05 | Phase 5 | Complete |
-| PRED-06 | Phase 5 | Complete |
-| LANG-01 | Phase 5 | Complete |
-| LANG-02 | Phase 5 | Complete |
-| VAR-01 | Phase 6 | Pending |
-| VAR-02 | Phase 6 | Pending |
-| VAR-03 | Phase 6 | Pending |
-| SET-01 | Phase 7 | Pending |
-| SET-02 | Phase 7 | Pending |
-| SET-03 | Phase 7 | Pending |
-| SET-04 | Phase 7 | Pending |
-| SET-05 | Phase 7 | Pending |
+| SRCH-01 | TBD | Pending |
+| SRCH-02 | TBD | Pending |
+| SRCH-03 | TBD | Pending |
+| SRCH-04 | TBD | Pending |
+| SRCH-05 | TBD | Pending |
+| SRCH-06 | TBD | Pending |
+| SERP-01 | TBD | Pending |
+| SERP-02 | TBD | Pending |
+| SERP-03 | TBD | Pending |
+| SERP-04 | TBD | Pending |
+| SERP-05 | TBD | Pending |
+| XLT-01 | TBD | Pending |
+| XLT-02 | TBD | Pending |
+| XLT-03 | TBD | Pending |
+| XLT-04 | TBD | Pending |
+| XLT-05 | TBD | Pending |
+| SSET-01 | TBD | Pending |
+| SSET-02 | TBD | Pending |
 
-**Coverage:** 16/16 requirements mapped ✓
+**Coverage:** 18 requirements (phase mapping assigned by roadmapper).
+
+---
+
+## Paused — v1.1 Inline Predictions (NOT this milestone)
+
+v1.1 is paused, not archived. Phase 5 shipped (PRED-*/LANG-* complete) but is shelved behind `PREDICT_ENABLED=false` in `content.ts` with the Predict hotkey row hidden in `options.html`. Phases 6 (VAR-*) and 7 (SET-*) are unbuilt. Resume by flipping the flag, unhiding `#predictHotkeyRow`, and roadmapping the VAR/SET requirements below.
+
+- PRED-01..06 — ghost-text engine (complete, shelved)
+- LANG-01..02 — language-agnostic field support (complete, shelved)
+- VAR-01..03 — alternate variations & cycling (unbuilt)
+- SET-01..05 — prediction settings (unbuilt; note SET-03 configurable trigger partially landed early in Phase 5)
