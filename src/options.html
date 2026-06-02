@@ -100,7 +100,8 @@
     <section class="hotkeys">
       <h2>Hotkeys</h2>
       <p class="help-text">Click a field, then press the key combination you want (must include Ctrl, Shift, or Alt). Press Esc to cancel.</p>
-      <div class="hotkey-row">
+      <!-- Ghost-text inline prediction shelved (v1.1 paused) — hidden, may return. -->
+      <div class="hotkey-row" id="predictHotkeyRow" hidden>
         <label for="predictHotkey">Predict (inline completion)</label>
         <button type="button" class="hotkey-capture" id="predictHotkey"></button>
       </div>
@@ -117,8 +118,7 @@
         <button type="button" class="hotkey-capture" id="swapHotkey"></button>
       </div>
       <ul>
-        <li><kbd>Tab</kbd> / <kbd>Enter</kbd> — Accept inline suggestion</li>
-        <li><kbd>Escape</kbd> — Dismiss suggestion / cancel compose</li>
+        <li><kbd>Escape</kbd> — Cancel compose</li>
       </ul>
       <p class="help-text">Click <strong>Save Settings</strong> to apply. Changes take effect immediately in open tabs.</p>
     </section>

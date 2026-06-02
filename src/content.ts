@@ -20,6 +20,11 @@ let composeState: {
 // Prediction engine state and helpers (Phase 05-02)
 // ---------------------------------------------------------------------------
 
+// Ghost-text inline prediction shelved while v1.1 is paused (helm decision 2026-06-02).
+// Flag gates the only live entrypoint (the manual predict hotkey); the engine code is
+// left intact so the feature can be re-enabled by flipping this back to true.
+const PREDICT_ENABLED = false;
+
 // D-01 default: manual trigger only; auto (predict-as-you-type) is opt-in.
 // Phase 7 (SET-01/SET-02) will expose this in options and set it from storage.
 // Using let (not const) so Phase 7 can update it without a code change.
@@ -885,7 +890,7 @@ document.addEventListener('keydown', (event) => {
   // conflicts with the CJK IME toggle on Linux (fcitx/ibus) at the OS level; the
   // OS may capture it before the browser sees it. Key is now user-configurable
   // (SET-03). See 05-RESEARCH.md Pitfall 1 for the full analysis.
-  if (matchesHotkey(event, parsedHotkeys.predict)) {
+  if (PREDICT_ENABLED && matchesHotkey(event, parsedHotkeys.predict)) {
     event.preventDefault();
     event.stopPropagation();
     schedulePrediction(element, 'manual');
