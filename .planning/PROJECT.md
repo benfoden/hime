@@ -8,15 +8,22 @@ A Chrome extension that lets you type in English and get inline Japanese (or any
 
 Type English, get natural Japanese inline — without breaking your keyboard flow.
 
-## Current Milestone: v1.1 Inline Predictions
+## Current Milestone: v1.2 Translated Search
 
-**Goal:** Live 2-3 word inline completions in any text field, any language, with cycleable alternate variations.
+**Goal:** An extension page where the user searches in their own language, the query runs against Brave Search in the target language, and results render as a classic Google-style SERP translated back into the user's language, each linking to the original page.
 
 **Target features:**
-- Ghost-text inline prediction engine — debounced context capture → provider call → render 2-3 word suggestion as inline ghost text
-- Multiple alternate variations per prediction, cycled via in-field keybinding
-- Tab/Enter to accept (undo-safe `execCommand insertText`), Esc to dismiss
-- Settings: enable/disable, debounce timing, max variations, trigger behavior, keybindings
+- Translated-search page bundled in the extension (new surface)
+- Query translation (user language → target language) before search
+- Brave Search API integration, BYOK key in settings (stored in chrome.storage like LLM keys)
+- Result translation (target language → user language) via existing OpenAI/Gemini/OpenRouter provider layer
+- Results UI: classic SERP layout showing translated title/snippet, links back to original (untranslated) source pages
+
+## Paused Milestone: v1.1 Inline Predictions
+
+**Status:** PAUSED 2026-06-02 (not archived). Phase 5 ghost-text engine built but shelved behind `PREDICT_ENABLED=false` (content.ts) with the Predict hotkey row hidden in options. Phases 6 (alternate variations/cycling) and 7 (prediction settings) unbuilt. Resume by flipping the flag, unhiding `#predictHotkeyRow`, and roadmapping phases 6–7.
+
+**Goal:** Live 2-3 word inline completions in any text field, any language, with cycleable alternate variations.
 
 ## Requirements
 
@@ -45,7 +52,8 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 
 ### Active
 
-- v1.1 Inline Predictions — see REQUIREMENTS.md (ghost-text completions, alternate variations, cycle keybinding, settings)
+- v1.2 Translated Search — see REQUIREMENTS.md (translated-search page, query+result translation, Brave Search BYOK, classic SERP UI)
+- v1.1 Inline Predictions — PAUSED (phase 5 shelved behind PREDICT_ENABLED flag; phases 6–7 unbuilt)
 
 ### Out of Scope (v1.0)
 
@@ -120,4 +128,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-30 — milestone v1.1 Inline Predictions started*
+*Last updated: 2026-06-02 — milestone v1.2 Translated Search started (v1.1 paused)*

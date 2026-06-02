@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Inline Predictions
-status: verifying
-stopped_at: Completed 05-01-PLAN.md — ready for 05-02
-last_updated: "2026-05-31T14:03:29.911Z"
-last_activity: 2026-05-31
+milestone: v1.2
+milestone_name: Translated Search
+status: planning
+last_updated: "2026-06-02T17:54:55.498Z"
+last_activity: 2026-06-02
 progress:
-  total_phases: 3
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-05-30)
 
 ## Current Position
 
-Phase: 05 (ghost-text-prediction-engine) — EXECUTING
-Plan: 2 of 2
-Status: Phase complete — ready for verification
-Last activity: 2026-05-31
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-02 — Milestone v1.2 started
 
 ## Performance Metrics
 
