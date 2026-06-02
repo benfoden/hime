@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Translated Search
 status: planning
-last_updated: "2026-06-02T17:54:55.498Z"
+last_updated: "2026-06-02"
 last_activity: 2026-06-02
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,69 +17,51 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-30)
+See: .planning/PROJECT.md (updated 2026-06-02)
 
 **Core value:** Type English, get natural Japanese inline — without breaking your keyboard flow.
-**Current focus:** Phase 05 — ghost-text-prediction-engine
+**Current milestone:** v1.2 Translated Search (phases 8-11)
+**Current focus:** Phase 8 — API Integration Scaffold (ready to plan)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-06-02 — Milestone v1.2 started
+Phase: 8 of 11 (API Integration Scaffold)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-06-02 — v1.2 roadmap created; phases 8-11 defined
+
+Progress (v1.2): [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
-**Velocity:**
-
-- Total plans completed: 6 (Phase 1, pre-GSD)
-- Average duration: n/a (Phase 1 was bulk build)
-- Total execution time: n/a
+**Velocity (v1.2):**
+- Total plans completed: 0
+- Average duration: — min
+- Total execution time: — hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Core Build | 1 | n/a | n/a |
-| 02.1 | 2 | - | - |
-| 03 | 3 | - | - |
-| 04 | 0 | - | - |
-| 5. Ghost-Text Engine | 1 | 4m 15s | 4m 15s |
-| 6. Variations & Cycling | 0 | - | - |
-| 7. Prediction Settings | 0 | - | - |
-
-**Recent Trend:** Baseline (no post-GSD plans yet)
+| - | - | - | - |
 
 *Updated after each plan completion*
-| Phase 05 P02 | 5m 26s | 3 tasks | 2 files |
 
 ## Accumulated Context
 
-### Roadmap Evolution
-
-- Phase 02.1 inserted after Phase 2: OpenRouter Provider Support (URGENT)
-- v1.1 Inline Predictions roadmapped: Phase 5 (engine), Phase 6 (variations), Phase 7 (settings)
-
 ### Decisions
 
-See PROJECT.md Key Decisions table.
+Key architecture decisions for v1.2 (see PROJECT.md for full log):
+- All network calls (Brave + LLM) routed through background service worker via `searchTranslated` message — no API key exposure on the search page
+- Batch result translation uses keyed JSON object (`{"0": ..., "1": ...}`) with count assertion + raw fallback — never plain array
+- Three-stage progressive render: skeleton → raw Brave results → translated overlay
+- `chrome_url_overrides` rejected; page opened via `chrome.tabs.create(getURL('search.html'))`
+- XSS: Brave `description` HTML stripped to plain text; never assigned to `innerHTML`
+- Query translation uses explicit source→target direction — bypasses the auto-flip in existing `translateText()`
 
-Recent decisions affecting current work:
-
-- **Phase 1**: `document.execCommand('insertText')` is deprecated but accepted — no undo-safe alternative exists; monitor Chrome releases
-- **Phase 2**: Auto-formality as default — LLM infers tone from input; needs validation testing before trusting
-- **Phase 3**: Google Docs contenteditable behavior is the highest-risk unknown — may require graceful "unsupported" message rather than a fix
-- **02-01**: node --test 'test/**/*.mjs' glob used (not bare directory) — Node 24 requires explicit file pattern for test runner
-- **02-01**: type:module added to package.json — compiled dist/*.js is ES module format, avoids reparsing overhead
-- **02-01**: ErrorKind re-exported from types.ts — single canonical import site for Plans 02 and 03
-- **v1.1**: Cycle keybinding handled in content script (VAR-02), not Chrome commands — preserves the 4-hotkey cap (3 already used)
-- **05-01**: predict() implemented alongside interface types — TypeScript compilation requires all interface members at once; all three providers received predict() in Task 1 GREEN phase
-- **05-01**: sanitizeSuggestion uses /[\x00-\x1F\x7F-\x9F]/g for C0/C1 control char stripping (plan had garbled regex)
-- **05-01**: max_tokens:8 chosen for provider predict() calls — CJK-friendly per research recommendation
-- **05-02**: PREDICT_TRIGGER_MODE changed from const to let — TypeScript narrows const literals causing TS2367; let allows Phase 7 to assign from storage at runtime
-- **05-02**: Ghost Esc wired in non-capture keydown listener alongside compose-Esc — capture-phase listener is ctrl-gated so Esc lives in the non-capture listener per D-09 precedence rule
-- **05-02**: renderGhost stub used in Task 1 then replaced in Task 2 — TypeScript requires all called functions declared at compile time; stub kept each task independently compilable
+Carried from v1.1:
+- `document.execCommand('insertText')` accepted as deprecated but undo-safe; monitor Chrome releases
+- `Ctrl+Shift+T` reopens closed tabs — known conflict; unresolved
 
 ### Pending Todos
 
@@ -87,19 +69,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- **Phase 2**: `Ctrl+Shift+T` reopens closed tabs in Chrome — default hotkey conflict needs verification before Web Store submission
-- **Phase 3 RESOLVED**: Shadow DOM traversal confirmed working — one-level open root check sufficient for Gmail
-- **Phase 3 RESOLVED**: Google Docs canvas detection implemented — graceful degradation, not a fix (correct approach)
-
-## Deferred Items
-
-| Category | Item | Status | Deferred At |
-|----------|------|--------|-------------|
-| *(none)* | | | |
+- Brave free tier: ~1,000 queries/mo; 429 must surface clearly during dev to avoid silent quota drain
+- Service-worker termination risk on slow connections: 3-stage pipeline can reach 15-25s; progressive render is the mitigation
 
 ## Session Continuity
 
-Last session: 2026-05-31T14:03:29.908Z
-Stopped at: Completed 05-01-PLAN.md — ready for 05-02
-Resume file: 
-None
+Last session: 2026-06-02
+Stopped at: v1.2 roadmap created — phases 8-11 defined, ready to plan Phase 8
+Resume file: None

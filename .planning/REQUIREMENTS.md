@@ -2,7 +2,7 @@
 
 **Milestone goal:** An extension page where the user searches in their own language, the query runs against Brave Search in the target language, and results render as a classic Google-style SERP translated back into the user's language, each linking to the original page.
 
-**Status:** Requirements defined → Roadmap pending
+**Status:** Roadmap complete — ready to plan Phase 8
 
 ---
 
@@ -64,26 +64,26 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SRCH-01 | TBD | Pending |
-| SRCH-02 | TBD | Pending |
-| SRCH-03 | TBD | Pending |
-| SRCH-04 | TBD | Pending |
-| SRCH-05 | TBD | Pending |
-| SRCH-06 | TBD | Pending |
-| SERP-01 | TBD | Pending |
-| SERP-02 | TBD | Pending |
-| SERP-03 | TBD | Pending |
-| SERP-04 | TBD | Pending |
-| SERP-05 | TBD | Pending |
-| XLT-01 | TBD | Pending |
-| XLT-02 | TBD | Pending |
-| XLT-03 | TBD | Pending |
-| XLT-04 | TBD | Pending |
-| XLT-05 | TBD | Pending |
-| SSET-01 | TBD | Pending |
-| SSET-02 | TBD | Pending |
+| SRCH-01 | Phase 11 | Pending |
+| SRCH-02 | Phase 11 | Pending |
+| SRCH-03 | Phase 11 | Pending |
+| SRCH-04 | Phase 8 | Pending |
+| SRCH-05 | Phase 8 | Pending |
+| SRCH-06 | Phase 8 | Pending |
+| SERP-01 | Phase 9 | Pending |
+| SERP-02 | Phase 9 | Pending |
+| SERP-03 | Phase 9 | Pending |
+| SERP-04 | Phase 9 | Pending |
+| SERP-05 | Phase 9 | Pending |
+| XLT-01 | Phase 8 | Pending |
+| XLT-02 | Phase 10 | Pending |
+| XLT-03 | Phase 10 | Pending |
+| XLT-04 | Phase 10 | Pending |
+| XLT-05 | Phase 10 | Pending |
+| SSET-01 | Phase 8 | Pending |
+| SSET-02 | Phase 8 | Pending |
 
-**Coverage:** 18 requirements (phase mapping assigned by roadmapper).
+**Coverage:** 18/18 requirements mapped.
 
 ---
 
