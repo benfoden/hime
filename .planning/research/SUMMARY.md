@@ -1,168 +1,67 @@
-# Project Research Summary
+# v1.2 Translated Search — Research Summary
 
-**Project:** hime — Chrome Extension (MV3) AI-powered inline translation IME
-**Domain:** Browser extension, keyboard-native composition/translation tool
-**Researched:** 2026-05-24
-**Confidence:** HIGH
+Synthesis of STACK.md, FEATURES.md, ARCHITECTURE.md, PITFALLS.md (researched 2026-06-02).
+**Overall confidence: HIGH** — decisions derived from the actual codebase + verified Chrome MV3 behavior + Brave API official docs.
+(v1.0 MVP research history is preserved in MILESTONES.md and PROJECT.md.)
 
-## Executive Summary
+## Stack Additions
 
-Hime is a keyboard-native inline translation extension for Chrome, built on MV3 with TypeScript and no runtime dependencies. Unlike every competitor in the space (Google Translate, DeepL, Yomitan), hime treats translation as a *writing* tool — the user types in their source language and the translated text lands directly in the active field — rather than a reading aid. This "compose in English, output in Japanese" workflow is genuinely unoccupied in the market and constitutes the product's primary moat. The v1.0 implementation is complete and functional, with the stack and architecture both well-validated.
+| Addition | Detail |
+|---|---|
+| **Brave Search REST API** | `GET https://api.search.brave.com/res/v1/web/search`; auth header `X-Subscription-Token` (not query param); returns `title`, `url`, `description`, `meta_url.hostname`, `meta_url.favicon` per result |
+| **`src/brave-search.ts`** | New `BraveSearchClient` fetch wrapper; no npm package; zero new runtime deps |
+| **manifest `host_permissions`** | Add `"https://api.search.brave.com/*"` — required for service-worker CORS bypass |
+| **`settings.braveApiKey`** | New field on existing `Settings` interface; chrome.storage.local; one new password input on options page |
+| **5 new source files** | `brave-search.ts`, `search-util.ts`, `search-renderer.ts`, `search.ts`, `search.html`/`search.css` |
+| **No build tooling changes** | Plain `tsc` + copy-assets sufficient; no Vite migration |
+| **Brave free tier** | ~$5/mo credit (~1,000 queries); effective rate ~1 req/s; handle 429 explicitly |
 
-The recommended approach for v1.x is hardening over expansion: validate prompt quality across adversarial inputs, verify cross-site compatibility on the highest-traffic complex editors (Google Docs, Gmail, Notion, Slack), and resolve the handful of known pitfalls before submitting to the Chrome Web Store. The architecture is already correct — background-as-API-gateway, provider abstraction, compose state owned by the content script — and does not need structural changes to ship.
+## Core Architecture Decision
 
-The primary risks are all implementation-level, not architectural: LLM output containing wrapper text instead of a clean translation, `contenteditable` editors (particularly Google Docs) ignoring `document.execCommand('insertText')`, and the deprecated-but-still-working `execCommand` being the only undo-safe text replacement API available. These are known, addressable, and mapped to specific work items.
+**Route every network call (Brave Search AND LLM translation) through the existing background service worker** via a single new `searchTranslated` message type. The search page (`search.ts`) sends ONE message for the whole pipeline (translate query → Brave fetch → batch-translate results) and receives a ready-to-render `SearchResult[]`. Keeps API-key access centralized in `background.ts` (matching the LLM-call pattern); the SERP page is a thin UI controller + pure renderer.
 
-## Key Findings
+**Build order:** types → `BraveSearchClient` → settings UI → background handler → search utilities → renderer → search page → popup/omnibox entry point.
 
-### Recommended Stack
+Page opened via `chrome.tabs.create({ url: chrome.runtime.getURL('search.html') })`. `chrome_url_overrides` is the WRONG choice (hijacks new-tab page).
 
-The existing v1.0 stack is appropriate and intentional: TypeScript 5.2+, Chrome MV3, `@types/chrome`, plain `tsc` build, and zero runtime npm dependencies. The no-dependency stance is correct for a BYOK extension — native `fetch()` covers all API calls, `chrome.storage` handles persistence, and vanilla DOM handles the simple popup/options UI. The only meaningful build tooling gap is the absence of Vite + CRXJS, which would provide HMR during development and proper bundling; migration is low-risk and worth addressing before significant additional feature work.
+## Feature Table Stakes (v1)
 
-**Core technologies:**
-- **TypeScript 5.2.2 + @types/chrome 0.0.246:** Strict mode catches Chrome API misuse at compile time; essential for cross-context code (service worker vs content script have different available APIs)
-- **Chrome MV3 service worker:** Platform standard; mandates the background-as-gateway pattern that correctly handles CSP constraints
-- **Direct `fetch()` (no SDK):** CSP-safe, zero bundle overhead; OpenAI and Gemini REST APIs are simple enough that the Node SDKs add complexity without benefit
-- **Vite + @crxjs/vite-plugin (recommended addition):** HMR + correct MV3 bundling; low-risk migration from plain tsc
+- Classic SERP card: favicon + hostname, translated title link, translated snippet. `href` = original `url` **verbatim — never mutated, never translated**.
+- Query translation (explicit source→target direction, NOT the auto-flip in current `translateText()`) before the Brave call.
+- Single `searchTranslated` round-trip; background owns all three steps.
+- Batch result translation as a **keyed JSON object** `{"0": title, "1": snippet, ...}` with count assertion + raw-text fallback. NEVER a plain array.
+- Translated-query disclosure line ("Searching in Japanese for: ___"), read-only — critical for trust.
+- Skeleton rows during async phases (2–8s total latency makes a blank page unacceptable).
+- Source == target no-op short-circuit (compare language codes before first LLM call).
+- 429 handling with a distinct "search quota exceeded" message; 1s submit debounce.
+- Empty / bad-key / network-failure / worker-termination states.
+- XSS-safe snippet rendering (Brave `description` contains raw `<strong>` HTML — strip to plain text, never `innerHTML`).
 
-**Missing dev tooling (recommended additions):** `web-ext` for live reload, `vitest` for unit tests on provider/prompt logic, `eslint` + `@typescript-eslint` for lint.
+### Explicit v1 Anti-Features (do NOT build)
+Editable translated query · link proxying/click-to-translated-page · pagination/load-more · image/video result tabs · auto-detect source language (use settings value) · translate-as-you-type.
 
-### Expected Features
+## Watch-Out-For (top pitfalls)
 
-V1.0 is fully shipped. The immediate work is validation and distribution, not new features.
+1. **Brave key leakage / CORS** — any Brave `fetch` outside `background.ts` exposes the key in DevTools and fails CORS. Service-worker-only.
+2. **Source == target** — without the guard, same-language settings waste quota / paraphrase instead of translate.
+3. **Unhandled 429** — free tier exhausts fast under dev testing; surface a specific error, do not retry.
+4. **Snippet XSS via `innerHTML`** — Brave `description` has `<strong>` highlight tags; strip to text. Verify with a `<script>alert(1)</script>` mock snippet pre-ship.
+5. **URL fields in translation batch** — whitelist only `title` + `description`; never pass `url`/`hostname` to the prompt (translated URLs → 404s).
+6. **Batch count mismatch (silent corruption)** — LLMs drop/merge/reorder array items, mapping wrong titles to wrong URLs. Keyed object + `Object.keys(parsed).length === expectedCount` assertion + raw fallback. `json_object` guarantees valid JSON, NOT correct length.
+7. **Service-worker termination mid-chain** — 3-stage serial chain can reach 15–25s. Progressive render: skeleton → raw Brave results after step 2 → translated overlay after step 3 (also the graceful-degradation path).
+8. **Auto-direction-flip in `translateText()`** — existing helper auto-flips on detecting Japanese; for search, call the provider with explicit source/target or add a `translateTextExplicit()` bypass.
 
-**Must have (table stakes — all done):**
-- Works in `<input>`, `<textarea>`, and `contenteditable` elements
-- Keyboard trigger (no mouse required) — `Ctrl+Shift+T`, `Ctrl+Shift+Y`
-- Undo support via `document.execCommand('insertText')`
-- Settings/configuration page with API key and provider selection
-- Clear on/off visual feedback (blue border + badge)
-- Error visibility (red "ERR" badge)
-- Skips sensitive fields (password, readonly, hidden, disabled)
+## Suggested Phase Structure (roadmapper finalizes)
 
-**Should have (differentiators — all done):**
-- Compose mode: write in source language, output replaces text in-place
-- YOLO mode: one-shot hotkey for fast short translations
-- Auto-formality inference (LLM reads tone, picks register)
-- 4-level formality control (Auto/Casual/Polite/Formal)
-- Language swap hotkey + badge persistence
-- Custom prompt override for domain-specific vocabulary
-- Multi-provider support (OpenAI + Gemini) via abstraction layer
-- BYOK with session-only key storage option
+| Phase | Name | Key Deliverable |
+|---|---|---|
+| 8 | API Integration Scaffold | `searchTranslated` message + Brave client + Brave-key setting + source==target guard + 429 handling |
+| 9 | SERP Rendering | `SearchResult` type (immutable URL), XSS-safe renderer, skeleton/empty/error states |
+| 10 | Translation Integration | Keyed batch translation, count assertion, raw fallback, three-stage progressive UX |
+| 11 | Page Wiring + Entry Point | Full `search.ts` wired, debounce, popup/omnibox entry |
 
-**Defer (v2+):**
-- Firefox/Safari port — real porting effort, not a toggle
-- Additional LLM providers (Claude, Mistral, Ollama) — provider abstraction makes this easy when there's demand
-- Per-site language memory — high UX value; defer until v1 is stable
-- Translation history/cache — nice for power users; not essential
-- Glossary/term overrides — power feature, small segment
-
-**Anti-features (do not build):** streaming/translate-as-you-type, system-wide IME, multiple simultaneous language pairs, offline/local model support, right-click context menu, auto-popup suggestions.
-
-### Architecture Approach
-
-The architecture is MV3-compliant and correct. Three strict layers: background service worker (all API calls, badge control, hotkey routing), content script (DOM state machine, compose/YOLO mode, text replacement), and UI pages (popup + options via `chrome.storage`). The background-as-API-gateway pattern is not a design choice — it is required by MV3's CSP model. The provider interface + registry cleanly isolates LLM-specific logic so adding a provider means adding one file with no other changes. Compose state is correctly owned by the content script (persistent for the page lifetime), not the service worker (which is ephemeral and can be terminated after 30 seconds of inactivity).
-
-**Major components:**
-1. **`background.ts` (service worker)** — LLM API calls, badge control, hotkey-to-content-script dispatch, settings reads; the only layer that can call `fetch()` to external domains
-2. **`content.ts` (content script)** — compose mode state machine, YOLO handler, DOM element detection, undo-safe text replacement via `execCommand`
-3. **`providers/` (openai.ts, gemini.ts)** — `TranslationProvider` interface implementations; swappable with zero background.ts changes
-4. **`options.ts` / `popup.ts`** — settings persistence and status display; communicate via `chrome.storage.local`, not direct messages
-
-### Critical Pitfalls
-
-1. **Service worker termination drops in-flight API calls** — use `chrome.runtime.connect()` persistent ports (not `sendMessage`) for the content-script ↔ service-worker translate exchange; add 15s client-side timeout for user-visible failure
-2. **`contenteditable` editors ignore `execCommand`** — Google Docs, Notion, complex Slack/Discord boxes use virtual DOM layers; `execCommand` mutates the real DOM, desynchronizing their state; needs site-specific testing and possibly fallback `InputEvent` dispatching
-3. **LLM output contains wrapper text** — model returns `"Here is the translation: ..."` instead of clean text; tighten system prompt with explicit no-wrapper constraint + add post-processing strip in background worker; test adversarial inputs
-4. **Shadow DOM inputs invisible to content scripts** — Gmail compose uses shadow DOM; `document.querySelectorAll` doesn't pierce shadow boundaries; need recursive `shadowRoot.activeElement` traversal
-5. **API key leakage via message bus** — never pass raw API error objects to content script (they contain `Authorization` headers); serialize only `{ error: error.message }`; audit all `sendMessage` response payloads before public distribution
-
-## Implications for Roadmap
-
-Based on combined research, the product is functionally complete but not yet distribution-ready. The roadmap is a hardening arc, not a feature-addition arc.
-
-### Phase 1: Prompt Quality Validation
-**Rationale:** The core value proposition (auto-formality, clean output) is only as good as the prompt. This is low-effort, high-risk-if-skipped, and gates everything else — bad output discovered post-launch damages trust.
-**Delivers:** Verified prompt quality across 20+ input types; zero wrapper text in output; auto-formality correct for slang, business, technical, and emoji-heavy inputs
-**Addresses:** Compose mode, YOLO mode, formality control (FEATURES.md — all table stakes)
-**Avoids:** LLM wrapper text pitfall (PITFALLS.md Pitfall 3); prompt injection via page content
-
-### Phase 2: Cross-Site Compatibility
-**Rationale:** The extension targets keyboard-native users who work in Gmail, Slack, Notion, GitHub, Twitter/X — all of these have contenteditable complexity, Shadow DOM, or CSP quirks. Compatibility is the second gate before Web Store submission.
-**Delivers:** Verified compose + YOLO + undo on 8+ major sites; documented unsupported editors; Shadow DOM traversal fix for Gmail; hotkey conflict verification
-**Addresses:** contenteditable table stakes (FEATURES.md); service worker termination, Shadow DOM, hotkey conflict pitfalls (PITFALLS.md Pitfalls 1, 4, 6)
-**Avoids:** Compose mode state machine pitfalls; hotkey conflicts with Chrome's own `Ctrl+Shift+T`
-
-### Phase 3: Security & Distribution Hardening
-**Rationale:** These are not visible features but are required for public distribution — the Web Store review team and privacy-conscious users will check. Rate limiting and key audit prevent embarrassing/costly incidents post-launch.
-**Delivers:** API key audit (no leakage in message bus), 500ms debounce on hotkey, prompt injection delimiter wrapping, Web Store assets (screenshots, privacy policy, store listing)
-**Uses:** Existing provider abstraction + message protocol (ARCHITECTURE.md)
-**Avoids:** API key leakage pitfall (PITFALLS.md Pitfall 5); unbounded text/cost pitfall
-
-### Phase 4: Provider Expansion
-**Rationale:** The provider abstraction (ARCHITECTURE.md) makes this genuinely low-effort. Additional providers expand the BYOK appeal and reduce vendor lock-in concerns. Defer until v1 is stable and there's user signal.
-**Delivers:** Additional LLM providers (Claude, Mistral); model name validation/alias endpoints to handle OpenAI model rename risk
-**Uses:** `TranslationProvider` interface — one new file per provider, no other changes
-**Implements:** Provider registry extension (ARCHITECTURE.md)
-
-### Phase 5: Power User Features
-**Rationale:** These address the highest-value v2 features identified in FEATURES.md. Add only after Web Store launch and user feedback confirms demand.
-**Delivers:** Per-site language memory; translation history/cache; glossary/term overrides
-**Uses:** `chrome.storage.local` (already the settings store; extend schema)
-
-### Phase Ordering Rationale
-
-- **Prompt first, sites second:** A prompt bug discovered during cross-site testing requires re-running site validation. Fixing prompt first makes site testing the final gate.
-- **Security before distribution:** Phase 3 is a prerequisite for Web Store submission, not an optional add-on.
-- **Provider expansion before power features:** Adding providers is low-effort (one file) and expands the potential user base before investing in retention features.
-- **All phases avoid the `execCommand` deprecation risk** by treating it as an accepted known risk to monitor each Chrome major release — no alternative exists.
-
-### Research Flags
-
-Phases likely needing deeper research during planning:
-- **Phase 2 (Cross-site):** Google Docs contenteditable behavior is complex; may need to research `InputEvent` dispatching as a fallback or confirm graceful "unsupported" messaging is the right call
-- **Phase 3 (Web Store submission):** Chrome Web Store review requirements and privacy policy specifics need current documentation check
-
-Phases with well-documented patterns (can proceed without additional research):
-- **Phase 1 (Prompt validation):** Standard LLM output testing; patterns well-established
-- **Phase 4 (Provider expansion):** Pattern already proven twice (OpenAI + Gemini); third provider is a template exercise
-
-## Confidence Assessment
-
-| Area | Confidence | Notes |
-|------|------------|-------|
-| Stack | HIGH | Derived from actual v1.0 codebase; stack is validated, not speculative |
-| Features | HIGH | v1.0 shipped; feature landscape confirmed against implementation + competitor analysis |
-| Architecture | HIGH | Derived from actual source files; MV3 constraints are authoritative and well-documented |
-| Pitfalls | HIGH | Chrome platform behavior pitfalls are well-documented; LLM output pitfalls are established domain knowledge |
-
-**Overall confidence:** HIGH
-
-### Gaps to Address
-
-- **`execCommand` replacement:** No undo-safe replacement API exists as of 2026-05-24. Monitor Chrome release notes each major version. This is accepted technical debt, not an oversight.
-- **Google Docs contenteditable fallback:** Research didn't resolve whether `InputEvent` dispatching works in Google Docs or whether the correct answer is graceful unsupported messaging. Phase 2 testing will determine this.
-- **Model name stability:** `gpt-5-mini`, `gpt-5-nano` are hardcoded strings with known rename risk. Phase 4 should address with model alias endpoints or a version check.
-- **Hotkey default conflict:** `Ctrl+Shift+T` reopens closed tabs in Chrome. Phase 2 testing in a fresh profile will confirm whether Chrome intercepts this before the extension, and if so, default hotkeys should change before Web Store submission.
-
-## Sources
-
-### Primary (HIGH confidence)
-- Codebase inspection (`src/background.ts`, `src/content.ts`, `src/types.ts`, `src/providers/`, `manifest.json`, `package.json`, `tsconfig.json`) — stack, architecture, features
-- Chrome Extension MV3 documentation — service worker lifecycle, CSP constraints, commands API limits (4-command cap), `host_permissions` model
-- `.planning/PROJECT.md` — authoritative requirements and decisions
-
-### Secondary (MEDIUM confidence)
-- CRXJS Vite plugin (`github.com/crxjs/chrome-extension-tools`) — community-standard for Vite + MV3; actively maintained
-- MDN Web Docs — `document.execCommand` deprecation status ("deprecated, Chrome retains for accessibility")
-
-### Tertiary (reference)
-- Google Translate Chrome Extension (published behavior) — competitor feature analysis
-- DeepL Chrome Extension (published behavior) — competitor feature analysis
-- Yomitan (open source, GitHub) — competitor feature analysis
-- OWASP LLM Top 10 (LLM01: Prompt Injection) — security pitfall framing
-- Gemini API reference — `systemInstruction` field requirement for system prompts
+(Phase numbers continue from v1.1.)
 
 ---
-*Research completed: 2026-05-24*
+*Research completed: 2026-06-02*
 *Ready for roadmap: yes*
