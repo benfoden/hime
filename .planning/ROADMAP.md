@@ -33,7 +33,7 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 ### v1.2 Translated Search (Phases 8-11) — ACTIVE
 
 - [x] **Phase 8: API Integration Scaffold** - searchTranslated message type, BraveSearchClient, Brave key setting + test, source==target guard, 429 handling (completed 2026-06-03)
-- [ ] **Phase 9: SERP Rendering** - SearchResult type, XSS-safe renderer, skeleton/empty/error states
+- [x] **Phase 9: SERP Rendering** - SearchResult type, XSS-safe renderer, skeleton/empty/error states (completed 2026-06-03)
 - [ ] **Phase 10: Translation Pipeline** - Keyed-JSON batch translation, count assertion, raw fallback, three-stage progressive render
 - [ ] **Phase 11: Page Wiring & Popup Entry** - Full search.ts wired end-to-end, query translation disclosure line, debounce, popup button
 
@@ -127,8 +127,8 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 
 **Plans**: 2 plans
 
-- [ ] 09-01-PLAN.md — linkedom devDep + DOM-agnostic renderSerp/SerpState core + shared mock fixtures (7 states + XSS probe) + node:test harness (SERP-01..05)
-- [ ] 09-02-PLAN.md — search.html shell + light-theme Google-style search.css + search.ts ?state= entry + 7-state visual walkthrough (SERP-01, SERP-04, SERP-05)
+- [x] 09-01-PLAN.md — linkedom devDep + DOM-agnostic renderSerp/SerpState core + shared mock fixtures (7 states + XSS probe) + node:test harness (SERP-01..05)
+- [x] 09-02-PLAN.md — search.html shell + light-theme Google-style search.css + search.ts ?state= entry + 7-state visual walkthrough (SERP-01, SERP-04, SERP-05)
 
 **UI hint**: yes
 
@@ -173,6 +173,6 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 | 6. Alternate Variations & Cycling | v1.1 | 0/0 | Paused | - |
 | 7. Prediction Settings | v1.1 | 0/0 | Paused | - |
 | 8. API Integration Scaffold | v1.2 | 4/4 | Complete    | 2026-06-03 |
-| 9. SERP Rendering | v1.2 | 0/2 | Planned | - |
+| 9. SERP Rendering | v1.2 | 2/2 | Complete   | 2026-06-03 |
 | 10. Translation Pipeline | v1.2 | 0/0 | Not started | - |
 | 11. Page Wiring & Popup Entry | v1.2 | 0/0 | Not started | - |
