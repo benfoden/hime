@@ -27,7 +27,7 @@
 
 ### Result Translation Pipeline (XLT)
 
-- [ ] **XLT-01**: All network calls (Brave Search and LLM translation) are routed through the background service worker via a single `searchTranslated` message type; no API key is ever read or fetched from the search page itself.
+- [x] **XLT-01**: All network calls (Brave Search and LLM translation) are routed through the background service worker via a single `searchTranslated` message type; no API key is ever read or fetched from the search page itself.
 - [ ] **XLT-02**: Result titles and snippets are translated in one batched LLM call using a keyed JSON object (`{"0": …, "1": …}`), reusing the existing OpenAI/Gemini/OpenRouter provider abstraction.
 - [ ] **XLT-03**: After the batch translation returns, the result count is asserted against the input count; on mismatch the affected items fall back to raw untranslated text (never blank, never mismapped).
 - [ ] **XLT-04**: Only `title` and `description` fields are sent to the translation prompt — URLs/hostnames are never passed to translation.
@@ -35,7 +35,7 @@
 
 ### Settings (SSET)
 
-- [ ] **SSET-01**: The options page has a Brave Search API key field (BYOK), stored in `chrome.storage` alongside the existing LLM keys.
+- [x] **SSET-01**: The options page has a Brave Search API key field (BYOK), stored in `chrome.storage` alongside the existing LLM keys.
 - [ ] **SSET-02**: The options page can test/validate the Brave key (consistent with the existing "Test Connection" pattern), or surfaces a clear "key required" message when absent.
 
 ---
@@ -75,12 +75,12 @@
 | SERP-03 | Phase 9 | Pending |
 | SERP-04 | Phase 9 | Pending |
 | SERP-05 | Phase 9 | Pending |
-| XLT-01 | Phase 8 | Pending |
+| XLT-01 | Phase 8 | Complete |
 | XLT-02 | Phase 10 | Pending |
 | XLT-03 | Phase 10 | Pending |
 | XLT-04 | Phase 10 | Pending |
 | XLT-05 | Phase 10 | Pending |
-| SSET-01 | Phase 8 | Pending |
+| SSET-01 | Phase 8 | Complete |
 | SSET-02 | Phase 8 | Pending |
 
 **Coverage:** 18/18 requirements mapped.
