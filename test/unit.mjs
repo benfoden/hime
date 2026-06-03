@@ -825,3 +825,172 @@ test('Enter accept: gated to input tag only (contenteditable passes through)', (
   const shouldAccept = contentEditableTag === 'input';
   assert.equal(shouldAccept, false, 'Enter should NOT accept ghost in contenteditable');
 });
+
+// ---------------------------------------------------------------------------
+// BraveSearchClient tests (Phase 08-02 Task 2) — Brave Search transport.
+// search() GETs the Brave web-search endpoint with X-Subscription-Token,
+// maps web.results[] → SearchResult[] (urls verbatim, SERP-02), and rejects
+// with classifyBraveError kinds on failure (429→search_quota, 401→auth,
+// network→network). Fetch is mocked via the withFetch helper above.
+// ---------------------------------------------------------------------------
+
+const { BraveSearchClient, BRAVE_ENDPOINT } = await import(path.join(__dirname, '../dist/brave-search.js'));
+
+// Build a mock fetch returning a 200 JSON body, capturing the call args.
+function braveOkFetch(body, captured) {
+  return async (urlStr, init) => {
+    captured.url = urlStr;
+    captured.init = init;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => body,
+    };
+  };
+}
+
+const SAMPLE_BRAVE_BODY = {
+  web: {
+    results: [
+      {
+        title: 'Best Greek Restaurants',
+        url: 'https://example.com/greek?q=1&x=2',
+        description: 'The best <strong>Greek</strong> spots',
+        meta_url: { hostname: 'example.com', favicon: 'https://imgs.search.brave.com/fav1' },
+      },
+      {
+        title: 'No hostname result',
+        url: 'https://nohost.test/path',
+        // meta_url.hostname absent → fall back to new URL(url).hostname
+        meta_url: {},
+        // description absent → '' fallback
+      },
+    ],
+  },
+};
+
+test('BraveSearchClient: 200 maps web.results to SearchResult[] with title/url/description/hostname', async () => {
+  const client = new BraveSearchClient();
+  const captured = {};
+  const results = await withFetch(braveOkFetch(SAMPLE_BRAVE_BODY, captured), () =>
+    client.search('greek food', 'test-key'),
+  );
+  assert.equal(results.length, 2);
+  assert.equal(results[0].title, 'Best Greek Restaurants');
+  assert.equal(results[0].description, 'The best <strong>Greek</strong> spots');
+  assert.equal(results[0].hostname, 'example.com');
+});
+
+test('BraveSearchClient: url is byte-for-byte verbatim from web.results (SERP-02)', async () => {
+  const client = new BraveSearchClient();
+  const captured = {};
+  const results = await withFetch(braveOkFetch(SAMPLE_BRAVE_BODY, captured), () =>
+    client.search('greek food', 'test-key'),
+  );
+  // The url with query params must not be re-encoded or mutated.
+  assert.equal(results[0].url, 'https://example.com/greek?q=1&x=2');
+});
+
+test('BraveSearchClient: missing meta_url.hostname falls back to new URL(url).hostname', async () => {
+  const client = new BraveSearchClient();
+  const captured = {};
+  const results = await withFetch(braveOkFetch(SAMPLE_BRAVE_BODY, captured), () =>
+    client.search('q', 'test-key'),
+  );
+  assert.equal(results[1].hostname, 'nohost.test');
+});
+
+test('BraveSearchClient: missing description → "" (never undefined)', async () => {
+  const client = new BraveSearchClient();
+  const captured = {};
+  const results = await withFetch(braveOkFetch(SAMPLE_BRAVE_BODY, captured), () =>
+    client.search('q', 'test-key'),
+  );
+  assert.equal(results[1].description, '');
+  assert.notEqual(results[1].description, undefined);
+});
+
+test('BraveSearchClient: empty/absent web.results → [] (not a throw)', async () => {
+  const client = new BraveSearchClient();
+  const captured = {};
+  const empty = await withFetch(braveOkFetch({ web: { results: [] } }, captured), () =>
+    client.search('q', 'k'),
+  );
+  assert.deepEqual(empty, []);
+  const absent = await withFetch(braveOkFetch({}, captured), () => client.search('q', 'k'));
+  assert.deepEqual(absent, []);
+});
+
+test('BraveSearchClient: request carries X-Subscription-Token header equal to key + Accept json', async () => {
+  const client = new BraveSearchClient();
+  const captured = {};
+  await withFetch(braveOkFetch(SAMPLE_BRAVE_BODY, captured), () =>
+    client.search('greek food', 'my-secret-key'),
+  );
+  assert.equal(captured.init.headers['X-Subscription-Token'], 'my-secret-key');
+  assert.equal(captured.init.headers['Accept'], 'application/json');
+});
+
+test('BraveSearchClient: request URL contains q, count, result_filter=web params', async () => {
+  const client = new BraveSearchClient();
+  const captured = {};
+  await withFetch(braveOkFetch(SAMPLE_BRAVE_BODY, captured), () =>
+    client.search('greek food', 'k', { count: 5 }),
+  );
+  const u = new URL(captured.url);
+  assert.equal(u.searchParams.get('q'), 'greek food');
+  assert.equal(u.searchParams.get('count'), '5');
+  assert.equal(u.searchParams.get('result_filter'), 'web');
+  assert.equal(u.origin + u.pathname, BRAVE_ENDPOINT);
+});
+
+test('BraveSearchClient: 429 rejects with .kind === "search_quota"', async () => {
+  const client = new BraveSearchClient();
+  await withFetch(
+    async () => ({ ok: false, status: 429, json: async () => ({}) }),
+    async () => {
+      await assert.rejects(
+        () => client.search('q', 'k'),
+        (err) => {
+          assert.equal(err.kind, 'search_quota');
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test('BraveSearchClient: 401 rejects with .kind === "auth"', async () => {
+  const client = new BraveSearchClient();
+  await withFetch(
+    async () => ({ ok: false, status: 401, json: async () => ({ message: 'bad key' }) }),
+    async () => {
+      await assert.rejects(
+        () => client.search('q', 'k'),
+        (err) => {
+          assert.equal(err.kind, 'auth');
+          assert.equal(err.status, 401);
+          return true;
+        },
+      );
+    },
+  );
+});
+
+test('BraveSearchClient: fetch throwing TypeError rejects with .kind === "network"', async () => {
+  const client = new BraveSearchClient();
+  await withFetch(
+    async () => {
+      throw new TypeError('Failed to fetch');
+    },
+    async () => {
+      await assert.rejects(
+        () => client.search('q', 'k'),
+        (err) => {
+          assert.equal(err.kind, 'network');
+          return true;
+        },
+      );
+    },
+  );
+});
