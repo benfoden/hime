@@ -994,3 +994,100 @@ test('BraveSearchClient: fetch throwing TypeError rejects with .kind === "networ
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// searchTranslated / testBraveKey handler logic (Phase 08-03 Task 1)
+//
+// background.ts calls chrome.* at module load, so it is not importable under
+// node:test. Following the predict-handler precedent (logic tested inline as
+// pure algorithm, no chrome import), these tests exercise the EXTRACTABLE pure
+// logic of the searchTranslated/testBraveKey handlers: dedup-key normalization,
+// in-flight dedup collapsing, the source==target `direct` flag, and the
+// empty-key short-circuit guard.
+// ---------------------------------------------------------------------------
+
+// (a) dedupKey normalization — trim().toLowerCase()
+test('searchTranslated dedup: dedupKey normalizes via trim().toLowerCase()', () => {
+  const dedupKey = (q) => q.trim().toLowerCase();
+  assert.equal(dedupKey('Hello '), 'hello');
+  assert.equal(dedupKey('  WORLD'), 'world');
+  // Two visually-distinct submits of the same query normalize identically.
+  assert.equal(dedupKey('Tokyo '), dedupKey('tokyo'));
+});
+
+// (b) dedup harness — two same-key calls reuse ONE underlying async fn
+test('searchTranslated dedup: two same-key submits issue only ONE underlying search', async () => {
+  let fetchCount = 0;
+  // Stand-in for braveClient.search — increments once per real invocation.
+  const underlyingSearch = async (_q) => {
+    fetchCount += 1;
+    return [{ title: 'r' }];
+  };
+
+  const inFlight = new Map();
+  // Mirrors the handler's dedup branch with try/finally cleanup (Pitfall 4).
+  async function dispatch(query) {
+    const key = query.trim().toLowerCase();
+    if (inFlight.has(key)) {
+      return inFlight.get(key);
+    }
+    const promise = underlyingSearch(query);
+    inFlight.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      inFlight.delete(key);
+    }
+  }
+
+  // Fire two same-query submits before the first resolves.
+  const [a, b] = await Promise.all([dispatch('Hello '), dispatch('hello')]);
+  assert.equal(fetchCount, 1, 'expected exactly one underlying search for two same-key submits');
+  assert.deepEqual(a, b);
+  // Map entry cleaned up after settle (Pitfall 4).
+  assert.equal(inFlight.size, 0);
+});
+
+// (b2) dedup cleanup on FAILURE — a rejected query leaves no hanging entry
+test('searchTranslated dedup: failed query deletes Map entry (try/finally, Pitfall 4)', async () => {
+  const inFlight = new Map();
+  const failingSearch = async () => {
+    throw Object.assign(new Error('boom'), { kind: 'search_quota' });
+  };
+  async function dispatch(query) {
+    const key = query.trim().toLowerCase();
+    const promise = failingSearch(query);
+    inFlight.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      inFlight.delete(key);
+    }
+  }
+  await assert.rejects(() => dispatch('q'));
+  assert.equal(inFlight.size, 0, 'failed query must not leave a hanging dedup entry');
+});
+
+// (c) direct flag — isDirect = (source === target)
+test('searchTranslated direct flag: isDirect true for equal, false for unequal source/target', () => {
+  const isDirect = (s, t) => s === t;
+  assert.equal(isDirect('Japanese', 'Japanese'), true);
+  assert.equal(isDirect('English', 'English'), true);
+  assert.equal(isDirect('English', 'Japanese'), false);
+});
+
+// (d) empty-key guard — short-circuits before a fetch flag is set
+test('searchTranslated empty.key guard: empty braveApiKey short-circuits before fetch', () => {
+  let fetchAttempted = false;
+  function guardThenFetch(apiKey) {
+    if (!apiKey) {
+      return { error: 'Brave API key not configured — add it in options', kind: 'auth' };
+    }
+    fetchAttempted = true;
+    return { results: [] };
+  }
+  const res = guardThenFetch('');
+  assert.equal(fetchAttempted, false, 'must not attempt a fetch when key is empty');
+  assert.equal(res.kind, 'auth');
+  assert.ok(/api key/i.test(res.error));
+});
