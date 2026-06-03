@@ -1,6 +1,7 @@
 import { OpenAIProvider } from './providers/openai.js';
 import { GeminiProvider } from './providers/gemini.js';
 import { OpenRouterProvider } from './providers/openrouter.js';
+import { BraveSearchClient } from './brave-search.js';
 import type {
   TranslationConfig,
   TranslationProvider,
@@ -10,7 +11,9 @@ import type {
   Message,
   TranslateMessage,
   SetBadgeMessage,
-  PredictMessage
+  PredictMessage,
+  SearchTranslatedMessage,
+  SearchResult
 } from './types.js';
 import { migrateSettings } from './types.js';
 import { sanitizeSuggestion } from './predict-util.js';
@@ -21,6 +24,16 @@ const providers: Record<string, TranslationProvider> = {
   gemini: new GeminiProvider(),
   openrouter: new OpenRouterProvider(),
 };
+
+// Brave Search transport (Plan 08-02). Single module-scope instance.
+const braveClient = new BraveSearchClient();
+
+// In-flight dedup map (D-05): keyed on the normalized query (trim().toLowerCase()).
+// While a search for a given normalized query is pending, a second same-query
+// submit awaits the SAME promise rather than issuing a second Brave fetch.
+// Entries are removed in a try/finally so a failed query never leaves a hanging
+// entry (RESEARCH Pitfall 4).
+const inFlightSearches = new Map<string, Promise<SearchResult[]>>();
 
 // Current compose mode state
 let composeState: {
@@ -147,6 +160,75 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           } catch (err) {
             // D-10: silent — never an error badge for predictions
             sendResponse({ suggestion: '' });
+          }
+          break;
+        }
+
+        case 'searchTranslated': {
+          const msg = message as SearchTranslatedMessage;
+          const { query, sourceLanguage, targetLanguage } = msg.payload;
+          const settings = await getSettings();
+          // XLT-01 / T-08-07: key read from storage ONLY — never from the payload.
+          const apiKey = settings.braveApiKey;
+          if (!apiKey) {
+            // Empty stored key → auth error, no fetch attempted.
+            sendResponse({ error: 'Brave API key not configured — add it in options', kind: 'auth' });
+            break;
+          }
+
+          // D-06: source==target short-circuit flag (query needs no translation).
+          const isDirect = sourceLanguage === targetLanguage;
+          // D-05: dedup key — normalized query.
+          const dedupKey = query.trim().toLowerCase();
+
+          if (inFlightSearches.has(dedupKey)) {
+            // A search for this query is already in flight — reuse its promise.
+            try {
+              const results = await inFlightSearches.get(dedupKey)!;
+              sendResponse({ results, direct: isDirect });
+            } catch (err) {
+              // Surface the same { error, kind } the originating caller will see.
+              const kind = (err as { kind?: string })?.kind ?? 'unknown';
+              const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+              sendResponse({ error: errorMessage, kind });
+            }
+            break;
+          }
+
+          // First caller for this query — issue the fetch and register it.
+          // D-07: NO 429 auto-retry; the transport classifies and throws.
+          const promise = braveClient.search(query, apiKey, { count: 10 });
+          inFlightSearches.set(dedupKey, promise);
+          try {
+            const results = await promise;
+            sendResponse({ results, direct: isDirect });
+          } catch (err) {
+            const kind = (err as { kind?: string })?.kind ?? 'unknown';
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            sendResponse({ error: errorMessage, kind });
+          } finally {
+            // Cleanup on BOTH success and failure (Pitfall 4) — never leak an entry.
+            inFlightSearches.delete(dedupKey);
+          }
+          break;
+        }
+
+        case 'testBraveKey': {
+          // No payload — key read from storage (D-04 / T-08-01 / XLT-01).
+          const settings = await getSettings();
+          const apiKey = settings.braveApiKey;
+          if (!apiKey) {
+            sendResponse({ ok: false, error: 'Brave API key is empty — enter it in options', kind: 'auth' });
+            break;
+          }
+          try {
+            // D-04: count:1 minimizes quota cost for a validation probe.
+            await braveClient.search('test', apiKey, { count: 1 });
+            sendResponse({ ok: true });
+          } catch (err) {
+            const kind = (err as { kind?: string })?.kind ?? 'unknown';
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            sendResponse({ ok: false, error: errorMessage, kind });
           }
           break;
         }
