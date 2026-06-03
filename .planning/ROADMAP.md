@@ -107,7 +107,7 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 
 - [x] 08-01-PLAN.md — SearchResult type + searchTranslated/testBraveKey message types + braveApiKey setting + search_quota error model (D-01, D-02, D-03, D-07)
 - [x] 08-02-PLAN.md — BraveSearchClient (src/brave-search.ts) + manifest host_permissions; web.results→SearchResult mapping, 429/network classification (SRCH-04)
-- [ ] 08-03-PLAN.md — background searchTranslated + testBraveKey handlers: in-flight dedup, source==target direct flag, key-from-storage (SRCH-05, SRCH-06, XLT-01)
+- [x] 08-03-PLAN.md — background searchTranslated + testBraveKey handlers: in-flight dedup, source==target direct flag, key-from-storage (SRCH-05, SRCH-06, XLT-01)
 - [ ] 08-04-PLAN.md — options page Brave key field + worker-routed Test Brave Key button + live-key checkpoint (SSET-01, SSET-02)
 
 **UI hint**: yes
