@@ -12,7 +12,7 @@ import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const { classifyError } = await import(path.join(__dirname, '../dist/errors.js'));
+const { classifyError, classifyBraveError } = await import(path.join(__dirname, '../dist/errors.js'));
 const { stripWrappers } = await import(path.join(__dirname, '../dist/output.js'));
 
 // ---------------------------------------------------------------------------
@@ -71,6 +71,63 @@ test('classifyError: 418 → unknown kind with status in message', () => {
   const result = classifyError('openai', new Error("I'm a teapot"), { status: 418 });
   assert.equal(result.kind, 'unknown');
   assert.ok(result.message.includes('418'), `message should contain '418', got: ${result.message}`);
+});
+
+// ---------------------------------------------------------------------------
+// classifyBraveError tests (Phase 08-01 Task 1) — Brave Search error model
+// 429 → search_quota (distinct from LLM rate_limit), 401/403 → auth,
+// network → network, other → unknown.
+// ---------------------------------------------------------------------------
+
+test('classifyBraveError: 429 → search_quota kind with quota message', () => {
+  const result = classifyBraveError(null, { status: 429 });
+  assert.equal(result.kind, 'search_quota');
+  assert.match(result.message, /quota/i);
+  assert.equal(result.message, 'Search quota exceeded — check your Brave plan');
+  assert.equal(result.status, 429);
+});
+
+test('classifyBraveError: 401 → auth kind', () => {
+  const result = classifyBraveError(new Error('bad key'), { status: 401 });
+  assert.equal(result.kind, 'auth');
+  assert.match(result.message, /brave api key/i);
+  assert.equal(result.status, 401);
+});
+
+test('classifyBraveError: 403 → auth kind', () => {
+  const result = classifyBraveError(new Error('forbidden'), { status: 403 });
+  assert.equal(result.kind, 'auth');
+});
+
+test('classifyBraveError: TypeError (offline) → network kind', () => {
+  const result = classifyBraveError(new TypeError('Failed to fetch'));
+  assert.equal(result.kind, 'network');
+  assert.equal(result.message, 'Network error — request timed out or offline');
+});
+
+test('classifyBraveError: AbortError (timeout) → network kind', () => {
+  const err = new Error('Request was aborted');
+  err.name = 'AbortError';
+  const result = classifyBraveError(err);
+  assert.equal(result.kind, 'network');
+  assert.equal(result.message, 'Network error — request timed out or offline');
+});
+
+test('classifyBraveError: 500 with bodyMessage → unknown kind with status and body', () => {
+  const result = classifyBraveError(new Error('server error'), { status: 500, bodyMessage: 'boom' });
+  assert.equal(result.kind, 'unknown');
+  assert.ok(result.message.includes('500'), `message should contain '500', got: ${result.message}`);
+  assert.ok(result.message.includes('boom'), `message should contain body, got: ${result.message}`);
+  assert.equal(result.status, 500);
+});
+
+// Regression guard: the LLM rate_limit path must stay distinct from search_quota (D-07).
+test('classifyBraveError: 429 is NOT the LLM rate_limit kind (D-07 discriminator)', () => {
+  const brave = classifyBraveError(null, { status: 429 });
+  const llm = classifyError('openai', new Error('rate limited'), { status: 429 });
+  assert.equal(brave.kind, 'search_quota');
+  assert.equal(llm.kind, 'rate_limit');
+  assert.notEqual(brave.kind, llm.kind);
 });
 
 // ---------------------------------------------------------------------------
