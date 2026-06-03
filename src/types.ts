@@ -20,6 +20,9 @@ export interface Settings extends TranslationConfig, ProviderConfig {
   composeHotkey: string;
   yoloHotkey: string;
   swapHotkey: string;
+  // Brave Search API key — top-level, NOT inside apiKeys (apiKeys is keyed by LLM
+  // provider only, D-03). Read from storage in the worker; never passed in a message.
+  braveApiKey: string;
 }
 
 export interface TranslationRequest {
@@ -63,7 +66,9 @@ export type MessageType =
   | 'directionSwapped'
   | 'getUsage'
   | 'resetUsage'
-  | 'predict';
+  | 'predict'
+  | 'searchTranslated'
+  | 'testBraveKey';
 
 export interface Message {
   type: MessageType;
@@ -81,6 +86,45 @@ export interface TranslateMessage extends Message {
 export interface PredictMessage extends Message {
   type: 'predict';
   payload: { text: string };
+}
+
+// A single Brave Search result, normalized for the Phase 9 SERP renderer.
+export interface SearchResult {
+  title: string;
+  // The verbatim Brave result URL. NEVER mutated or rewritten (SERP-02).
+  url: string;
+  // Raw Brave snippet. May contain <strong> HTML when text_decorations=true.
+  // Phase 8 passes this through untouched; Phase 9 MUST strip to plain text and
+  // render via textContent (never innerHTML) — XSS-safe rendering is Phase 9's
+  // contract (SERP-03).
+  description: string;
+  // Pre-parsed hostname for display / favicon lookup.
+  hostname: string;
+  faviconUrl?: string;
+}
+
+export interface SearchTranslatedMessage extends Message {
+  type: 'searchTranslated';
+  payload: {
+    query: string;
+    sourceLanguage: string;
+    targetLanguage: string;
+  };
+}
+
+// Worker → page reply for a searchTranslated request.
+// Success → { results, direct? }; failure → { error, kind } (D-02).
+export interface SearchTranslatedResponse {
+  results?: SearchResult[];
+  direct?: boolean;
+  error?: string;
+  kind?: import('./errors.js').ErrorKind;
+}
+
+// Probe the stored Brave key. NO payload — the key is read from storage in the
+// worker (D-04), never passed in the message (T-08-01 / XLT-01).
+export interface TestBraveKeyMessage extends Message {
+  type: 'testBraveKey';
 }
 
 export interface SetBadgeMessage extends Message {
@@ -106,6 +150,7 @@ export const DEFAULT_SETTINGS: Settings = {
   composeHotkey: 'Ctrl+Y',
   yoloHotkey: 'Ctrl+Shift+Y',
   swapHotkey: 'Ctrl+Shift+S',
+  braveApiKey: '',
 };
 
 // Migrate legacy single apiKey to per-provider apiKeys

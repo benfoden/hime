@@ -205,6 +205,8 @@ async function saveSettings(): Promise<void> {
     composeHotkey: currentSettings.composeHotkey,
     yoloHotkey: currentSettings.yoloHotkey,
     swapHotkey: currentSettings.swapHotkey,
+    // Preserve the stored Brave key; the options UI for editing it lands in a later plan.
+    braveApiKey: currentSettings.braveApiKey,
   };
 
   await chrome.storage.local.set({ himeSettings: newSettings });
