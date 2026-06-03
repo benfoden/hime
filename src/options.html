@@ -47,7 +47,20 @@
       <button id="testConnection" class="btn-secondary">Test Connection</button>
       <div id="testStatus" class="status" style="display: none; margin-top: 12px;"></div>
     </section>
-    
+
+    <section>
+      <h2>Translated Search</h2>
+
+      <div class="form-group">
+        <label for="braveApiKey">Brave Search API Key</label>
+        <input type="password" id="braveApiKey" placeholder="Enter your Brave Search API key">
+        <p class="help-text">Bring your own Brave Search key. Brave Search is metered (roughly $0.005 per query as of Feb 2026) — each test or search counts against your Brave quota.</p>
+      </div>
+
+      <button id="testBraveKey" class="btn-secondary">Test Brave Key</button>
+      <div id="braveTestStatus" class="status" style="display: none; margin-top: 12px;"></div>
+    </section>
+
     <section>
       <h2>Translation</h2>
       
