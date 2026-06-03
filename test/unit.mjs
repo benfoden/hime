@@ -14,6 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const { classifyError, classifyBraveError } = await import(path.join(__dirname, '../dist/errors.js'));
 const { stripWrappers } = await import(path.join(__dirname, '../dist/output.js'));
+const { migrateSettings } = await import(path.join(__dirname, '../dist/types.js'));
 
 // ---------------------------------------------------------------------------
 // classifyError tests
@@ -128,6 +129,28 @@ test('classifyBraveError: 429 is NOT the LLM rate_limit kind (D-07 discriminator
   assert.equal(brave.kind, 'search_quota');
   assert.equal(llm.kind, 'rate_limit');
   assert.notEqual(brave.kind, llm.kind);
+});
+
+// ---------------------------------------------------------------------------
+// migrateSettings braveApiKey tests (Phase 08-01 Task 2)
+// Legacy blobs without braveApiKey get the '' default via the DEFAULT_SETTINGS
+// spread — must be '' not undefined (Pitfall 3).
+// ---------------------------------------------------------------------------
+
+test('migrateSettings: empty blob gets braveApiKey default ""', () => {
+  assert.equal(migrateSettings({}).braveApiKey, '');
+});
+
+test('migrateSettings: existing braveApiKey value preserved', () => {
+  assert.equal(migrateSettings({ braveApiKey: 'abc' }).braveApiKey, 'abc');
+});
+
+test('migrateSettings: legacy blob lacking braveApiKey → "" not undefined', () => {
+  // A realistic legacy blob from before the Brave feature existed.
+  const legacy = { provider: 'openai', apiKey: 'sk-old', model: 'gpt-5-mini' };
+  const migrated = migrateSettings(legacy);
+  assert.equal(migrated.braveApiKey, '');
+  assert.notEqual(migrated.braveApiKey, undefined);
 });
 
 // ---------------------------------------------------------------------------
