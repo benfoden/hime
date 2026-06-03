@@ -89,7 +89,11 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
   3. When the source language and target language settings are identical, the background handler short-circuits all translation calls and returns a flag indicating the search ran directly in that language.
   4. When Brave returns HTTP 429, the error surfaces as "search quota exceeded" and the request does not auto-retry; other network failures return a distinct error state.
   5. Submit debounce (~1s) is enforced by the message contract such that rapid successive calls do not generate duplicate Brave requests.
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 08-01-PLAN.md — SearchResult type + searchTranslated/testBraveKey message types + braveApiKey setting + search_quota error model (D-01, D-02, D-03, D-07)
+- [ ] 08-02-PLAN.md — BraveSearchClient (src/brave-search.ts) + manifest host_permissions; web.results→SearchResult mapping, 429/network classification (SRCH-04)
+- [ ] 08-03-PLAN.md — background searchTranslated + testBraveKey handlers: in-flight dedup, source==target direct flag, key-from-storage (SRCH-05, SRCH-06, XLT-01)
+- [ ] 08-04-PLAN.md — options page Brave key field + worker-routed Test Brave Key button + live-key checkpoint (SSET-01, SSET-02)
 **UI hint**: yes
 
 ### Phase 9: SERP Rendering
@@ -139,7 +143,7 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 | 5. Ghost-Text Prediction Engine | v1.1 | 2/2 | Complete (shelved) | 2026-05-31 |
 | 6. Alternate Variations & Cycling | v1.1 | 0/0 | Paused | - |
 | 7. Prediction Settings | v1.1 | 0/0 | Paused | - |
-| 8. API Integration Scaffold | v1.2 | 0/0 | Not started | - |
+| 8. API Integration Scaffold | v1.2 | 0/4 | Planned | - |
 | 9. SERP Rendering | v1.2 | 0/0 | Not started | - |
 | 10. Translation Pipeline | v1.2 | 0/0 | Not started | - |
 | 11. Page Wiring & Popup Entry | v1.2 | 0/0 | Not started | - |
