@@ -10,6 +10,9 @@ let targetLanguageInput: HTMLInputElement;
 let formalitySelect: HTMLSelectElement;
 let customPromptTextarea: HTMLTextAreaElement;
 let testConnectionBtn: HTMLButtonElement;
+let braveApiKeyInput: HTMLInputElement;
+let testBraveKeyBtn: HTMLButtonElement;
+let braveTestStatusDiv: HTMLDivElement;
 let saveBtn: HTMLButtonElement;
 let statusDiv: HTMLDivElement;
 let testStatusDiv: HTMLDivElement;
@@ -95,6 +98,7 @@ async function loadSettings(): Promise<void> {
 function populateForm(): void {
   providerSelect.value = currentSettings.provider;
   apiKeyInput.value = currentSettings.apiKeys[currentSettings.provider] || '';
+  braveApiKeyInput.value = currentSettings.braveApiKey || '';
   modelSelect.value = currentSettings.model;
   storageModeSelect.value = currentSettings.storageMode;
   sourceLanguageInput.value = currentSettings.sourceLanguage;
@@ -205,8 +209,8 @@ async function saveSettings(): Promise<void> {
     composeHotkey: currentSettings.composeHotkey,
     yoloHotkey: currentSettings.yoloHotkey,
     swapHotkey: currentSettings.swapHotkey,
-    // Preserve the stored Brave key; the options UI for editing it lands in a later plan.
-    braveApiKey: currentSettings.braveApiKey,
+    // D-03: top-level field (NOT inside apiKeys). Persisted from the Translated Search input.
+    braveApiKey: braveApiKeyInput.value,
   };
 
   await chrome.storage.local.set({ himeSettings: newSettings });
@@ -261,6 +265,45 @@ async function testConnection(): Promise<void> {
     showStatus(`Connection error: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error', testStatusDiv);
   } finally {
     testConnectionBtn.disabled = false;
+  }
+}
+
+// Test the Brave Search key. Unlike testConnection (which POSTs the LLM key from
+// the page), this routes through the background worker (D-04): the key is saved to
+// storage first, then a payload-less testBraveKey message is sent — the key is never
+// carried in the message or fetched directly from this page (XLT-01 / T-08-10).
+async function testBraveKey(): Promise<void> {
+  if (!braveApiKeyInput.value) {
+    // SSET-02: "key required" — no worker call when the field is empty.
+    showStatus('Brave API key required — enter it first', 'error', braveTestStatusDiv);
+    return;
+  }
+
+  // Save the Brave key to storage FIRST (partial save merged into currentSettings).
+  // On save failure, surface it and do NOT proceed to test against a stale key (Pitfall 5).
+  const merged: Settings = { ...currentSettings, braveApiKey: braveApiKeyInput.value };
+  try {
+    await chrome.storage.local.set({ himeSettings: merged });
+    currentSettings = merged;
+  } catch (error) {
+    showStatus(`Could not save Brave key: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error', braveTestStatusDiv);
+    return;
+  }
+
+  showStatus('Testing Brave key…', 'info', braveTestStatusDiv);
+  testBraveKeyBtn.disabled = true;
+  try {
+    // No key in the payload — the worker reads it from storage (XLT-01).
+    const response = await chrome.runtime.sendMessage({ type: 'testBraveKey' });
+    if (response?.ok) {
+      showStatus('Brave key valid!', 'success', braveTestStatusDiv);
+    } else {
+      showStatus(response?.error ?? 'Brave key test failed', 'error', braveTestStatusDiv);
+    }
+  } catch {
+    showStatus('Could not reach background worker', 'error', braveTestStatusDiv);
+  } finally {
+    testBraveKeyBtn.disabled = false;
   }
 }
 
@@ -344,6 +387,9 @@ document.addEventListener('DOMContentLoaded', () => {
   formalitySelect = document.getElementById('formality') as HTMLSelectElement;
   customPromptTextarea = document.getElementById('customPrompt') as HTMLTextAreaElement;
   testConnectionBtn = document.getElementById('testConnection') as HTMLButtonElement;
+  braveApiKeyInput = document.getElementById('braveApiKey') as HTMLInputElement;
+  testBraveKeyBtn = document.getElementById('testBraveKey') as HTMLButtonElement;
+  braveTestStatusDiv = document.getElementById('braveTestStatus') as HTMLDivElement;
   saveBtn = document.getElementById('save') as HTMLButtonElement;
   statusDiv = document.getElementById('status') as HTMLDivElement;
   testStatusDiv = document.getElementById('testStatus') as HTMLDivElement;
@@ -372,6 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateModelOptions();
   });
   testConnectionBtn.addEventListener('click', testConnection);
+  testBraveKeyBtn.addEventListener('click', testBraveKey);
   saveBtn.addEventListener('click', saveSettings);
   resetUsageBtn.addEventListener('click', async () => {
     await chrome.runtime.sendMessage({ type: 'resetUsage' });
