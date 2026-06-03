@@ -14,9 +14,15 @@
   },
   "devDependencies": {
     "@types/chrome": "^0.0.246",
+    "linkedom": "^0.18.12",
     "typescript": "^5.2.2"
   },
   "type": "module",
-  "keywords": ["chrome-extension", "ime", "translation", "ai"],
+  "keywords": [
+    "chrome-extension",
+    "ime",
+    "translation",
+    "ai"
+  ],
   "license": "MIT"
 }
