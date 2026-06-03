@@ -32,7 +32,7 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 
 ### v1.2 Translated Search (Phases 8-11) — ACTIVE
 
-- [ ] **Phase 8: API Integration Scaffold** - searchTranslated message type, BraveSearchClient, Brave key setting + test, source==target guard, 429 handling
+- [x] **Phase 8: API Integration Scaffold** - searchTranslated message type, BraveSearchClient, Brave key setting + test, source==target guard, 429 handling (completed 2026-06-03)
 - [ ] **Phase 9: SERP Rendering** - SearchResult type, XSS-safe renderer, skeleton/empty/error states
 - [ ] **Phase 10: Translation Pipeline** - Keyed-JSON batch translation, count assertion, raw fallback, three-stage progressive render
 - [ ] **Phase 11: Page Wiring & Popup Entry** - Full search.ts wired end-to-end, query translation disclosure line, debounce, popup button
@@ -125,7 +125,11 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
   4. While results are loading, skeleton placeholder rows are shown so the page is never blank during the 2-8s async window.
   5. Each distinct error state (empty results, missing/invalid Brave key, network failure, quota exceeded/429) renders a unique, human-readable message rather than a generic error or blank page.
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+- [ ] 09-01-PLAN.md — linkedom devDep + DOM-agnostic renderSerp/SerpState core + shared mock fixtures (7 states + XSS probe) + node:test harness (SERP-01..05)
+- [ ] 09-02-PLAN.md — search.html shell + light-theme Google-style search.css + search.ts ?state= entry + 7-state visual walkthrough (SERP-01, SERP-04, SERP-05)
+
 **UI hint**: yes
 
 ### Phase 10: Translation Pipeline
@@ -168,7 +172,7 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 | 5. Ghost-Text Prediction Engine | v1.1 | 2/2 | Complete (shelved) | 2026-05-31 |
 | 6. Alternate Variations & Cycling | v1.1 | 0/0 | Paused | - |
 | 7. Prediction Settings | v1.1 | 0/0 | Paused | - |
-| 8. API Integration Scaffold | v1.2 | 4/4 | Plans Complete|  |
-| 9. SERP Rendering | v1.2 | 0/0 | Not started | - |
+| 8. API Integration Scaffold | v1.2 | 4/4 | Complete    | 2026-06-03 |
+| 9. SERP Rendering | v1.2 | 0/2 | Planned | - |
 | 10. Translation Pipeline | v1.2 | 0/0 | Not started | - |
 | 11. Page Wiring & Popup Entry | v1.2 | 0/0 | Not started | - |
