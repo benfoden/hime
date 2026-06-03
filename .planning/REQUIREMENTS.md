@@ -36,7 +36,7 @@
 ### Settings (SSET)
 
 - [x] **SSET-01**: The options page has a Brave Search API key field (BYOK), stored in `chrome.storage` alongside the existing LLM keys.
-- [ ] **SSET-02**: The options page can test/validate the Brave key (consistent with the existing "Test Connection" pattern), or surfaces a clear "key required" message when absent.
+- [x] **SSET-02**: The options page can test/validate the Brave key (consistent with the existing "Test Connection" pattern), or surfaces a clear "key required" message when absent.
 
 ---
 
@@ -81,7 +81,7 @@
 | XLT-04 | Phase 10 | Pending |
 | XLT-05 | Phase 10 | Pending |
 | SSET-01 | Phase 8 | Complete |
-| SSET-02 | Phase 8 | Pending |
+| SSET-02 | Phase 8 | Complete |
 
 **Coverage:** 18/18 requirements mapped.
 
