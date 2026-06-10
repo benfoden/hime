@@ -31,7 +31,7 @@ export function buildPredictionPrompt(): string {
   ].join('\n');
 }
 
-function getFormalityInstruction(formality: string): string {
+export function getFormalityInstruction(formality: string): string {
   switch (formality) {
     case 'casual':
       return 'Use casual, informal language (e.g. for Japanese: タメ口、plain form).';

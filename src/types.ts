@@ -68,7 +68,8 @@ export type MessageType =
   | 'resetUsage'
   | 'predict'
   | 'searchTranslated'
-  | 'testBraveKey';
+  | 'testBraveKey'
+  | 'translateBatch';
 
 export interface Message {
   type: MessageType;
@@ -125,6 +126,22 @@ export interface SearchTranslatedResponse {
 // worker (D-04), never passed in the message (T-08-01 / XLT-01).
 export interface TestBraveKeyMessage extends Message {
   type: 'testBraveKey';
+}
+
+export interface TranslateBatchMessage extends Message {
+  type: 'translateBatch';
+  payload: {
+    items: Record<string, { t: string; d: string }>;
+    config: TranslationConfig;
+  };
+}
+
+// Worker → page reply for a translateBatch request.
+// Success → { translations }; failure → { error, kind } (D-02).
+export interface TranslateBatchResponse {
+  translations?: Record<string, { t: string; d: string }>;
+  error?: string;
+  kind?: import('./errors.js').ErrorKind;
 }
 
 export interface SetBadgeMessage extends Message {
