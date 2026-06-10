@@ -19,6 +19,7 @@ import type {
 import { migrateSettings } from './types.js';
 import { sanitizeSuggestion } from './predict-util.js';
 import { buildBatchTranslatePrompt, parseBatchReply } from './translate-batch.js';
+import { classifyError } from './errors.js';
 
 // Provider registry
 const providers: Record<string, TranslationProvider> = {
@@ -254,7 +255,9 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             const translations = parseBatchReply(result.text, inputKeys);
             sendResponse({ translations });
           } catch (err) {
-            const kind = (err as any)?.kind ?? 'unknown';
+            // Provider errors already carry .kind; the synthetic 8s-timeout AbortError
+            // does not, so fall back to classifyError (AbortError → 'network', T-10-05/D-04).
+            const kind = (err as { kind?: string })?.kind ?? classifyError(s.provider, err).kind;
             const errorMessage = err instanceof Error ? err.message : 'Unknown error';
             console.error('[hime] translateBatch failed', { provider: s.provider, model: s.model, kind, message: errorMessage });
             sendResponse({ error: errorMessage, kind });
