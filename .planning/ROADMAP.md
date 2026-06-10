@@ -146,7 +146,7 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 
 **Plans**: 2 plans
 
-- [ ] 10-01-PLAN.md — src/translate-batch.ts pure functions (buildBatchPayload, buildBatchTranslatePrompt, parseBatchReply, mergeTranslations) + translateBatch message types + node:test harness (XLT-02, XLT-03, XLT-04, XLT-05)
+- [x] 10-01-PLAN.md — src/translate-batch.ts pure functions (buildBatchPayload, buildBatchTranslatePrompt, parseBatchReply, mergeTranslations) + translateBatch message types + node:test harness (XLT-02, XLT-03, XLT-04, XLT-05)
 - [ ] 10-02-PLAN.md — background.ts translateBatch worker case: provider+key guard, Promise.race 8s timeout, worker-side parseBatchReply, { translations } | { error, kind } (XLT-02, XLT-05)
 
 ### Phase 11: Page Wiring & Popup Entry
@@ -177,5 +177,5 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 | 7. Prediction Settings | v1.1 | 0/0 | Paused | - |
 | 8. API Integration Scaffold | v1.2 | 4/4 | Complete    | 2026-06-03 |
 | 9. SERP Rendering | v1.2 | 2/2 | Complete   | 2026-06-03 |
-| 10. Translation Pipeline | v1.2 | 0/2 | Planned | - |
+| 10. Translation Pipeline | v1.2 | 1/2 | In Progress|  |
 | 11. Page Wiring & Popup Entry | v1.2 | 0/0 | Not started | - |
