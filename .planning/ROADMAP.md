@@ -177,5 +177,5 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 | 7. Prediction Settings | v1.1 | 0/0 | Paused | - |
 | 8. API Integration Scaffold | v1.2 | 4/4 | Complete    | 2026-06-03 |
 | 9. SERP Rendering | v1.2 | 2/2 | Complete   | 2026-06-03 |
-| 10. Translation Pipeline | v1.2 | 2/2 | Complete   | 2026-06-10 |
+| 10. Translation Pipeline | v1.2 | 2/2 | Complete    | 2026-06-10 |
 | 11. Page Wiring & Popup Entry | v1.2 | 0/0 | Not started | - |

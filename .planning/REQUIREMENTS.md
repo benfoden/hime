@@ -28,10 +28,10 @@
 ### Result Translation Pipeline (XLT)
 
 - [x] **XLT-01**: All network calls (Brave Search and LLM translation) are routed through the background service worker via a single `searchTranslated` message type; no API key is ever read or fetched from the search page itself.
-- [ ] **XLT-02**: Result titles and snippets are translated in one batched LLM call using a keyed JSON object (`{"0": …, "1": …}`), reusing the existing OpenAI/Gemini/OpenRouter provider abstraction.
-- [ ] **XLT-03**: After the batch translation returns, the result count is asserted against the input count; on mismatch the affected items fall back to raw untranslated text (never blank, never mismapped).
-- [ ] **XLT-04**: Only `title` and `description` fields are sent to the translation prompt — URLs/hostnames are never passed to translation.
-- [ ] **XLT-05**: The pipeline renders progressively (skeleton → raw Brave results → translated overlay) so a service-worker timeout or translation failure still leaves usable untranslated results.
+- [x] **XLT-02**: Result titles and snippets are translated in one batched LLM call using a keyed JSON object (`{"0": …, "1": …}`), reusing the existing OpenAI/Gemini/OpenRouter provider abstraction.
+- [x] **XLT-03**: After the batch translation returns, the result count is asserted against the input count; on mismatch the affected items fall back to raw untranslated text (never blank, never mismapped).
+- [x] **XLT-04**: Only `title` and `description` fields are sent to the translation prompt — URLs/hostnames are never passed to translation.
+- [x] **XLT-05**: The pipeline renders progressively (skeleton → raw Brave results → translated overlay) so a service-worker timeout or translation failure still leaves usable untranslated results.
 
 ### Settings (SSET)
 
@@ -76,10 +76,10 @@
 | SERP-04 | Phase 9 | Complete |
 | SERP-05 | Phase 9 | Complete |
 | XLT-01 | Phase 8 | Complete |
-| XLT-02 | Phase 10 | Pending |
-| XLT-03 | Phase 10 | Pending |
-| XLT-04 | Phase 10 | Pending |
-| XLT-05 | Phase 10 | Pending |
+| XLT-02 | Phase 10 | Complete |
+| XLT-03 | Phase 10 | Complete |
+| XLT-04 | Phase 10 | Complete |
+| XLT-05 | Phase 10 | Complete |
 | SSET-01 | Phase 8 | Complete |
 | SSET-02 | Phase 8 | Complete |
 
