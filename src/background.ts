@@ -13,10 +13,12 @@ import type {
   SetBadgeMessage,
   PredictMessage,
   SearchTranslatedMessage,
-  SearchResult
+  SearchResult,
+  TranslateBatchMessage
 } from './types.js';
 import { migrateSettings } from './types.js';
 import { sanitizeSuggestion } from './predict-util.js';
+import { buildBatchTranslatePrompt, parseBatchReply } from './translate-batch.js';
 
 // Provider registry
 const providers: Record<string, TranslationProvider> = {
@@ -209,6 +211,53 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           } finally {
             // Cleanup on BOTH success and failure (Pitfall 4) — never leak an entry.
             inFlightSearches.delete(dedupKey);
+          }
+          break;
+        }
+
+        case 'translateBatch': {
+          const msg = message as TranslateBatchMessage;
+          const { items, config } = msg.payload;
+          const s = await getSettings();
+          const apiKey = s.apiKeys[s.provider] || '';
+          if (!apiKey) {
+            sendResponse({ error: `API key not configured for ${s.provider}`, kind: 'auth' });
+            break;
+          }
+          const provider = providers[s.provider];
+          if (!provider) {
+            sendResponse({ error: `Unknown provider: ${s.provider}`, kind: 'unknown' });
+            break;
+          }
+          // XLT-04: serialize ONLY the page-supplied items — url/hostname never added here.
+          const inputKeys = Object.keys(items);
+          const payloadText = JSON.stringify(items);
+          // Batch prompt is prepended to the user content so the JSON instruction overrides
+          // the system-level "output ONLY translated text" that all providers inject via
+          // buildSystemPrompt. This keeps all provider files untouched (out of scope).
+          // See RESEARCH §"Pattern 2" and §"Pitfall: prompt conflict".
+          const batchInstruction = buildBatchTranslatePrompt(config);
+          const userContent = `${batchInstruction}\n\n${payloadText}`;
+          try {
+            // D-04: race against an 8s timeout. The synthetic error uses name: 'AbortError'
+            // so classifyError maps it to kind: 'network' (errors.ts lines 24-34).
+            const result = await Promise.race([
+              provider.translate(userContent, config, apiKey, s.model),
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(Object.assign(new Error('Translation timed out'), { name: 'AbortError' })),
+                  8000
+                )
+              ),
+            ]);
+            if (result.usage) await recordUsage(s.model, result.usage);
+            const translations = parseBatchReply(result.text, inputKeys);
+            sendResponse({ translations });
+          } catch (err) {
+            const kind = (err as any)?.kind ?? 'unknown';
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            console.error('[hime] translateBatch failed', { provider: s.provider, model: s.model, kind, message: errorMessage });
+            sendResponse({ error: errorMessage, kind });
           }
           break;
         }
