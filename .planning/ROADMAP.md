@@ -161,10 +161,15 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
   3. The query is translated using explicit source-to-target direction and does not trigger the auto-flip behavior used by the inline translate modes; the language pair shown in the disclosure line matches the user's settings.
 
 **Plans**: 3 plans
+**Wave 1**
 
 - [ ] 11-01-PLAN.md — worker-side query translation in searchTranslated (explicit source→target, source==target short-circuit, translatedQuery in response, raw-fallback on LLM failure) (SRCH-02)
 - [ ] 11-02-PLAN.md — popup "Search" button opening search.html via chrome.tabs.create (launcher, no pre-fill) (SRCH-01)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 11-03-PLAN.md — page wiring: top search bar + read-only disclosure line + live 3-stage render (skeleton → raw → translated overlay) via renderSerp; ?state= mock driver removed (SRCH-03, XLT-05 page half)
+
 **UI hint**: yes
 
 ## Progress
