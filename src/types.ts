@@ -114,10 +114,16 @@ export interface SearchTranslatedMessage extends Message {
 }
 
 // Worker → page reply for a searchTranslated request.
-// Success → { results, direct? }; failure → { error, kind } (D-02).
+// Success → { results, direct?, translatedQuery?, translationFailed? }; failure → { error, kind } (D-02).
+// translatedQuery: the source→target translated query string the worker searched with (D-04).
+//   Present only when source != target and LLM translation succeeded.
+// translationFailed: true when an LLM translation was attempted but failed/timed out (D-10),
+//   so the page can show a degraded disclosure. Absent (undefined) on success or when direct.
 export interface SearchTranslatedResponse {
   results?: SearchResult[];
   direct?: boolean;
+  translatedQuery?: string;
+  translationFailed?: boolean;
   error?: string;
   kind?: import('./errors.js').ErrorKind;
 }
