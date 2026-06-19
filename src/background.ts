@@ -19,6 +19,7 @@ import type {
 import { migrateSettings } from './types.js';
 import { sanitizeSuggestion } from './predict-util.js';
 import { buildBatchTranslatePrompt, parseBatchReply } from './translate-batch.js';
+import { buildQueryTranslateConfig } from './query-translate.js';
 import { classifyError } from './errors.js';
 
 // Provider registry
@@ -179,16 +180,55 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             break;
           }
 
-          // D-06: source==target short-circuit flag (query needs no translation).
+          // D-03: source==target short-circuit flag (query needs no translation).
           const isDirect = sourceLanguage === targetLanguage;
-          // D-05: dedup key — normalized query.
-          const dedupKey = query.trim().toLowerCase();
+
+          // D-01 / D-02: Translate the query with an explicit source→target direction
+          // before Brave search. Only when source != target (not isDirect).
+          // Keys: Brave key from braveApiKey; LLM key from apiKeys[provider] (XLT-01 / T-11-01).
+          let searchQuery = query;
+          let translatedQuery: string | undefined;
+          let translationFailed = false;
+
+          if (!isDirect) {
+            const llmApiKey = settings.apiKeys[settings.provider] || '';
+            const provider = providers[settings.provider];
+            if (!llmApiKey || !provider) {
+              // No LLM key/provider — skip translation, search raw (D-10).
+              translationFailed = true;
+            } else {
+              const queryConfig = buildQueryTranslateConfig(sourceLanguage, targetLanguage, settings.formality);
+              try {
+                // D-10 / T-11-03: race against an 8s timeout (mirrors translateBatch pattern).
+                const result = await Promise.race([
+                  provider.translate(query, queryConfig, llmApiKey, settings.model),
+                  new Promise<never>((_, reject) =>
+                    setTimeout(
+                      () => reject(Object.assign(new Error('Query translation timed out'), { name: 'AbortError' })),
+                      8000
+                    )
+                  ),
+                ]);
+                searchQuery = result.text.trim();
+                translatedQuery = searchQuery;
+                // Mirror translateText L108-110: record usage when present.
+                if (result.usage) await recordUsage(settings.model, result.usage);
+              } catch {
+                // LLM failure/timeout → raw-query fallback (D-10). Never an error response.
+                translationFailed = true;
+                // searchQuery stays = query (raw fallback)
+              }
+            }
+          }
+
+          // D-05: dedup key — normalized search query (what is actually searched).
+          const dedupKey = searchQuery.trim().toLowerCase();
 
           if (inFlightSearches.has(dedupKey)) {
             // A search for this query is already in flight — reuse its promise.
             try {
               const results = await inFlightSearches.get(dedupKey)!;
-              sendResponse({ results, direct: isDirect });
+              sendResponse({ results, direct: isDirect, translatedQuery, translationFailed });
             } catch (err) {
               // Surface the same { error, kind } the originating caller will see.
               const kind = (err as { kind?: string })?.kind ?? 'unknown';
@@ -200,11 +240,11 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
 
           // First caller for this query — issue the fetch and register it.
           // D-07: NO 429 auto-retry; the transport classifies and throws.
-          const promise = braveClient.search(query, apiKey, { count: 10 });
+          const promise = braveClient.search(searchQuery, apiKey, { count: 10 });
           inFlightSearches.set(dedupKey, promise);
           try {
             const results = await promise;
-            sendResponse({ results, direct: isDirect });
+            sendResponse({ results, direct: isDirect, translatedQuery, translationFailed });
           } catch (err) {
             const kind = (err as { kind?: string })?.kind ?? 'unknown';
             const errorMessage = err instanceof Error ? err.message : 'Unknown error';
