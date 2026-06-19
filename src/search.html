@@ -9,6 +9,11 @@
 <body>
   <div class="container">
     <h1 class="page-title">hime Search</h1>
+    <form id="search-form">
+      <input id="search-input" type="text" autocomplete="off" placeholder="Search…" aria-label="Search query" />
+      <button id="search-submit" type="submit">Search</button>
+    </form>
+    <div id="disclosure" class="search-disclosure" role="status" aria-live="polite"></div>
     <div id="results"></div>
   </div>
   <script type="module" src="search.js"></script>
