@@ -11,7 +11,7 @@
 ### Search & Query (SRCH)
 
 - [ ] **SRCH-01**: From the toolbar popup, the user can open a bundled Translated Search page (`search.html`) via `chrome.tabs.create(getURL(...))`.
-- [ ] **SRCH-02**: The user enters a query in their own (source) language; on submit it is translated to the configured target language using an explicit source→target direction (NOT the auto-flip used by in-field translate).
+- [x] **SRCH-02**: The user enters a query in their own (source) language; on submit it is translated to the configured target language using an explicit source→target direction (NOT the auto-flip used by in-field translate).
 - [ ] **SRCH-03**: The translated query is shown to the user as a read-only disclosure line (e.g. "Searching in Japanese for: …") above the results — not editable.
 - [x] **SRCH-04**: The translated query is sent to the Brave Search API and web results are retrieved.
 - [x] **SRCH-05**: When source language == target language, all translation is skipped (no-op short-circuit) and the search runs directly, with a notice that it searched directly in that language.

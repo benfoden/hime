@@ -163,7 +163,7 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 **Plans**: 3 plans
 **Wave 1**
 
-- [ ] 11-01-PLAN.md — worker-side query translation in searchTranslated (explicit source→target, source==target short-circuit, translatedQuery in response, raw-fallback on LLM failure) (SRCH-02)
+- [x] 11-01-PLAN.md — worker-side query translation in searchTranslated (explicit source→target, source==target short-circuit, translatedQuery in response, raw-fallback on LLM failure) (SRCH-02)
 - [ ] 11-02-PLAN.md — popup "Search" button opening search.html via chrome.tabs.create (launcher, no pre-fill) (SRCH-01)
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -187,4 +187,4 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 | 8. API Integration Scaffold | v1.2 | 4/4 | Complete    | 2026-06-03 |
 | 9. SERP Rendering | v1.2 | 2/2 | Complete   | 2026-06-03 |
 | 10. Translation Pipeline | v1.2 | 2/2 | Complete    | 2026-06-10 |
-| 11. Page Wiring & Popup Entry | v1.2 | 0/3 | Not started | - |
+| 11. Page Wiring & Popup Entry | v1.2 | 1/3 | Executing | - |
