@@ -160,7 +160,11 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
   2. After the user submits a query, the translated form of that query appears as a read-only disclosure line (e.g. "Searching in Japanese for: ___") above the results before results load.
   3. The query is translated using explicit source-to-target direction and does not trigger the auto-flip behavior used by the inline translate modes; the language pair shown in the disclosure line matches the user's settings.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+- [ ] 11-01-PLAN.md — worker-side query translation in searchTranslated (explicit source→target, source==target short-circuit, translatedQuery in response, raw-fallback on LLM failure) (SRCH-02)
+- [ ] 11-02-PLAN.md — popup "Search" button opening search.html via chrome.tabs.create (launcher, no pre-fill) (SRCH-01)
+- [ ] 11-03-PLAN.md — page wiring: top search bar + read-only disclosure line + live 3-stage render (skeleton → raw → translated overlay) via renderSerp; ?state= mock driver removed (SRCH-03, XLT-05 page half)
 **UI hint**: yes
 
 ## Progress
@@ -178,4 +182,4 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 | 8. API Integration Scaffold | v1.2 | 4/4 | Complete    | 2026-06-03 |
 | 9. SERP Rendering | v1.2 | 2/2 | Complete   | 2026-06-03 |
 | 10. Translation Pipeline | v1.2 | 2/2 | Complete    | 2026-06-10 |
-| 11. Page Wiring & Popup Entry | v1.2 | 0/0 | Not started | - |
+| 11. Page Wiring & Popup Entry | v1.2 | 0/3 | Not started | - |
