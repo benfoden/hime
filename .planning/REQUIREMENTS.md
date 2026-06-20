@@ -20,8 +20,8 @@
 ### Results SERP (SERP)
 
 - [x] **SERP-01**: Results render as a classic Google-style SERP: each row shows favicon + hostname, a translated title that links to the result, and a translated snippet.
-- [ ] **SERP-02**: Each result link's `href` is the original Brave-provided URL verbatim — never translated, never mutated, never proxied.
-- [ ] **SERP-03**: Result snippet/title text is rendered XSS-safely — Brave `description` HTML (e.g. `<strong>` highlights) is stripped to plain text; content is never assigned to `innerHTML`.
+- [x] **SERP-02**: Each result link's `href` is the original Brave-provided URL verbatim — never translated, never mutated, never proxied.
+- [x] **SERP-03**: Result snippet/title text is rendered XSS-safely — Brave `description` HTML (e.g. `<strong>` highlights) is stripped to plain text; content is never assigned to `innerHTML`.
 - [x] **SERP-04**: While the async pipeline runs, skeleton rows are shown (no blank screen during the 2–8s latency).
 - [x] **SERP-05**: Empty results, invalid/missing API key, network failure, and quota-exceeded (HTTP 429) each show a distinct, human-readable state — 429 reads as "search quota exceeded" and does not auto-retry.
 
@@ -71,8 +71,8 @@
 | SRCH-05 | Phase 8 | Complete |
 | SRCH-06 | Phase 8 | Complete |
 | SERP-01 | Phase 9 | Complete |
-| SERP-02 | Phase 9 | Pending |
-| SERP-03 | Phase 9 | Pending |
+| SERP-02 | Phase 9 | Complete |
+| SERP-03 | Phase 9 | Complete |
 | SERP-04 | Phase 9 | Complete |
 | SERP-05 | Phase 9 | Complete |
 | XLT-01 | Phase 8 | Complete |
