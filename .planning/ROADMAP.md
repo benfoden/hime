@@ -2,9 +2,9 @@
 
 ## Milestones
 
-- v1.0 MVP — Phases 1-4 (shipped 2026-05-25)
-- v1.1 Inline Predictions — Phases 5-7 (PAUSED 2026-06-02; phase 5 shelved behind flag, phases 6-7 unbuilt)
-- v1.2 Translated Search — Phases 8-11 (active)
+- ✅ v1.0 MVP — Phases 1-4 (shipped 2026-05-25)
+- ⏸ v1.1 Inline Predictions — Phases 5-7 (PAUSED 2026-06-02; phase 5 shelved behind flag, phases 6-7 unbuilt)
+- ✅ v1.2 Translated Search — Phases 8-11 (shipped 2026-06-20)
 
 ## Phases
 
@@ -30,12 +30,17 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 
 </details>
 
-### v1.2 Translated Search (Phases 8-11) — ACTIVE
+<details>
+<summary>✅ v1.2 Translated Search (Phases 8-11) — SHIPPED 2026-06-20</summary>
+
+Full phase details archived to `milestones/v1.2-ROADMAP.md`. Audit passed (17/18 reqs) — see `milestones/v1.2-MILESTONE-AUDIT.md`.
 
 - [x] **Phase 8: API Integration Scaffold** - searchTranslated message type, BraveSearchClient, Brave key setting + test, source==target guard, 429 handling (completed 2026-06-03)
 - [x] **Phase 9: SERP Rendering** - SearchResult type, XSS-safe renderer, skeleton/empty/error states (completed 2026-06-03)
 - [x] **Phase 10: Translation Pipeline** - Keyed-JSON batch translation, count assertion, raw fallback, three-stage progressive render (completed 2026-06-10)
-- [x] **Phase 11: Page Wiring & Popup Entry** - Full search.ts wired end-to-end, query translation disclosure line, debounce, popup button (completed 2026-06-20)
+- [x] **Phase 11: Page Wiring & Popup Entry** - Full search.ts wired end-to-end, query translation disclosure line, popup button (completed 2026-06-20)
+
+</details>
 
 ## Phase Details
 
@@ -90,87 +95,7 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 **Plans**: TBD
 **UI hint**: yes
 
-### Phase 8: API Integration Scaffold
-
-**Goal**: The background service worker can execute a complete Brave Search round-trip — receive the searchTranslated message, fetch results with the user's Brave key, and return raw results — with all error and edge-case paths handled before any UI exists.
-**Depends on**: Phase 5 (background message dispatch pattern, chrome.storage, provider abstraction)
-**Requirements**: SRCH-04, SRCH-05, SRCH-06, SSET-01, SSET-02, XLT-01
-**Success Criteria** (what must be TRUE):
-
-  1. The user can enter and save a Brave API key in the options page; a "Test Connection" action confirms the key is valid against the live Brave endpoint and shows a human-readable error when it is not.
-  2. Sending a searchTranslated message from any extension page reaches the background worker, performs a Brave Search fetch using the stored key, and returns a result array — no API key is ever accessible from the search page itself.
-  3. When the source language and target language settings are identical, the background handler short-circuits all translation calls and returns a flag indicating the search ran directly in that language.
-  4. When Brave returns HTTP 429, the error surfaces as "search quota exceeded" and the request does not auto-retry; other network failures return a distinct error state.
-  5. Submit debounce (~1s) is enforced by the message contract such that rapid successive calls do not generate duplicate Brave requests.
-
-**Plans**: 4 plans
-
-- [x] 08-01-PLAN.md — SearchResult type + searchTranslated/testBraveKey message types + braveApiKey setting + search_quota error model (D-01, D-02, D-03, D-07)
-- [x] 08-02-PLAN.md — BraveSearchClient (src/brave-search.ts) + manifest host_permissions; web.results→SearchResult mapping, 429/network classification (SRCH-04)
-- [x] 08-03-PLAN.md — background searchTranslated + testBraveKey handlers: in-flight dedup, source==target direct flag, key-from-storage (SRCH-05, SRCH-06, XLT-01)
-- [x] 08-04-PLAN.md — options page Brave key field + worker-routed Test Brave Key button + live-key checkpoint (SSET-01, SSET-02)
-
-**UI hint**: yes
-
-### Phase 9: SERP Rendering
-
-**Goal**: A static search page renders a well-formed, XSS-safe SERP from a fixed mock result set, covering all display states a user can encounter — populated results, skeleton loading, empty, and each error variant.
-**Depends on**: Phase 8 (SearchResult type contract established)
-**Requirements**: SERP-01, SERP-02, SERP-03, SERP-04, SERP-05
-**Success Criteria** (what must be TRUE):
-
-  1. Each result row renders favicon + hostname, a translated title that is a clickable link, and a translated snippet — all from the SearchResult data.
-  2. Every result link's href is the verbatim original URL from Brave; no mutation, encoding change, proxy wrapping, or translation is applied to URLs.
-  3. A snippet containing raw HTML (e.g. `<strong>` highlights or `<script>` tags) is rendered as plain text and never executed — verified by injecting a `<script>alert(1)</script>` mock snippet.
-  4. While results are loading, skeleton placeholder rows are shown so the page is never blank during the 2-8s async window.
-  5. Each distinct error state (empty results, missing/invalid Brave key, network failure, quota exceeded/429) renders a unique, human-readable message rather than a generic error or blank page.
-
-**Plans**: 2 plans
-
-- [x] 09-01-PLAN.md — linkedom devDep + DOM-agnostic renderSerp/SerpState core + shared mock fixtures (7 states + XSS probe) + node:test harness (SERP-01..05)
-- [x] 09-02-PLAN.md — search.html shell + light-theme Google-style search.css + search.ts ?state= entry + 7-state visual walkthrough (SERP-01, SERP-04, SERP-05)
-
-**UI hint**: yes
-
-### Phase 10: Translation Pipeline
-
-**Goal**: Result titles and snippets are translated back to the user's language via a single batched LLM call that is robust to model misbehavior — count mismatches fall back to raw text rather than wrong or blank output — and the page renders progressively so a slow or failed translation still leaves usable results.
-**Depends on**: Phase 8 (searchTranslated handler, provider layer), Phase 9 (renderer accepts both raw and translated results)
-**Requirements**: XLT-02, XLT-03, XLT-04, XLT-05
-**Success Criteria** (what must be TRUE):
-
-  1. Result titles and snippets are translated in a single batched LLM call using a keyed JSON object; the provider receives only title and description fields — URLs and hostnames are never present in the translation prompt.
-  2. When the LLM returns fewer or more keyed entries than sent, the affected results display their original untranslated text rather than mismatched or blank content.
-  3. The page transitions through three visible stages: skeleton rows while Brave fetches, raw untranslated results immediately after the Brave response, then translated results overlaid after the LLM batch completes.
-  4. If the background service worker times out or the translation LLM call fails entirely, the user is left with readable raw Brave results rather than a blank or errored page.
-
-**Plans**: 2 plans
-
-- [x] 10-01-PLAN.md — src/translate-batch.ts pure functions (buildBatchPayload, buildBatchTranslatePrompt, parseBatchReply, mergeTranslations) + translateBatch message types + node:test harness (XLT-02, XLT-03, XLT-04, XLT-05)
-- [x] 10-02-PLAN.md — background.ts translateBatch worker case: provider+key guard, Promise.race 8s timeout, worker-side parseBatchReply, { translations } | { error, kind } (XLT-02, XLT-05)
-
-### Phase 11: Page Wiring & Popup Entry
-
-**Goal**: The translated search feature is fully connected end-to-end — a user opens it from the popup, enters a query in their own language, sees what it was translated to, and receives translated SERP results for that query.
-**Depends on**: Phase 9 (renderer), Phase 10 (translation pipeline)
-**Requirements**: SRCH-01, SRCH-02, SRCH-03
-**Success Criteria** (what must be TRUE):
-
-  1. Clicking the search button in the extension popup opens the bundled `search.html` page in a new tab.
-  2. After the user submits a query, the translated form of that query appears as a read-only disclosure line (e.g. "Searching in Japanese for: ___") above the results before results load.
-  3. The query is translated using explicit source-to-target direction and does not trigger the auto-flip behavior used by the inline translate modes; the language pair shown in the disclosure line matches the user's settings.
-
-**Plans**: 3 plans
-**Wave 1**
-
-- [x] 11-01-PLAN.md — worker-side query translation in searchTranslated (explicit source→target, source==target short-circuit, translatedQuery in response, raw-fallback on LLM failure) (SRCH-02)
-- [x] 11-02-PLAN.md — popup "Search" button opening search.html via chrome.tabs.create (launcher, no pre-fill) (SRCH-01)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 11-03-PLAN.md — page wiring: top search bar + read-only disclosure line + live 3-stage render (skeleton → raw → translated overlay) via renderSerp; ?state= mock driver removed (SRCH-03, XLT-05 page half)
-
-**UI hint**: yes
+> v1.2 phase details (Phases 8–11) archived to `milestones/v1.2-ROADMAP.md`.
 
 ## Progress
 

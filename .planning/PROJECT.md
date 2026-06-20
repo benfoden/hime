@@ -8,16 +8,14 @@ A Chrome extension that lets you type in English and get inline Japanese (or any
 
 Type English, get natural Japanese inline — without breaking your keyboard flow.
 
-## Current Milestone: v1.2 Translated Search
+## Next Milestone: v1.3 Image Translation
 
-**Goal:** An extension page where the user searches in their own language, the query runs against Brave Search in the target language, and results render as a classic Google-style SERP translated back into the user's language, each linking to the original page.
+**Status:** To be scoped via `/gsd-new-milestone` (phases 12+). After v1.3: v1.4 contextual-hints.
 
-**Target features:**
-- Translated-search page bundled in the extension (new surface)
-- Query translation (user language → target language) before search
-- Brave Search API integration, BYOK key in settings (stored in chrome.storage like LLM keys)
-- Result translation (target language → user language) via existing OpenAI/Gemini/OpenRouter provider layer
-- Results UI: classic SERP layout showing translated title/snippet, links back to original (untranslated) source pages
+## Shipped Milestone: v1.2 Translated Search
+
+**Shipped 2026-06-20** (phases 8–11, 11 plans). Audit passed 17/18 — see `milestones/v1.2-MILESTONE-AUDIT.md`.
+An in-extension search page: query translated user→target language, run against Brave Search (BYOK), results rendered as a classic Google-style SERP back-translated target→user, each linking to the verbatim original page. Three-stage progressive render (skeleton → raw → translated overlay), XSS-safe, all network through the background worker.
 
 ## Paused Milestone: v1.1 Inline Predictions
 
@@ -49,10 +47,16 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 - ✓ Loading overlay with guaranteed cleanup on failure — Phase 3
 - ✓ Cursor-end positioning after translation — Phase 3
 - ✓ Focus-leave compose cleanup via focusout handler — Phase 3
+- ✓ In-extension Translated Search page: query translation (source→target) + Brave Search BYOK + classic SERP — v1.2
+- ✓ Batched keyed-JSON result translation (target→source) with count-assertion raw fallback — v1.2
+- ✓ Three-stage progressive render (skeleton → raw Brave → translated overlay) — v1.2
+- ✓ XSS-safe SERP rendering (textContent-only, verbatim original hrefs) — v1.2
+- ✓ All search/translation network routed through background worker (no key on page) — v1.2
 
 ### Active
 
-- v1.2 Translated Search — see REQUIREMENTS.md (translated-search page, query+result translation, Brave Search BYOK, classic SERP UI)
+- v1.3 Image Translation — next milestone, to be scoped via `/gsd-new-milestone`
+- v1.4 Contextual Hints — queued after v1.3
 - v1.1 Inline Predictions — PAUSED (phase 5 shelved behind PREDICT_ENABLED flag; phases 6–7 unbuilt)
 
 ### Out of Scope (v1.0)
@@ -69,9 +73,10 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 
 ## Current State
 
-**Shipped:** v1.0 MVP (2026-05-25) — 5 phases, 8 plans, 63 commits
-**Codebase:** ~2,000 LOC TypeScript + 480 LOC tests (40 passing)
-**Providers:** OpenAI, Gemini, OpenRouter (3 providers via abstraction layer)
+**Shipped:** v1.0 MVP (2026-05-25); v1.2 Translated Search (2026-06-20, phases 8–11)
+**Paused:** v1.1 Inline Predictions (phase 5 shelved behind `PREDICT_ENABLED=false`; phases 6–7 unbuilt)
+**Codebase:** TypeScript + Chrome MV3; 137 tests passing / 1 skip
+**Providers:** OpenAI, Gemini, OpenRouter (LLM); Brave Search (search, BYOK)
 **Compatibility:** Verified on Gmail, GitHub, Twitter/X, Notion, Slack, Discord; Google Docs graceful degradation
 
 ## Context
@@ -109,6 +114,11 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 | One-level Shadow DOM traversal | Closed roots are inaccessible per spec; multi-level traversal is over-engineering | ✓ Good — Phase 3 |
 | OpenRouter via OpenAI-compatible API | Single integration pattern, dynamic model fetching, minimal code | ✓ Good — Phase 02.1 |
 | Skip Web Store for v1.0 | Dev load-unpacked sufficient; store submission deferred to future milestone | ✓ Good — Phase 4 |
+| Brave Search as the v1.2 search backend (BYOK) | Single-provider focus; abstraction deferred until a second provider is needed | ✓ Good — v1.2 |
+| Keyed-JSON batch translation with count-assertion fallback | One LLM call for all results; on count mismatch fall back to raw text — never blank/mismapped | ✓ Good — v1.2 |
+| Three-stage progressive render (skeleton → raw → translated overlay) | A worker timeout or translation failure still leaves usable untranslated results | ✓ Good — v1.2 |
+| XSS-safe SERP via textContent-only + verbatim hrefs | Brave description HTML stripped to text; URLs never mutated/translated (SERP-02/03) | ✓ Good — v1.2 |
+| SRCH-06: in-flight dedup instead of literal ~1s submit debounce | Worker dedup map covers duplicate-call intent; a literal debounce would delay deliberate submits | ✓ Good — v1.2 audit |
 
 ## Evolution
 
@@ -128,4 +138,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-02 — milestone v1.2 Translated Search started (v1.1 paused)*
+*Last updated: 2026-06-20 — v1.2 Translated Search shipped; next milestone v1.3 Image Translation (v1.1 paused)*

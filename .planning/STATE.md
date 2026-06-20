@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Translated Search
-status: executing
-stopped_at: Phase 11 Plan 03 Tasks 1-3 complete — awaiting human-verify at Task 4
-last_updated: "2026-06-20T16:58:03.172Z"
-last_activity: 2026-06-20
+status: Awaiting next milestone
+stopped_at: v1.2 milestone complete and archived — ready to scope v1.3
+last_updated: "2026-06-20T17:59:25.212Z"
+last_activity: 2026-06-20 — Milestone v1.2 completed and archived
 progress:
   total_phases: 7
   completed_phases: 5
@@ -18,20 +18,18 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-02)
+See: .planning/PROJECT.md (updated 2026-06-20)
 
 **Core value:** Type English, get natural Japanese inline — without breaking your keyboard flow.
-**Current milestone:** v1.2 Translated Search (phases 8-11)
-**Current focus:** Phase 10 — translation-pipeline
+**Last shipped:** v1.2 Translated Search (phases 8-11, 2026-06-20)
+**Current focus:** Scope next milestone v1.3 Image Translation via `/gsd-new-milestone`
 
 ## Current Position
 
-Phase: 11
-Plan: Not started
-Status: Executing
-Last activity: 2026-06-20
-
-Progress (v1.2): [████████░░] Phase 11 Plan 03/3 in progress
+Phase: Milestone v1.2 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-20 — Milestone v1.2 completed and archived
 
 ## Performance Metrics
 
@@ -88,3 +86,7 @@ None yet.
 Last session: 2026-06-19T22:10:00Z
 Stopped at: Phase 11 Plan 03 Tasks 1-3 complete — awaiting human-verify at Task 4
 Resume file: .planning/phases/11-page-wiring-popup-entry/11-03-PLAN.md
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
