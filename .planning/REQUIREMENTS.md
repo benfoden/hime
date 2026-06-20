@@ -15,7 +15,7 @@
 - [x] **SRCH-03**: The translated query is shown to the user as a read-only disclosure line (e.g. "Searching in Japanese for: …") above the results — not editable.
 - [x] **SRCH-04**: The translated query is sent to the Brave Search API and web results are retrieved.
 - [x] **SRCH-05**: When source language == target language, all translation is skipped (no-op short-circuit) and the search runs directly, with a notice that it searched directly in that language.
-- [x] **SRCH-06**: Submit is debounced (~1s) to avoid duplicate Brave calls / rate-limit waste.
+- [x] **SRCH-06**: Duplicate Brave calls / rate-limit waste are avoided. _(Satisfied via worker-level in-flight dedup map D-05, which coalesces concurrent identical queries. The literal ~1s submit debounce was intentionally dropped at v1.2 audit: it would delay deliberate Enter/button submits on an explicit-submit form; dedup covers the intent.)_
 
 ### Results SERP (SERP)
 
