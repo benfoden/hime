@@ -64,15 +64,17 @@
     <section>
       <h2>Translation</h2>
       
-      <div class="form-row">
+      <div class="form-row lang-row">
         <div class="form-group">
           <label for="sourceLanguage">Source Language</label>
-          <input type="text" id="sourceLanguage" value="English">
+          <select id="sourceLanguage"></select>
         </div>
-        
+
+        <button id="swapLanguages" type="button" class="swap-btn" title="Swap source and target" aria-label="Swap source and target language">⇄</button>
+
         <div class="form-group">
           <label for="targetLanguage">Target Language</label>
-          <input type="text" id="targetLanguage" value="Japanese">
+          <select id="targetLanguage"></select>
         </div>
       </div>
       

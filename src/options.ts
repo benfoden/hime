@@ -1,12 +1,13 @@
-import { DEFAULT_SETTINGS, PROVIDER_MODELS, OPENROUTER_ALLOWLIST, MODEL_META, migrateSettings, metaLabel, type Settings, type UsageRecord } from './types.js';
+import { DEFAULT_SETTINGS, PROVIDER_MODELS, OPENROUTER_ALLOWLIST, MODEL_META, SUPPORTED_LANGUAGES, migrateSettings, metaLabel, type Settings, type UsageRecord } from './types.js';
 
 // DOM Elements
 let providerSelect: HTMLSelectElement;
 let apiKeyInput: HTMLInputElement;
 let modelSelect: HTMLSelectElement;
 let storageModeSelect: HTMLSelectElement;
-let sourceLanguageInput: HTMLInputElement;
-let targetLanguageInput: HTMLInputElement;
+let sourceLanguageSelect: HTMLSelectElement;
+let targetLanguageSelect: HTMLSelectElement;
+let swapLanguagesBtn: HTMLButtonElement;
 let formalitySelect: HTMLSelectElement;
 let customPromptTextarea: HTMLTextAreaElement;
 let testConnectionBtn: HTMLButtonElement;
@@ -94,6 +95,23 @@ async function loadSettings(): Promise<void> {
   await updateModelOptions();
 }
 
+// Fill a language <select> with SUPPORTED_LANGUAGES, ensuring the currently
+// stored value is present (legacy/custom free-text values are injected so they
+// are never silently dropped) and selected.
+function populateLanguageSelect(select: HTMLSelectElement, current: string): void {
+  const options = SUPPORTED_LANGUAGES.includes(current)
+    ? [...SUPPORTED_LANGUAGES]
+    : [current, ...SUPPORTED_LANGUAGES];
+  select.replaceChildren();
+  for (const lang of options) {
+    const opt = document.createElement('option');
+    opt.value = lang;
+    opt.textContent = lang;
+    select.appendChild(opt);
+  }
+  select.value = current;
+}
+
 // Populate form with current settings
 function populateForm(): void {
   providerSelect.value = currentSettings.provider;
@@ -101,8 +119,8 @@ function populateForm(): void {
   braveApiKeyInput.value = currentSettings.braveApiKey || '';
   modelSelect.value = currentSettings.model;
   storageModeSelect.value = currentSettings.storageMode;
-  sourceLanguageInput.value = currentSettings.sourceLanguage;
-  targetLanguageInput.value = currentSettings.targetLanguage;
+  populateLanguageSelect(sourceLanguageSelect, currentSettings.sourceLanguage);
+  populateLanguageSelect(targetLanguageSelect, currentSettings.targetLanguage);
   formalitySelect.value = currentSettings.formality;
   customPromptTextarea.value = currentSettings.customPrompt || '';
   predictHotkeyBtn.textContent = currentSettings.predictHotkey;
@@ -201,8 +219,8 @@ async function saveSettings(): Promise<void> {
     apiKeys: updatedKeys,
     model: modelSelect.value,
     storageMode: storageModeSelect.value as 'persistent' | 'session',
-    sourceLanguage: sourceLanguageInput.value,
-    targetLanguage: targetLanguageInput.value,
+    sourceLanguage: sourceLanguageSelect.value,
+    targetLanguage: targetLanguageSelect.value,
     formality: formalitySelect.value as 'auto' | 'casual' | 'polite' | 'formal',
     customPrompt: customPromptTextarea.value || undefined,
     predictHotkey: currentSettings.predictHotkey,
@@ -382,8 +400,9 @@ document.addEventListener('DOMContentLoaded', () => {
   apiKeyInput = document.getElementById('apiKey') as HTMLInputElement;
   modelSelect = document.getElementById('model') as HTMLSelectElement;
   storageModeSelect = document.getElementById('storageMode') as HTMLSelectElement;
-  sourceLanguageInput = document.getElementById('sourceLanguage') as HTMLInputElement;
-  targetLanguageInput = document.getElementById('targetLanguage') as HTMLInputElement;
+  sourceLanguageSelect = document.getElementById('sourceLanguage') as HTMLSelectElement;
+  targetLanguageSelect = document.getElementById('targetLanguage') as HTMLSelectElement;
+  swapLanguagesBtn = document.getElementById('swapLanguages') as HTMLButtonElement;
   formalitySelect = document.getElementById('formality') as HTMLSelectElement;
   customPromptTextarea = document.getElementById('customPrompt') as HTMLTextAreaElement;
   testConnectionBtn = document.getElementById('testConnection') as HTMLButtonElement;
@@ -416,6 +435,14 @@ document.addEventListener('DOMContentLoaded', () => {
     currentSettings.provider = providerSelect.value as Settings['provider'];
     apiKeyInput.value = currentSettings.apiKeys[currentSettings.provider] || '';
     updateModelOptions();
+  });
+  // Swap the source/target language values in place (each dropdown carries the
+  // other's value as an option once populated, so assignment always succeeds).
+  swapLanguagesBtn.addEventListener('click', () => {
+    const src = sourceLanguageSelect.value;
+    const tgt = targetLanguageSelect.value;
+    populateLanguageSelect(sourceLanguageSelect, tgt);
+    populateLanguageSelect(targetLanguageSelect, src);
   });
   testConnectionBtn.addEventListener('click', testConnection);
   testBraveKeyBtn.addEventListener('click', testBraveKey);

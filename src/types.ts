@@ -159,6 +159,32 @@ export interface SetBadgeMessage extends Message {
   };
 }
 
+// Supported translation languages (display names — sent verbatim to the LLM as
+// the language name). Used to populate the source/target dropdowns in options.
+// Stored free-text values not in this list are still honored: options.ts injects
+// the persisted value as an extra option so legacy/custom settings never break.
+export const SUPPORTED_LANGUAGES: readonly string[] = [
+  'English',
+  'Japanese',
+  'Korean',
+  'Chinese (Simplified)',
+  'Chinese (Traditional)',
+  'Spanish',
+  'French',
+  'German',
+  'Italian',
+  'Portuguese',
+  'Dutch',
+  'Russian',
+  'Polish',
+  'Turkish',
+  'Arabic',
+  'Hindi',
+  'Vietnamese',
+  'Thai',
+  'Indonesian',
+];
+
 // Default settings
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'openai',

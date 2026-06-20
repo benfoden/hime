@@ -59,7 +59,46 @@ body {
 .search-controls {
   display: flex;
   align-items: center;
+  gap: 12px;
   margin-bottom: 16px;
+}
+
+/* ── Loading state + elapsed-millisecond timer ── */
+
+.search-timer {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #4d5156;
+  font-variant-numeric: tabular-nums;
+  min-height: 16px;
+}
+
+.search-timer.is-running {
+  color: #4A90D9;
+}
+
+/* Spinner shown only while a search/translate is in flight. */
+.search-timer.is-running::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(74, 144, 217, 0.3);
+  border-top-color: #4A90D9;
+  border-radius: 50%;
+  animation: hime-spin 0.7s linear infinite;
+}
+
+@keyframes hime-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-timer.is-running::before {
+    animation: none;
+  }
 }
 
 .translate-toggle {

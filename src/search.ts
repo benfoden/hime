@@ -53,6 +53,56 @@ let lastRaw: SearchResult[] | null = null; // target-language Brave rows
 let lastTranslated: SearchResult[] | null = null; // source-language overlay (lazy)
 let lastInTargetLang = false; // is lastRaw in the target language (translation actually happened)?
 
+// ── Loading state + elapsed-millisecond timer ────────────────────────────────
+// A single status line shows a spinner + live elapsed ms while a search/translate
+// is in flight ("Searching… 234 ms"), then freezes on the final elapsed time
+// ("Searched + translated · 812 ms"). The page is browser-only and untested, so
+// this lives here rather than in a DOM-agnostic module.
+let timerEl: HTMLElement | null = null;
+let timerLabel = '';
+let timerStart = 0;
+let timerHandle: ReturnType<typeof setInterval> | null = null;
+
+function elapsedMs(): number {
+  return Math.round(performance.now() - timerStart);
+}
+
+function renderTimer(): void {
+  if (!timerEl) return;
+  timerEl.textContent = `${timerLabel} ${elapsedMs()} ms`;
+}
+
+function startTimer(label: string): void {
+  if (!timerEl) return;
+  timerLabel = label;
+  timerStart = performance.now();
+  timerEl.classList.add('is-running');
+  renderTimer();
+  if (timerHandle !== null) clearInterval(timerHandle);
+  timerHandle = setInterval(renderTimer, 50);
+}
+
+function setTimerLabel(label: string): void {
+  timerLabel = label;
+  renderTimer();
+}
+
+// Stop ticking. finalLabel: a frozen summary ("Searched · 320 ms") or '' to clear.
+function stopTimer(finalLabel?: string): void {
+  if (timerHandle !== null) {
+    clearInterval(timerHandle);
+    timerHandle = null;
+  }
+  if (!timerEl) return;
+  timerEl.classList.remove('is-running');
+  if (finalLabel === undefined) {
+    const ms = Math.round(performance.now() - timerStart);
+    timerEl.textContent = `${timerLabel} · ${ms} ms`;
+  } else {
+    timerEl.textContent = finalLabel;
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   // Resolve DOM elements
   const form = document.getElementById('search-form') as HTMLFormElement | null;
@@ -62,6 +112,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const toggle = document.getElementById('translate-results') as HTMLInputElement | null;
   const toggleLabel = document.getElementById('translate-results-label') as HTMLElement | null;
   const settingsLink = document.getElementById('open-settings') as HTMLElement | null;
+  timerEl = document.getElementById('search-timer');
 
   if (!form || !input || !disclosure || !mount) {
     // DOM incomplete — bail out gracefully (should never happen in production)
@@ -113,7 +164,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch {
       // Persist best-effort; the in-memory toggle still takes effect this session.
     }
-    void applyOverlay(mount, ++currentRun);
+    // Only the first translate-on for a given search hits the worker; cached
+    // re-applies are instant. Show the timer only when real work will happen.
+    const willTranslate = backTranslate && lastInTargetLang && !lastTranslated;
+    const token = ++currentRun;
+    if (willTranslate) startTimer('Translating results…');
+    void applyOverlay(mount, token).then(() => {
+      if (willTranslate && currentRun === token) stopTimer(`Translated results · ${elapsedMs()} ms`);
+    });
   });
 
   // Settings nav: open the extension's options page.
@@ -151,6 +209,7 @@ async function runSearch(
     lastRaw = null;
     lastTranslated = null;
     lastInTargetLang = false;
+    stopTimer('');
     return;
   }
 
@@ -160,6 +219,9 @@ async function runSearch(
   lastRaw = null;
   lastTranslated = null;
   lastInTargetLang = false;
+
+  // Start the elapsed-ms timer for the whole pipeline (search → render → overlay).
+  startTimer('Searching…');
 
   // ── Stage 1: Send searchTranslated to worker ────────────────────────────
   let reply: SearchTranslatedResponse;
@@ -175,6 +237,7 @@ async function runSearch(
       document,
       mount,
     );
+    stopTimer('');
     return;
   }
 
@@ -218,12 +281,14 @@ async function runSearch(
       document,
       mount,
     );
+    stopTimer('');
     return;
   }
 
   // No results → empty state
   if (!reply.results || reply.results.length === 0) {
     renderSerp({ kind: 'empty' }, document, mount);
+    stopTimer(`No results · ${elapsedMs()} ms`);
     return;
   }
 
@@ -237,7 +302,20 @@ async function runSearch(
   lastInTargetLang = !reply.direct && !reply.translationFailed && !!reply.translatedQuery;
 
   // ── Stage 5: Back-translate overlay (gated by the toggle) ────────────────
+  // If the overlay will actually translate, switch the live label; otherwise the
+  // search itself is done and the overlay is a no-op / instant raw render.
+  const willTranslate = backTranslate && lastInTargetLang;
+  if (willTranslate) {
+    setTimerLabel('Translating results…');
+  }
   await applyOverlay(mount, runToken);
+  // Freeze the timer — but only if this is still the active run (a newer search
+  // or toggle may have started while we awaited the overlay; T-11-09).
+  if (currentRun === runToken) {
+    stopTimer(willTranslate
+      ? `Searched + translated · ${elapsedMs()} ms`
+      : `Searched · ${elapsedMs()} ms`);
+  }
 }
 
 /**

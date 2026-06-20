@@ -58,6 +58,28 @@ section {
   flex: 1;
 }
 
+/* Language row: two dropdowns with a swap button between them. The button
+   aligns to the dropdowns (labels sit above), so nudge it down past the label. */
+.lang-row {
+  align-items: flex-end;
+}
+
+.swap-btn {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+  padding: 10px 14px;
+  background: #3a3a3a;
+  color: #5fa3e8;
+  border: 1px solid #444;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.swap-btn:hover {
+  background: #474747;
+  border-color: #5fa3e8;
+}
+
 label {
   display: block;
   margin-bottom: 6px;
