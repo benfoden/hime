@@ -25,11 +25,56 @@ body {
   padding: 30px;
 }
 
+/* ── Header: title + settings nav link ── */
+
+.page-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
 .page-title {
   font-size: 22px;
   font-weight: 500;
   color: #4A90D9;
-  margin: 0 0 24px 0;
+  margin: 0;
+}
+
+.settings-link {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #4A90D9;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.settings-link:hover {
+  text-decoration: underline;
+}
+
+/* ── Controls row: back-translate results toggle ── */
+
+.search-controls {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.translate-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #4d5156;
+  cursor: pointer;
+  user-select: none;
+}
+
+.translate-toggle input {
+  cursor: pointer;
+  accent-color: #4A90D9;
 }
 
 /* ── Top search bar (#search-form, #search-input, #search-submit) — D-09 ── */

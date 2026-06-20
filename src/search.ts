@@ -9,7 +9,14 @@
 //   1. User submits query → searchTranslated (worker translates + Brave-searches)
 //   2. Disclosure line + skeleton appear (D-11: disclosure before skeleton)
 //   3. Raw Brave results render (renderSerp populated)
-//   4. translateBatch overlay replaces titles/snippets (XLT-05 page half)
+//   4. translateBatch overlay translates titles/snippets BACK to the reader's
+//      source language (XLT-05 page half) — gated by the results toggle.
+//
+// Results back-translation: when source != target, Brave results come back in
+// the target language. The "Translate results to <source>" toggle (default on)
+// overlays a translation back to the reader's source language so an English
+// user can read Japanese results. Toggling re-applies from cache — no Brave
+// re-fetch (raw + translated views are both cached per search).
 //
 // Re-submit re-runs the pipeline in place (D-09). A run counter guards against
 // stale translateBatch overlays clobbering a newer search (T-11-09).
@@ -19,14 +26,16 @@ import { buildDisclosureText } from './disclosure.js';
 import type { DisclosureInput } from './disclosure.js';
 import { buildBatchPayload, mergeTranslations } from './translate-batch.js';
 import type {
+  SearchResult,
   SearchTranslatedResponse,
   TranslateBatchResponse,
   TranslationConfig,
 } from './types.js';
 
-// In-flight run counter. Incremented on each runSearch call. Each async
-// continuation captures its own token and checks it before applying the
-// translateBatch overlay — stale overlays are silently discarded (T-11-09).
+// In-flight run counter. Incremented on each runSearch call (and each toggle
+// re-apply). Each async continuation captures its own token and checks it
+// before applying the translateBatch overlay — stale overlays are silently
+// discarded (T-11-09).
 let currentRun = 0;
 
 // Settings read once at page load (sourceLanguage / targetLanguage / formality).
@@ -34,17 +43,39 @@ let sourceLanguage = 'English';
 let targetLanguage = 'Japanese';
 let formality: TranslationConfig['formality'] = 'auto';
 
+// Results back-translation toggle (persisted). Default on.
+let backTranslate = true;
+const TOGGLE_KEY = 'himeSearchTranslateResults';
+
+// Cache of the most recent search so toggling the checkbox re-applies the
+// overlay WITHOUT a Brave re-fetch (and without re-translating once cached).
+let lastRaw: SearchResult[] | null = null; // target-language Brave rows
+let lastTranslated: SearchResult[] | null = null; // source-language overlay (lazy)
+let lastInTargetLang = false; // is lastRaw in the target language (translation actually happened)?
+
 document.addEventListener('DOMContentLoaded', async () => {
   // Resolve DOM elements
   const form = document.getElementById('search-form') as HTMLFormElement | null;
   const input = document.getElementById('search-input') as HTMLInputElement | null;
   const disclosure = document.getElementById('disclosure') as HTMLElement | null;
   const mount = document.getElementById('results') as HTMLElement | null;
+  const toggle = document.getElementById('translate-results') as HTMLInputElement | null;
+  const toggleLabel = document.getElementById('translate-results-label') as HTMLElement | null;
+  const settingsLink = document.getElementById('open-settings') as HTMLElement | null;
 
   if (!form || !input || !disclosure || !mount) {
     // DOM incomplete — bail out gracefully (should never happen in production)
     return;
   }
+
+  // Load the persisted toggle state (default on). Absent/true → on; explicit false → off.
+  try {
+    const stored = await chrome.storage.local.get(TOGGLE_KEY);
+    backTranslate = stored?.[TOGGLE_KEY] !== false;
+  } catch {
+    // Storage unavailable — keep default (on)
+  }
+  if (toggle) toggle.checked = backTranslate;
 
   // Read settings once. If the worker is unavailable, keep defaults.
   try {
@@ -61,12 +92,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Worker not available — use defaults; page degrades gracefully
   }
 
+  // Label reflects the reader's source language ("Translate results to English").
+  if (toggleLabel) toggleLabel.textContent = `Translate results to ${sourceLanguage}`;
+
   // Attach submit handler. The <form> element handles both Enter and button
   // click natively (D-09) — no keydown listener needed.
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const query = input.value.trim();
     void runSearch(query, disclosure, mount);
+  });
+
+  // Toggle: persist the preference and re-apply the overlay from cache. No
+  // Brave re-fetch — we already hold the raw rows; the translated view is cached
+  // after its first computation.
+  toggle?.addEventListener('change', () => {
+    backTranslate = !!toggle.checked;
+    try {
+      void chrome.storage.local.set({ [TOGGLE_KEY]: backTranslate });
+    } catch {
+      // Persist best-effort; the in-memory toggle still takes effect this session.
+    }
+    void applyOverlay(mount, ++currentRun);
+  });
+
+  // Settings nav: open the extension's options page.
+  settingsLink?.addEventListener('click', (event) => {
+    event.preventDefault();
+    try {
+      chrome.runtime.openOptionsPage();
+    } catch {
+      // Options page unavailable — no-op
+    }
   });
 });
 
@@ -77,7 +134,7 @@ document.addEventListener('DOMContentLoaded', async () => {
  *   1. Guard + settings
  *   2. searchTranslated → disclosure line (textContent) + loading skeleton
  *   3. Raw results render (populated)
- *   4. translateBatch overlay (replaces titles/snippets)
+ *   4. translateBatch overlay (back-translates titles/snippets to source — gated)
  *
  * Re-submitting increments currentRun so a stale overlay from a prior query
  * is silently dropped before it can clobber the newer search (T-11-09).
@@ -87,15 +144,22 @@ async function runSearch(
   disclosure: HTMLElement,
   mount: HTMLElement,
 ): Promise<void> {
-  // Guard: empty query → clear page
+  // Guard: empty query → clear page and drop any cached results.
   if (!query) {
     disclosure.textContent = '';
     mount.replaceChildren();
+    lastRaw = null;
+    lastTranslated = null;
+    lastInTargetLang = false;
     return;
   }
 
-  // Claim this run's token (increment before any await)
+  // Claim this run's token (increment before any await). Also invalidates any
+  // cached overlay from a prior search.
   const runToken = ++currentRun;
+  lastRaw = null;
+  lastTranslated = null;
+  lastInTargetLang = false;
 
   // ── Stage 1: Send searchTranslated to worker ────────────────────────────
   let reply: SearchTranslatedResponse;
@@ -166,10 +230,59 @@ async function runSearch(
   // ── Stage 4: Raw Brave results ───────────────────────────────────────────
   renderSerp({ kind: 'populated', results: reply.results }, document, mount);
 
-  // ── Stage 5: translateBatch overlay ─────────────────────────────────────
-  // Build the batch payload (title + description only; no URL — XLT-04 / T-11-08)
-  const items = buildBatchPayload(reply.results);
-  const config: TranslationConfig = { sourceLanguage, targetLanguage, formality };
+  // Cache for cheap toggle re-apply. Results are in the TARGET language only when
+  // a source→target translation actually happened (not direct, not failed).
+  lastRaw = reply.results;
+  lastTranslated = null;
+  lastInTargetLang = !reply.direct && !reply.translationFailed && !!reply.translatedQuery;
+
+  // ── Stage 5: Back-translate overlay (gated by the toggle) ────────────────
+  await applyOverlay(mount, runToken);
+}
+
+/**
+ * Apply (or remove) the results-back-translation overlay using the cached raw
+ * rows from the most recent search — no Brave re-fetch.
+ *
+ * - Toggle off, or results not in the target language → show the raw rows.
+ * - Toggle on + results in target language → translate titles/snippets BACK to
+ *   the reader's source language (target→source) and overlay them. The first
+ *   computation hits translateBatch; the result is cached so subsequent toggles
+ *   are instant. On any failure the raw rows stay visible (XLT-05 graceful
+ *   degradation).
+ *
+ * runToken guards against a stale apply (newer search/toggle started while we
+ * awaited the worker) clobbering the page.
+ */
+async function applyOverlay(mount: HTMLElement, runToken: number): Promise<void> {
+  if (!lastRaw) return;
+
+  // No back-translation wanted (toggle off) or nothing to translate back
+  // (results already in the reader's language) → show raw rows.
+  if (!backTranslate || !lastInTargetLang) {
+    if (currentRun === runToken) {
+      renderSerp({ kind: 'populated', results: lastRaw }, document, mount);
+    }
+    return;
+  }
+
+  // Cached translation → render instantly.
+  if (lastTranslated) {
+    if (currentRun === runToken) {
+      renderSerp({ kind: 'populated', results: lastTranslated }, document, mount);
+    }
+    return;
+  }
+
+  // Compute the overlay: translate target→source (back to the reader's language).
+  // Direction is swapped vs the query path: results arrive in the target language
+  // and must come back to the source language the reader understands.
+  const items = buildBatchPayload(lastRaw);
+  const config: TranslationConfig = {
+    sourceLanguage: targetLanguage,
+    targetLanguage: sourceLanguage,
+    formality,
+  };
 
   let batchReply: TranslateBatchResponse;
   try {
@@ -182,8 +295,8 @@ async function runSearch(
     return;
   }
 
-  // Guard: if a newer run started while we awaited translateBatch, discard
-  // this stale overlay — don't clobber the newer search (T-11-09)
+  // Guard: if a newer run/toggle started while we awaited translateBatch, discard
+  // this stale overlay — don't clobber the newer state (T-11-09).
   if (currentRun !== runToken) {
     return;
   }
@@ -193,7 +306,7 @@ async function runSearch(
     return;
   }
 
-  // Apply translated overlay: merge translations onto raw results
-  const translatedResults = mergeTranslations(reply.results, batchReply.translations);
-  renderSerp({ kind: 'populated', results: translatedResults }, document, mount);
+  // Apply translated overlay: merge translations onto raw results, then cache.
+  lastTranslated = mergeTranslations(lastRaw, batchReply.translations);
+  renderSerp({ kind: 'populated', results: lastTranslated }, document, mount);
 }
