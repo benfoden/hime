@@ -10,9 +10,9 @@
 
 ### Search & Query (SRCH)
 
-- [ ] **SRCH-01**: From the toolbar popup, the user can open a bundled Translated Search page (`search.html`) via `chrome.tabs.create(getURL(...))`.
+- [x] **SRCH-01**: From the toolbar popup, the user can open a bundled Translated Search page (`search.html`) via `chrome.tabs.create(getURL(...))`.
 - [x] **SRCH-02**: The user enters a query in their own (source) language; on submit it is translated to the configured target language using an explicit source→target direction (NOT the auto-flip used by in-field translate).
-- [ ] **SRCH-03**: The translated query is shown to the user as a read-only disclosure line (e.g. "Searching in Japanese for: …") above the results — not editable.
+- [x] **SRCH-03**: The translated query is shown to the user as a read-only disclosure line (e.g. "Searching in Japanese for: …") above the results — not editable.
 - [x] **SRCH-04**: The translated query is sent to the Brave Search API and web results are retrieved.
 - [x] **SRCH-05**: When source language == target language, all translation is skipped (no-op short-circuit) and the search runs directly, with a notice that it searched directly in that language.
 - [x] **SRCH-06**: Submit is debounced (~1s) to avoid duplicate Brave calls / rate-limit waste.
@@ -64,9 +64,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SRCH-01 | Phase 11 | Pending |
-| SRCH-02 | Phase 11 | Pending |
-| SRCH-03 | Phase 11 | Pending |
+| SRCH-01 | Phase 11 | Complete |
+| SRCH-02 | Phase 11 | Complete |
+| SRCH-03 | Phase 11 | Complete |
 | SRCH-04 | Phase 8 | Complete |
 | SRCH-05 | Phase 8 | Complete |
 | SRCH-06 | Phase 8 | Complete |

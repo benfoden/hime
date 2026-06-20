@@ -35,7 +35,7 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 - [x] **Phase 8: API Integration Scaffold** - searchTranslated message type, BraveSearchClient, Brave key setting + test, source==target guard, 429 handling (completed 2026-06-03)
 - [x] **Phase 9: SERP Rendering** - SearchResult type, XSS-safe renderer, skeleton/empty/error states (completed 2026-06-03)
 - [x] **Phase 10: Translation Pipeline** - Keyed-JSON batch translation, count assertion, raw fallback, three-stage progressive render (completed 2026-06-10)
-- [ ] **Phase 11: Page Wiring & Popup Entry** - Full search.ts wired end-to-end, query translation disclosure line, debounce, popup button
+- [x] **Phase 11: Page Wiring & Popup Entry** - Full search.ts wired end-to-end, query translation disclosure line, debounce, popup button (completed 2026-06-20)
 
 ## Phase Details
 
@@ -164,11 +164,11 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 **Wave 1**
 
 - [x] 11-01-PLAN.md — worker-side query translation in searchTranslated (explicit source→target, source==target short-circuit, translatedQuery in response, raw-fallback on LLM failure) (SRCH-02)
-- [ ] 11-02-PLAN.md — popup "Search" button opening search.html via chrome.tabs.create (launcher, no pre-fill) (SRCH-01)
+- [x] 11-02-PLAN.md — popup "Search" button opening search.html via chrome.tabs.create (launcher, no pre-fill) (SRCH-01)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 11-03-PLAN.md — page wiring: top search bar + read-only disclosure line + live 3-stage render (skeleton → raw → translated overlay) via renderSerp; ?state= mock driver removed (SRCH-03, XLT-05 page half)
+- [x] 11-03-PLAN.md — page wiring: top search bar + read-only disclosure line + live 3-stage render (skeleton → raw → translated overlay) via renderSerp; ?state= mock driver removed (SRCH-03, XLT-05 page half)
 
 **UI hint**: yes
 
@@ -187,4 +187,4 @@ Phase 5 ghost-text engine is complete but shelved behind `PREDICT_ENABLED=false`
 | 8. API Integration Scaffold | v1.2 | 4/4 | Complete    | 2026-06-03 |
 | 9. SERP Rendering | v1.2 | 2/2 | Complete   | 2026-06-03 |
 | 10. Translation Pipeline | v1.2 | 2/2 | Complete    | 2026-06-10 |
-| 11. Page Wiring & Popup Entry | v1.2 | 1/3 | Executing | - |
+| 11. Page Wiring & Popup Entry | v1.2 | 3/3 | Complete    | 2026-06-20 |
