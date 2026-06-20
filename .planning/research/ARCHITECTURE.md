@@ -1,435 +1,393 @@
 # Architecture Research
 
-**Domain:** Chrome MV3 Extension — keyboard-native inline translation
-**Researched:** 2026-06-02 (updated for v1.2 Translated Search)
-**Confidence:** HIGH (derived from actual v1.0 codebase + v1.2 integration analysis)
+**Domain:** Chrome MV3 extension — image OCR + translation (cloud vision, BYOK), surfaced in a side panel
+**Researched:** 2026-06-20
+**Confidence:** HIGH (existing codebase read directly; Chrome sidePanel/contextMenus/network-request semantics verified against current developer.chrome.com docs)
+
+> Scope: v1.3 **new features only**. The existing v1.0–v1.2 architecture (background-worker-owns-all-network, typed content↔worker message contract, provider abstraction, BYOK in `chrome.storage`, XSS-safe `textContent`-only render) is the foundation we *integrate with* and *reuse* — not re-research. This document specifies how image translation bolts onto it and the dependency-ordered build sequence for phases 12+.
 
 ---
 
-## Part 1: Existing v1.0 Architecture (unchanged — for context)
+## Standard Architecture
 
-Chrome MV3 mandates a strict three-layer separation. The architecture is not optional — it is imposed by the platform:
+### System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                   USER / BROWSER LAYER                       │
-│  Keyboard shortcut → Chrome Commands API                     │
-│  Tab focus, active element, DOM events                       │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ chrome.runtime messages
-┌───────────────────────────▼─────────────────────────────────┐
-│              BACKGROUND SERVICE WORKER                       │
-│  background.ts                                               │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ Command      │  │ Message      │  │  Provider        │  │
-│  │ Handler      │  │ Handler      │  │  Registry        │  │
-│  │ (hotkeys)    │  │ (translate,  │  │  openai/gemini   │  │
-│  │              │  │  badge, etc) │  │                  │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-│                         ↕ fetch()                           │
-│                   ┌──────────────┐                          │
-│                   │ chrome.      │                          │
-│                   │ storage.*    │                          │
-│                   └──────────────┘                          │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ chrome.runtime messages
-┌───────────────────────────▼─────────────────────────────────┐
-│                   CONTENT SCRIPT                             │
-│  content.ts (injected into every page)                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ Compose Mode │  │ YOLO Mode    │  │  DOM Utilities   │  │
-│  │ State Machine│  │ Handler      │  │  getActiveEl,    │  │
-│  │              │  │              │  │  setElementText  │  │
-│  └──────────────┘  └──────────────┘  └──────────────────┘  │
-│                         ↕                                   │
-│                   ┌──────────────┐                          │
-│                   │ Host Page    │                          │
-│                   │ DOM / Input  │                          │
-│                   │ Elements     │                          │
-│                   └──────────────┘                          │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          CONTENT SCRIPT (content.js)                       │
+│                       isolated world — DOM/UX only, NO keys                │
+│  ┌────────────────────────┐        ┌──────────────────────────────────┐   │
+│  │ existing: compose/yolo │        │ NEW: image-observer wiring        │   │
+│  │ predict/swap handlers  │        │  • IntersectionObserver over <img>│   │
+│  └────────────────────────┘        │  • per-img WeakMap state (dedup) │   │
+│                                     │  • concurrency queue (gate cost) │   │
+│                                     │  • settings gate (default OFF)   │   │
+│                                     └───────────────┬──────────────────┘   │
+└────────────────────────────────────────────────────┼──────────────────────┘
+        ▲ contextMenus click (worker-side)            │ runtime.sendMessage
+        │ srcUrl arrives in worker, NOT via content   │ { type:'translateImage', payload:{ srcUrl } }
+        │                                              ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                      BACKGROUND SERVICE WORKER (background.js)              │
+│              owns ALL network + keys; single onMessage switch              │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐  │
+│  │ contextMenus    │  │ NEW: image-fetch │  │ NEW: vision provider     │  │
+│  │ .onClicked      │─▶│  fetch(srcUrl)   │─▶│  VisionProvider abstraction│ │
+│  │ (registers menu)│  │  → base64 + mime │  │  ocrTranslate(img,cfg,key)│  │
+│  └─────────────────┘  │  (captureVisible │  │  → {detectedText,          │  │
+│                       │   Tab fallback)  │  │     translation}          │  │
+│                       └──────────────────┘  └────────────┬─────────────┘  │
+│  reuse: getSettings(), recordUsage(), classifyError(), in-flight dedup     │
+└────────────────────────────────────────────────────────┼──────────────────┘
+                                                          │ sidePanel.open() +
+                                                          │ runtime.sendMessage / port
+                                                          ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                    SIDE PANEL PAGE (sidepanel.html / .js)                   │
+│   extension-origin page; full chrome.* access; renders result text         │
+│  ┌──────────────────────────────────────────────────────────────────┐     │
+│  │ NEW: panel-render.ts — original text + translation, per-image      │     │
+│  │  card list; XSS-safe textContent-only (reuse serp-render pattern)  │     │
+│  └──────────────────────────────────────────────────────────────────┘     │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Component Responsibilities (v1.0)
+### Component Responsibilities
 
-| Component | Responsibility | Implementation |
-|-----------|----------------|----------------|
-| `background.ts` | LLM API calls, badge control, hotkey routing, settings read/write | MV3 service worker; lives in the extension origin |
-| `content.ts` | DOM focus tracking, compose/YOLO mode state, text replacement | Injected at `document_end` on all URLs |
-| `providers/openai.ts` | OpenAI Chat Completions API call + prompt construction | Implements `TranslationProvider` interface |
-| `providers/gemini.ts` | Google Gemini API call + prompt construction | Same interface, different endpoint |
-| `types.ts` | Shared types: Settings, Messages, TranslationProvider interface | Pure type definitions, no runtime code |
-| `options.ts` / `options.html` | Settings page: key, model, language, formality, custom prompt | Standard extension options page |
-| `popup.ts` / `popup.html` | Toolbar popup for quick status / actions | Extension action popup |
+| Component | Responsibility | New / Modified | Built like |
+|-----------|----------------|----------------|------------|
+| `image-observer.ts` (content) | IntersectionObserver over `<img>`, dedup map, concurrency queue, settings gate | **NEW** | self-contained, no top-level import/export (content.js is a classic script — see Anti-Pattern 4) |
+| `contextMenus` block (background) | register "Translate image with hime" on `image` context; `onClicked` → resolve `srcUrl` → run pipeline → open panel | **NEW** (in background) | mirror existing `onInstalled`/`onMessage` registration style |
+| `image-fetch.ts` (background) | `fetch(srcUrl)` → `ArrayBuffer` → base64 + MIME; `captureVisibleTab` fallback for tainted/cross-origin-blocked | **NEW** | new helper module imported by background |
+| `VisionProvider` + `providers/vision-*.ts` | `ocrTranslate(imageB64, mime, config, apiKey, model)` → `{detectedText, translation}` | **NEW**, parallels `TranslationProvider` | clone `OpenAIProvider`/`GeminiProvider` fetch+classifyError+timeout shape |
+| `translateImage` case (background switch) | route content/menu request → fetch bytes → vision provider → respond / push to panel | **NEW** case in existing `onMessage` switch | identical shape to `searchTranslated` case |
+| `panel-render.ts` + `sidepanel.html/.ts` | render `{original, translation}` cards; loading/error states | **NEW** | clone `serp-render.ts` DOM-agnostic `textContent`-only renderer |
+| `background.ts` onMessage switch | host new `translateImage` case | **MODIFIED** | add one `case` |
+| `types.ts` | new message/result types, settings fields | **MODIFIED** | extend `MessageType` union, `Settings`, add `VisionProvider` interface |
+| `options.ts` / `options.html` | vision provider/key fields + progressive-mode toggle (default OFF) | **MODIFIED** | mirror `braveApiKey` field wiring |
+| `manifest.json` | add `sidePanel`, `contextMenus` perms; `side_panel.default_path`; vision host_permissions; image-host permission strategy | **MODIFIED** | additive |
 
 ---
 
-## Part 2: v1.2 Translated Search — Integration Architecture
-
-### The Core Question: Where Does Each Network Call Live?
-
-**Answer: ALL network calls (Brave Search + translation) must go through the background service worker.**
-
-**Reasoning for Brave Search specifically:**
-
-Extension pages (search.html / search.ts) are NOT content scripts — they run in the extension origin, not in a host page. This means they are *not* subject to host-page CSP restrictions. Technically, a direct `fetch()` to `https://api.search.brave.com/` from `search.ts` *could* work if `host_permissions` includes that domain.
-
-However, routing Brave Search through background.ts is still the correct choice for three reasons:
-
-1. **API key security**: The Brave Search API key must be read from `chrome.storage.local`. While `search.ts` can call `chrome.storage.local.get()` directly (extension pages have full storage access), centralizing all key-reads in background.ts follows the existing pattern where the background worker is the single point of storage access for sensitive credentials.
-
-2. **Consistency**: The existing pattern is explicit: background.ts owns ALL external fetch calls. `search.ts` mimicking this pattern means any future key rotation, request logging, or error-classification logic added to background.ts benefits search automatically.
-
-3. **Host permissions list**: Keeping the Brave domain declared once in manifest.json and accessed only from background.ts means `search.ts` needs zero new permissions. If search.ts called Brave directly, the same permission would be declared but split across two call sites.
-
-**Translation calls from search.ts follow the same pattern for the same reasons.** The existing `translate` message type is already used by content scripts to invoke the provider registry in background.ts — search.ts sends the same message type. No new message-type needed for translation.
-
-### v1.2 System Overview
-
-```
-┌───────────────────────────────────────────────────────────────────┐
-│  search.html / search.ts  (new extension page)                    │
-│  ┌─────────────────┐  ┌───────────────────────────────────────┐  │
-│  │ SearchInput     │  │ SerpRenderer                          │  │
-│  │ - query field   │  │ - renders SearchResult[]              │  │
-│  │ - submit button │  │ - title (translated), snippet (trans) │  │
-│  │ - loading state │  │ - href → original URL                 │  │
-│  └────────┬────────┘  └───────────────────────────────────────┘  │
-│           │  chrome.runtime.sendMessage                           │
-└───────────┼───────────────────────────────────────────────────────┘
-            │
-            ▼  { type: 'translateQuery', payload: { query } }
-┌───────────────────────────────────────────────────────────────────┐
-│  background.ts  (service worker)                                  │
-│                                                                   │
-│  Step 1: translateQuery                                           │
-│    translateText(query)  →  provider.translate()  →  LLM API     │
-│    ──────────────────────────────────────────────────────────     │
-│  Step 2: braveSearch (new handler)                                │
-│    BraveSearchClient.search(translatedQuery)  →  Brave API        │
-│    ──────────────────────────────────────────────────────────     │
-│  Step 3: translateResults (new handler)                           │
-│    batch translate titles+snippets  →  provider.translate() x N  │
-│    (or single batch call with all titles+snippets joined)         │
-│    ──────────────────────────────────────────────────────────     │
-│  Returns: { results: SearchResult[] }  back to search.ts          │
-└───────────────────────────────────────────────────────────────────┘
-```
-
-### Message Types (new and reused)
-
-**Reused (no changes to background.ts message handler):**
-- `translate` — search.ts can send this for query translation if a standalone call is needed. The existing handler works as-is.
-- `getSettings` — search.ts reads settings (to know source/target language) exactly like options.ts does.
-
-**New message types to add:**
-
-| Message Type | Direction | Payload | Response |
-|---|---|---|---|
-| `searchTranslated` | search.ts → background | `{ query: string }` | `{ results: SearchResult[] }` or `{ error: string }` |
-
-The `searchTranslated` message encapsulates the entire three-step flow (translate query → Brave search → translate results) as a single round-trip. This is cleaner than three separate messages because: (a) the search page has no intermediate use for the translated query text, and (b) the background can handle the entire pipeline atomically, including error handling at each step without multiple round-trip failures to manage in the UI.
-
-**If a separate query-translate step is needed for UX** (e.g., showing "searching in Japanese for: ..." before results arrive), split into two messages:
-
-| Message Type | Direction | Payload | Response |
-|---|---|---|---|
-| `translateQuery` | search.ts → background | `{ query: string }` | `{ translatedQuery: string }` |
-| `braveSearch` | search.ts → background | `{ translatedQuery: string }` | `{ results: RawSearchResult[] }` |
-
-Then results translation reuses the existing `translate` message type for each batch. However, this three-message approach adds round-trip complexity and is only justified if the UX needs intermediate states. Start with `searchTranslated` as the single atomic message.
-
-### Full Data Flow Diagram
-
-```
-User types query → clicks Search
-    ↓
-search.ts: chrome.runtime.sendMessage({ type: 'searchTranslated', payload: { query } })
-    ↓
-background.ts: case 'searchTranslated'
-    ├─ [Step 1] translateText(query)
-    │    └─ providers[settings.provider].translate(query, {
-    │         sourceLanguage: settings.sourceLanguage,   // e.g. "English"
-    │         targetLanguage: settings.targetLanguage,   // e.g. "Japanese"
-    │         ...
-    │       }, apiKey, model)
-    │    └─ returns translatedQuery (e.g. "機械学習")
-    │
-    ├─ [Step 2] BraveSearchClient.search(translatedQuery, braveApiKey)
-    │    └─ fetch('https://api.search.brave.com/res/v1/web/search', {
-    │         headers: { 'X-Subscription-Token': braveApiKey, 'Accept': 'application/json' }
-    │       })
-    │    └─ returns RawSearchResult[] (title, url, description in target language)
-    │
-    ├─ [Step 3] batch translate titles + snippets
-    │    Option A (simple): one translate call per result, sequential or parallel
-    │    Option B (efficient): join all titles+snippets with separator, one LLM call
-    │    └─ returns translated title + snippet pairs
-    │
-    └─ sendResponse({ results: SearchResult[] })
-         // SearchResult = { title: string, url: string, snippet: string }
-         // title + snippet are translated; url is the original untouched
-
-search.ts: receives results → SerpRenderer.render(results)
-```
-
-**Result translation batching recommendation:** Join all titles and snippets into one LLM call with a structured separator (e.g., XML-tagged blocks or a JSON array). One API call for 10 results is far cheaper than 10 separate calls. The provider's `translate()` method already accepts arbitrary text — pass a structured batch string and parse it back. This detail belongs in a helper function in `search.ts` or a new `src/search-util.ts`.
-
-### New and Modified Files
-
-**New files:**
-
-| File | Purpose |
-|---|---|
-| `src/search.html` | Extension page HTML — search input + SERP container |
-| `src/search.ts` | Page controller — handles input, sends messages, passes results to renderer |
-| `src/search.css` | SERP styles — classic result list layout |
-| `src/search-renderer.ts` | Pure function: `renderResults(results: SearchResult[]): void` — DOM updates only, no I/O |
-| `src/brave-search.ts` | `BraveSearchClient` — wraps `fetch()` to Brave API, maps response to `RawSearchResult[]` |
-
-**Modified files:**
-
-| File | Changes |
-|---|---|
-| `src/background.ts` | Add `case 'searchTranslated'` handler; import and call `BraveSearchClient` |
-| `src/types.ts` | Add `SearchResult`, `RawSearchResult` interfaces; add `'searchTranslated'` to `MessageType` union; add `SearchTranslatedMessage` interface; add `braveApiKey` field to `Settings` |
-| `manifest.json` | Add `"https://api.search.brave.com/*"` to `host_permissions`; add `search.html` to `web_accessible_resources` or register as an extension page |
-| `src/options.html` | Add Brave Search API key input field in API Configuration section |
-| `src/options.ts` | Read/write `settings.braveApiKey` alongside existing provider keys |
-
-**No changes needed:**
-- `content.ts` — search is a separate extension page, not injected into host pages
-- `providers/*.ts` — existing provider implementations work unchanged
-- `popup.ts` / `popup.html` — may add a "Search" button/link to open search page, but not required
-
-### Opening the Search Page
-
-The search page is an extension page opened via `chrome.tabs.create({ url: chrome.runtime.getURL('search.html') })`. This can be triggered from:
-- The extension popup (add a "Search" button)
-- The omnibox keyword (optional: register in manifest with `"omnibox": { "keyword": "hime" }`)
-- A direct toolbar button if the popup is converted to open search instead
-
-The simplest path: add a "Translated Search" button to `popup.html` that calls `chrome.tabs.create`. No new manifest entry required.
-
-### Settings Addition: Brave API Key
-
-The `Settings` interface in `types.ts` gains one field:
-
-```typescript
-export interface Settings extends TranslationConfig, ProviderConfig {
-  // ... existing fields ...
-  braveApiKey: string;  // BYOK Brave Search API key
-}
-```
-
-Storage and retrieval follows the identical pattern to LLM API keys — stored in `chrome.storage.local` under `himeSettings`, read via `getSettings()` in background.ts. The options page gets a new password input field in the "API Configuration" section, labeled "Brave Search API Key".
-
-`DEFAULT_SETTINGS` gets `braveApiKey: ''`. `migrateSettings()` needs no change — the spread `{ ...DEFAULT_SETTINGS, ...raw }` already handles new fields gracefully.
-
-### Testability
-
-**Pure functions to isolate:**
-
-| Function | Location | What it does | How to test |
-|---|---|---|---|
-| `mapBraveResponse(raw)` | `src/brave-search.ts` | Maps raw Brave API JSON → `RawSearchResult[]` | Unit test with fixture JSON |
-| `buildBatchTranslationPrompt(results)` | `src/search-util.ts` | Constructs the joined batch string for LLM | Unit test with known inputs |
-| `parseBatchTranslationResponse(raw, count)` | `src/search-util.ts` | Parses LLM batch response back to string pairs | Unit test with mock LLM responses |
-| `renderResults(container, results)` | `src/search-renderer.ts` | DOM update only, no side effects | Node test with jsdom or manual DOM fixture |
-
-The `BraveSearchClient.search()` method wraps `fetch()` — keep it a thin wrapper so tests can inject a mock fetch. The background handler (`case 'searchTranslated'`) orchestrates these pure functions and is the only piece that requires a full integration test.
-
-### Build Order (dependency-respecting sequence)
-
-1. **Types first** (`src/types.ts`) — add `SearchResult`, `RawSearchResult`, `braveApiKey`, `searchTranslated` message types. Everything else imports from here.
-
-2. **BraveSearchClient** (`src/brave-search.ts`) — standalone module, no dependencies on other new files. Add Brave `host_permissions` to `manifest.json` at the same time.
-
-3. **Settings addition** — add `braveApiKey` to `options.html` + `options.ts`. Verify round-trip: key saves to storage, loads back. Independent of search page.
-
-4. **Background handler** (`src/background.ts`) — add `case 'searchTranslated'` using the now-complete `BraveSearchClient` and existing `translateText()`. Can be tested via chrome.runtime.sendMessage from DevTools console before search UI exists.
-
-5. **Search utilities** (`src/search-util.ts`) — batch translation helpers, pure functions. Unit testable immediately after writing.
-
-6. **SERP renderer** (`src/search-renderer.ts`) — pure DOM renderer, testable with hardcoded `SearchResult[]` array before plumbing is complete.
-
-7. **Search page** (`src/search.html` + `src/search.ts` + `src/search.css`) — wires everything together. Depends on all above.
-
-8. **Popup integration** — add "Translated Search" link/button to `popup.html` + `popup.ts`. Last because it's purely additive.
-
----
-
-## Existing Project Structure (v1.0)
+## Recommended Project Structure
 
 ```
 src/
-├── types.ts              # All shared types + DEFAULT_SETTINGS
-├── background.ts         # Service worker: routing, API calls, storage
-├── content.ts            # Content script: DOM state machine
-├── providers/
-│   ├── openai.ts         # OpenAI provider implementation
-│   ├── gemini.ts         # Gemini provider implementation
-│   └── openrouter.ts     # OpenRouter provider implementation
-├── popup.html
-├── popup.ts
-├── popup.css
-├── options.html          # Settings page
-├── options.ts
-├── options.css
-└── icons/
-    └── *.png / icon.svg
+├── content.ts                  # MODIFIED: bootstrap image-observer (inline; classic script)
+├── background.ts               # MODIFIED: + contextMenus reg, + translateImage case
+├── types.ts                    # MODIFIED: + TranslateImageMessage/Response, VisionProvider, settings
+├── image-fetch.ts              # NEW: srcUrl → base64+mime (worker-only), captureVisibleTab fallback
+├── image-observer.ts           # NEW: dedup + queue + threshold pure logic (node-testable core)
+├── panel-render.ts             # NEW: DOM-agnostic card renderer (clone of serp-render.ts)
+├── sidepanel.html              # NEW: side panel entry markup
+├── sidepanel.ts                # NEW: browser-only panel entry (clone search.ts shape)
+├── sidepanel.css               # NEW
+└── providers/
+    ├── vision.ts               # NEW: VisionProvider interface + registry helper
+    ├── vision-google.ts        # NEW: Vision DOCUMENT_TEXT_DETECTION + Translation v3 (two-call)
+    └── vision-claude.ts        # NEW: Claude vision single-call OCR+translate
 ```
 
-## v1.2 Target Structure (additions marked with +)
+### Structure Rationale
 
-```
-src/
-├── types.ts              # + SearchResult, RawSearchResult, braveApiKey, searchTranslated
-├── background.ts         # + case 'searchTranslated' handler
-├── content.ts            # (unchanged)
-├── brave-search.ts       # + NEW: BraveSearchClient wrapping Brave API fetch
-├── search-util.ts        # + NEW: batch translation prompt builder/parser
-├── search-renderer.ts    # + NEW: pure function SERP DOM renderer
-├── search.html           # + NEW: search page HTML
-├── search.ts             # + NEW: search page controller
-├── search.css            # + NEW: SERP styles
-├── providers/            # (unchanged)
-├── popup.html            # + add "Translated Search" button
-├── popup.ts              # + open search.html via chrome.tabs.create
-├── options.html          # + Brave API key input field
-├── options.ts            # + read/write braveApiKey
-└── ...
-```
+- **`image-observer.ts` split logic vs DOM:** mirror the v1.2 lesson (`serp-render.ts` is DOM-agnostic and node-tested, `search.ts` is browser-only). The queue/dedup/threshold logic is pure and testable. But **content.js is a classic script, not a module** (see content.ts header) — top-level `import`/`export` break it. So the *testable core* (`shouldTranslate`, queue drain) lives in `image-observer.ts` for the node harness, and the thin IntersectionObserver wiring is **inlined into `content.ts`**.
+- **`providers/vision-*.ts` parallels `providers/*.ts`:** identical pattern — class implementing an interface, `fetch` + `classifyError` + `AbortController` timeout, returns a typed result with `usage`. Drops straight into a `visionProviders` registry exactly like the existing `providers` record in `background.ts`.
+- **`panel-render.ts` clones `serp-render.ts`:** same `el()` helper, same `textContent`-only XSS contract, same injected-`Document` testability. Reuse, don't reinvent.
+- **Build note:** the build is plain `tsc` + `copy-assets` (no bundler). Each HTML page references its own compiled `.js`. Adding `sidepanel.html`/`.ts`/`.css` is the exact same move as the v1.2 `search.html`/`.ts` addition — no config change.
 
 ---
 
 ## Architectural Patterns
 
-### Pattern 1: Background-as-API-Gateway (existing, extended for search)
+### Pattern 1: New worker message case (reuse `searchTranslated` shape)
 
-**What:** All external network calls — LLM APIs and now Brave Search — are routed through the background service worker. Neither the search page nor content scripts ever call `fetch()` directly.
+**What:** Add a `translateImage` case to the existing `chrome.runtime.onMessage` switch. Key read from storage only; bytes fetched in-worker; provider routed through the abstraction; errors classified with `classifyError`. This is the integration point — content script never touches the network or the key.
 
-**Why it's the right call for search.ts even though search.ts is an extension page (not a content script):** The Brave API key lives in `chrome.storage.local`. Centralizing the key-read + fetch in background.ts keeps key access in one place, follows established project convention, and means future request logging or retry logic applies automatically.
+**When:** Both the progressive observer and the context-menu handler funnel through this one case.
 
-**Extended example for search:**
+**Trade-offs:** Single choke point makes dedup, usage recording, and timeout uniform (good). Service-worker lifetime means a long OCR call must complete before the worker idles — keep the message channel open (`return true`, already the existing pattern).
+
 ```typescript
-// search.ts — sends one message, gets back translated results
-const response = await chrome.runtime.sendMessage({
-  type: 'searchTranslated',
-  payload: { query: userInput }
-});
-if (response.error) showError(response.error);
-else renderResults(response.results);
+// types.ts (MODIFIED)
+export interface TranslateImageMessage extends Message {
+  type: 'translateImage';
+  payload: { srcUrl?: string; captureBytes?: string; mime?: string; imageId: string };
+}
+export interface TranslateImageResponse {
+  imageId: string;
+  detectedText?: string;
+  translation?: string;
+  error?: string;
+  kind?: import('./errors.js').ErrorKind;
+}
 
-// background.ts — case 'searchTranslated' — the only place that calls Brave API
-const settings = await getSettings();
-const translatedQuery = await translateText(query);         // reuses existing function
-const rawResults = await braveSearch(translatedQuery, settings.braveApiKey);
-const results = await translateResults(rawResults);          // new function
-sendResponse({ results });
+// background.ts (MODIFIED) — inside the existing switch
+case 'translateImage': {
+  const msg = message as TranslateImageMessage;
+  const settings = await getSettings();
+  const apiKey = settings.apiKeys[settings.visionProvider] || '';   // key from storage ONLY
+  if (!apiKey) { sendResponse({ imageId: msg.payload.imageId, error: 'Vision key not configured', kind: 'auth' }); break; }
+  try {
+    const { b64, mime } = msg.payload.srcUrl
+      ? await fetchImageAsBase64(msg.payload.srcUrl)               // worker-side fetch (CORS-free)
+      : { b64: msg.payload.captureBytes!, mime: msg.payload.mime! };
+    const provider = visionProviders[settings.visionProvider];
+    const result = await provider.ocrTranslate(b64, mime, buildVisionConfig(settings), apiKey, settings.visionModel);
+    if (result.usage) await recordUsage(settings.visionModel, result.usage);
+    sendResponse({ imageId: msg.payload.imageId, detectedText: result.detectedText, translation: result.translation });
+  } catch (err) {
+    const kind = (err as { kind?: string })?.kind ?? classifyError(settings.visionProvider, err).kind;
+    sendResponse({ imageId: msg.payload.imageId, error: err instanceof Error ? err.message : 'Unknown error', kind });
+  }
+  break;
+}
 ```
 
-### Pattern 2: Provider Interface Reuse (existing, no changes needed)
+### Pattern 2: Image fetch + encode lives in the worker (CORS / host_permissions)
 
-The `TranslationProvider` interface and registry in background.ts handle query translation and result translation identically to inline translation. No new provider abstraction needed — the search handler calls the existing `translateText()` function and the existing `providers[settings.provider]` registry.
+**What:** The service worker `fetch`es `srcUrl`, reads `arrayBuffer()`, base64-encodes, and infers MIME. The content script must NOT do this — content scripts inherit the **page's** origin and are bound by same-origin policy, so a cross-origin image (the common case) is unreadable there. The worker, given host_permissions, is not.
 
-### Pattern 3: Single Atomic Message for Multi-Step Pipeline
+**When:** Primary path for both context-menu and progressive translation.
 
-**What:** The `searchTranslated` message encapsulates translate-query + fetch-brave + translate-results as one round-trip from search.ts to background.ts.
+**Trade-offs / decision:** Fetching arbitrary image URLs needs broad `host_permissions` (`"https://*/*"`), which triggers a "read your data on all websites" install warning. **Recommendation:** declare `https://*/*` host permission (hime already injects on `<all_urls>`, so the trust posture is similar) AND keep a **`chrome.tabs.captureVisibleTab` fallback** for images the worker can't fetch (auth-gated CDNs, already-decoded blob:/data:, tainted). The capture path needs only `activeTab` and returns a PNG data URL of the visible viewport — crop to the image rect before sending if precision matters, or send whole-viewport for v1.3 simplicity.
 
-**Why not three separate messages:** Each round-trip adds latency and error-handling boilerplate in search.ts. The search page has no reason to show the translated query text to the user (it just shows results), so intermediate results have no UX value. A single message makes the happy path simple and error handling centralized in the background handler.
+```typescript
+// image-fetch.ts (NEW) — worker context only
+export async function fetchImageAsBase64(srcUrl: string): Promise<{ b64: string; mime: string }> {
+  if (srcUrl.startsWith('data:')) return parseDataUrl(srcUrl);
+  const resp = await fetch(srcUrl);                       // worker origin + host_permissions → no CORS
+  if (!resp.ok) { const e = new Error(`image fetch ${resp.status}`); (e as any).kind = 'network'; throw e; }
+  const mime = resp.headers.get('content-type') || 'image/png';
+  const buf = await resp.arrayBuffer();
+  return { b64: arrayBufferToBase64(buf), mime };
+}
+```
 
-**Trade-off:** If UX requires showing "Searching in Japanese for: 機械学習..." before results arrive, split into `translateQuery` + `braveSearch` + `translate` messages and stream progress. For v1.2 MVP, atomic is cleaner.
+### Pattern 3: Progressive IntersectionObserver with dedup + concurrency gate (content)
 
-### Pattern 4: Pure Renderer Function
+**What:** Default-OFF. When enabled, observe every `<img>` (and new ones via `MutationObserver`). When an image approaches the viewport, enqueue a `translateImage` request — but cap concurrent in-flight worker calls to control cost/latency, and dedup so each image is translated at most once.
 
-**What:** `search-renderer.ts` exports a single `renderResults(container: HTMLElement, results: SearchResult[]): void`. No network calls, no storage reads, no message passing.
+**When:** Only when `settings.imageProgressive === true` (read once at content-script init, re-read on `chrome.storage.onChanged`).
 
-**Why:** Makes the SERP layout testable in isolation. Given a fixed `SearchResult[]` array, the rendered HTML is deterministic and verifiable without a background worker or live API.
+**Trade-offs:** `rootMargin` pre-fetches before the image is visible (better perceived latency) at the cost of translating images the user may scroll past. A concurrency cap of ~2–3 plus per-image dedup keeps a 50-image gallery from firing 50 simultaneous paid API calls. Skip tiny images (icons/spacers) via a min `naturalWidth/Height` threshold to avoid wasting calls on non-text decorations. This mirrors the v1.2 in-flight-dedup cost discipline.
+
+```typescript
+// image-observer.ts (NEW) — pure logic exported for node tests; wiring inlined into content.ts
+const translated = new WeakMap<HTMLImageElement, 'pending' | 'done' | 'error'>(); // dedup
+const queue: HTMLImageElement[] = [];
+let inFlight = 0;
+const MAX_CONCURRENT = 3;          // cost/latency gate
+const MIN_SIDE_PX = 48;            // skip icons/spacers
+
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    const img = e.target as HTMLImageElement;
+    if (!e.isIntersecting) continue;
+    if (translated.has(img)) continue;                              // already handled
+    if (img.naturalWidth < MIN_SIDE_PX || img.naturalHeight < MIN_SIDE_PX) continue;
+    translated.set(img, 'pending');
+    queue.push(img); drain();
+  }
+}, { rootMargin: '200px', threshold: 0.01 });   // 200px = "approaching viewport"
+
+function drain() {
+  while (inFlight < MAX_CONCURRENT && queue.length) {
+    const img = queue.shift()!; inFlight++;
+    chrome.runtime.sendMessage({ type: 'translateImage', payload: { srcUrl: img.currentSrc || img.src, imageId: idFor(img) } })
+      .then((r) => translated.set(img, r?.error ? 'error' : 'done'))
+      .finally(() => { inFlight--; drain(); });
+  }
+}
+// gate: if (settings.imageProgressive) document.querySelectorAll('img').forEach(i => io.observe(i));
+```
+
+### Pattern 4: Context-menu entry funnels into the same pipeline
+
+**What:** Register one `chrome.contextMenus` item with `contexts: ['image']` in the worker (`onInstalled`). On click, `info.srcUrl` is the image URL — already in the worker, so it bypasses the content script entirely. Run the same fetch→vision pipeline, then `sidePanel.open({ windowId })` (allowed: a context-menu click is a user gesture) and push the result to the panel.
+
+**When:** Manual, one-off translation. Consumes no hotkey slot (the 4-hotkey cap is untouched).
+
+```typescript
+// background.ts (MODIFIED)
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({ id: 'hime-translate-image', title: 'Translate image with hime', contexts: ['image'] });
+});
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== 'hime-translate-image' || !info.srcUrl) return;
+  if (tab?.windowId != null) await chrome.sidePanel.open({ windowId: tab.windowId });  // user gesture OK
+  const imageId = crypto.randomUUID();
+  // run shared fetch→vision pipeline → deliver to panel (see Data Flow)
+});
+```
+
+---
+
+## Data Flow
+
+### Context-menu flow (manual)
+
+```
+right-click <img> → "Translate image with hime"
+  → contextMenus.onClicked (worker) has info.srcUrl
+      → sidePanel.open({windowId})            (user gesture satisfied)
+      → fetchImageAsBase64(srcUrl)            (worker fetch, CORS-free)
+      → visionProvider.ocrTranslate()         (BYOK key from storage)
+      → recordUsage()
+      → deliver {imageId, detectedText, translation} → side panel
+  → panel-render.ts appends a card (textContent-only)
+```
+
+### Progressive flow (opt-in, default OFF)
+
+```
+settings.imageProgressive === true
+  → content: IntersectionObserver observes <img> (rootMargin 200px)
+  → img approaches viewport → dedup check → enqueue
+  → concurrency gate (≤3 in flight) → runtime.sendMessage('translateImage', {srcUrl, imageId})
+  → worker: same fetch → vision → respond
+  → worker also pushes to side panel (open if behavior allows; else buffer until opened)
+  → panel renders card; content marks WeakMap 'done'
+```
+
+### Worker → panel delivery (two viable mechanisms)
+
+1. **`chrome.runtime.sendMessage` broadcast** + the panel holds a `chrome.runtime.onMessage` listener. Simplest; matches existing message style. Risk: if the panel isn't open, the message is dropped — so the worker should also stash latest results in `chrome.storage.session` (or an in-memory map keyed by tab) and the panel hydrates from it on load.
+2. **`chrome.runtime.connect` long-lived port** from panel → worker on panel load; worker pushes over the port. Cleaner for streaming multiple progressive results, but more lifecycle code.
+
+**Recommendation:** Start with (1) `sendMessage` + a `session`-storage hydration buffer (least new machinery, reuses the message contract). Move to a port only if progressive mode's multi-result streaming feels laggy.
+
+---
+
+## sidePanel vs injected in-page panel — DECISION
+
+**Recommendation: `chrome.sidePanel` (MV3 native side panel).** Confidence HIGH.
+
+| Criterion | `chrome.sidePanel` (native) | Injected in-page panel (content-script DOM) |
+|-----------|-----------------------------|---------------------------------------------|
+| Origin / CSP | Extension-origin page, full `chrome.*`, no host-page CSP | Subject to host-page CSP; many sites block injected styles/scripts |
+| XSS surface | Isolated from page DOM | Shares page DOM; higher risk, must shadow-DOM-isolate |
+| Reuse of v1.2 pattern | Direct clone of `search.ts`/`serp-render.ts` (extension page) | New isolation machinery, no prior art in hime |
+| Persistence across scroll/nav | Stable, browser-managed | Tears down on SPA nav; must re-inject |
+| User gesture to open | `open()` needs a gesture — context-menu click qualifies | Always available |
+| Cost | One manifest key + perm | Per-site breakage debugging |
+
+**Rationale:** hime already builds extension-origin pages (`search.html`, `options.html`, `popup.html`) and already has a DOM-agnostic `textContent`-only renderer to clone. The side panel is the same kind of page — `sidepanel.ts` is a near-copy of `search.ts`, `panel-render.ts` a near-copy of `serp-render.ts`. It sidesteps every host-page CSP/XSS headache an injected panel reintroduces. The only constraint — `open()` requires a user gesture — is satisfied by the context-menu click; for progressive mode the panel can be opened via `setPanelBehavior({ openPanelOnActionClick: true })` (toolbar click) or left for the user to open, with results buffered until then.
+
+**Manifest additions:**
+```jsonc
+"permissions": ["activeTab","storage","scripting","contextMenus","sidePanel"],
+"host_permissions": ["https://*/*", /* + existing API hosts */],
+"side_panel": { "default_path": "sidepanel.html" }
+```
+
+---
+
+## Provider abstraction — reuse, two candidates
+
+Parallel `TranslationProvider` exactly. The roadmap-review decision (Claude single-call vs Google Vision + Translation v3) maps to two interchangeable classes behind one interface — build the interface + registry first so the choice is swappable.
+
+```typescript
+export interface VisionProvider {
+  name: string;
+  ocrTranslate(imageB64: string, mime: string, config: TranslationConfig, apiKey: string, model: string):
+    Promise<{ detectedText: string; translation: string; usage?: { inputTokens: number; outputTokens: number } }>;
+}
+```
+
+| Path | Calls | Bbox geometry | Fit for v1.3 (side-panel text only) |
+|------|-------|---------------|-------------------------------------|
+| **Claude vision (single-call)** | 1 (OCR+translate in one prompt) | none | **Best fit** — no overlay needed, fewer moving parts, reuses an Anthropic-style fetch |
+| Google Vision + Translation v3 | 2 (DOCUMENT_TEXT_DETECTION → TranslateText) | word-level boundingBox | Overkill for text-only panel; keep for a future overlay milestone |
+
+Side-panel output means geometry is unused, which favors the **single-call Claude path** for v1.3. Build the interface so Google can be added later without touching the worker switch. (Final pick is the roadmap-review's call; architecture supports either.)
+
+---
+
+## Build Order (dependency-ordered, maps to phases 12+)
+
+> Each step is independently shippable/testable and reuses an existing pattern. Suggested phase grouping in brackets.
+
+1. **Scaffold: types + provider interface + manifest + worker case + image-fetch** *(Phase 12 — foundation)*
+   - `types.ts`: `TranslateImageMessage/Response`, `VisionProvider`, settings fields (`visionProvider`, `visionModel`, `imageProgressive`).
+   - `manifest.json`: `contextMenus`, `sidePanel` perms; `host_permissions` strategy; `side_panel.default_path`.
+   - `image-fetch.ts` (worker) + `providers/vision.ts` interface + **one** concrete provider (the roadmap pick) + `visionProviders` registry.
+   - `translateImage` case in the `onMessage` switch (reuses `getSettings`/`recordUsage`/`classifyError`).
+   - **Why first:** everything downstream sends this message / calls this provider. Node-testable in isolation (encode + parse), no UI needed.
+
+2. **Context menu → side panel render** *(Phase 13 — manual MVP, end-to-end vertical slice)*
+   - `contextMenus` registration + `onClicked` handler (resolves `srcUrl`, opens panel, runs pipeline).
+   - `sidepanel.html` + `sidepanel.ts` + `panel-render.ts` (clone `serp-render.ts`, `textContent`-only).
+   - Worker→panel delivery via `sendMessage` + `session`-storage hydration buffer.
+   - **Why second:** delivers the headline feature (right-click translate) with zero progressive complexity. Validates the whole pipeline before adding concurrency.
+
+3. **Progressive mode (IntersectionObserver + dedup + concurrency queue)** *(Phase 14)*
+   - `image-observer.ts` pure core (shouldTranslate, queue drain) — node-tested.
+   - Inline IntersectionObserver + `MutationObserver` wiring into `content.ts` (classic-script constraint).
+   - Dedup `WeakMap`, `MAX_CONCURRENT` gate, `MIN_SIDE_PX` skip, `rootMargin` tuning.
+   - Gated entirely behind `settings.imageProgressive` (read at init, react to `storage.onChanged`).
+   - **Why third:** depends on the worker case (1) and panel (2) already working; adds the cost-control surface on top.
+
+4. **Settings wiring + polish** *(Phase 15, or fold into 13/14)*
+   - `options.html`/`options.ts`: vision provider + key fields (mirror `braveApiKey` wiring), **progressive toggle default OFF**, optional concurrency/threshold knobs.
+   - Error/loading/empty states in panel (clone SERP states), usage surfaced in existing usage view.
+   - `captureVisibleTab` fallback for unfetchable images.
+   - **Why last:** the default-OFF gate must exist before progressive ships, but the engine (3) is what it gates; settings are thin glue over finished machinery.
+
+**Dependency graph:** `1 → 2 → 3`; `4` depends on `1` (keys) and `3` (the toggle's target). Phases 13 and 14 are the two natural milestone halves (manual, then automatic).
 
 ---
 
 ## Anti-Patterns
 
-### Anti-Pattern 1: Direct Brave API Fetch from search.ts
+### Anti-Pattern 1: Fetching image bytes in the content script
+**What people do:** `fetch(img.src)` inside the content script to get base64.
+**Why it's wrong:** content scripts run with the **host page's** origin and are bound by same-origin policy — cross-origin images (the norm) throw or taint. Keys also don't belong on the page.
+**Do this instead:** send only `srcUrl` to the worker; the worker fetches with host_permissions. Fall back to `captureVisibleTab` for the un-fetchable few.
 
-**What people might do:** Call `fetch('https://api.search.brave.com/res/v1/web/search', ...)` directly from `search.ts`.
+### Anti-Pattern 2: One API call per image with no gate
+**What people do:** observer fires `translateImage` for every `<img>` as it scrolls in.
+**Why it's wrong:** a long gallery = dozens of simultaneous paid OCR calls; cost + rate-limit + latency blowout.
+**Do this instead:** per-image dedup `WeakMap`, `MAX_CONCURRENT` queue, min-size skip, and the default-OFF gate. (Mirrors the v1.2 in-flight dedup discipline.)
 
-**Why it's wrong:** Technically possible (extension pages have host permissions), but it splits the API key access pattern — now keys are read from storage in two places (background.ts for LLM keys, search.ts for the Brave key). Breaks the single-point-of-key-read invariant that makes future key management changes easy.
+### Anti-Pattern 3: Injecting the panel into the host page
+**What people do:** build the result UI as injected DOM in the content script.
+**Why it's wrong:** host-page CSP breaks styles/scripts; shares the page DOM (XSS surface); tears down on SPA nav.
+**Do this instead:** `chrome.sidePanel` extension-origin page — clone the existing `search.html` pattern.
 
-**Do this instead:** Route Brave calls through background.ts via `sendMessage`, same as all other API calls.
-
-### Anti-Pattern 2: Per-Result Translation Calls
-
-**What people might do:** Translate each search result title and snippet in a separate LLM call inside a `results.map(async r => translate(r.title + r.snippet))`.
-
-**Why it's wrong:** For 10 results, this fires 10-20 separate LLM API calls, multiplying cost and latency by 10x.
-
-**Do this instead:** Batch all titles and snippets into one LLM call. Construct a numbered list or XML-tagged block, send as one `translate` call, parse the structured response back into per-result strings. One call for all results. Implement in `search-util.ts` as `buildBatchPrompt()` / `parseBatchResponse()`.
-
-### Anti-Pattern 3: Translating Result Titles Without Preserving URLs
-
-**What people might do:** Mutate the result objects' `url` field during translation or map incorrectly, losing the original source URL.
-
-**Why it's wrong:** The SERP must link to the original (untranslated) source pages. Losing the URL makes results useless.
-
-**Do this instead:** Keep `url` immutable through the entire pipeline. The translation step receives `{ title, snippet }` pairs indexed by position and returns translated pairs; `url` is carried through separately and never passed to the LLM.
-
-### Anti-Pattern 4: Auto-Detect Language Flip for Query Translation
-
-**What people might do:** Call the existing `translateText()` function which auto-detects Japanese input and flips source/target direction.
-
-**Why it's wrong:** `background.ts#translateText()` currently applies auto-direction-flip logic — if the text contains Japanese characters, it swaps source and target. For query translation on the search page, the user is always typing in their source language. The auto-flip would incorrectly reverse the direction if the user happens to paste a Japanese term to search in English.
-
-**Do this instead:** Add a `translateTextExplicit(text, source, target)` helper (or pass explicit config to a refactored `translateText`) that bypasses auto-flip. Or call `providers[settings.provider].translate(text, explicitConfig, ...)` directly from the search handler. The existing `translateText()` function is content-script-oriented; the search handler should use the provider API directly with explicit `sourceLanguage` / `targetLanguage` from settings.
+### Anti-Pattern 4: Top-level import/export in content.ts
+**What people do:** `import { observeImages } from './image-observer.js'` in `content.ts`.
+**Why it's wrong:** content.js is loaded as a **classic script**; any top-level import/export makes tsc emit `export {}` and the whole content script fails to load (documented in content.ts header).
+**Do this instead:** keep pure logic in a module the node tests import; inline the thin IntersectionObserver wiring into `content.ts`.
 
 ---
 
 ## Integration Points
 
-### External Services (v1.2 additions)
+### External Services
 
-| Service | Integration Pattern | Auth | Notes |
-|---------|---------------------|------|-------|
-| Brave Search API | `fetch()` from background.ts only | `X-Subscription-Token: <key>` header | BYOK key stored in `chrome.storage.local`; add `"https://api.search.brave.com/*"` to `host_permissions` |
-| LLM Providers (existing) | `fetch()` from background.ts via provider registry | Bearer / API key per provider | Reused unchanged for query + result translation |
+| Service | Integration Pattern | Notes |
+|---------|---------------------|-------|
+| Vision/OCR API (Claude vision OR Google Vision+Translate v3) | `VisionProvider.ocrTranslate`, worker-side `fetch`, BYOK key from storage | Single-call (Claude) favored; geometry unused for text-only panel. New host_permissions per provider. |
+| Arbitrary image origins | worker `fetch(srcUrl)` under `https://*/*` | Triggers broad-permission install warning; `captureVisibleTab` fallback for unfetchable |
 
-### Internal Boundaries (v1.2 additions)
+### Internal Boundaries
 
 | Boundary | Communication | Notes |
 |----------|---------------|-------|
-| search.ts → background.ts | `chrome.runtime.sendMessage({ type: 'searchTranslated', ... })` | Same async pattern as content.ts; `return true` in listener already present |
-| background.ts → BraveSearchClient | In-process function call | Same context; no serialization |
-| background.ts → search.ts (results) | `sendResponse({ results })` | Passes `SearchResult[]` array |
-| search.ts → search-renderer.ts | Direct function call | Same module; pure render function |
-| options.ts → chrome.storage.local | Existing settings pattern | `braveApiKey` added to `himeSettings` object |
-
----
-
-## Manifest Changes Required
-
-```json
-{
-  "host_permissions": [
-    "https://api.openai.com/*",
-    "https://generativelanguage.googleapis.com/*",
-    "https://openrouter.ai/*",
-    "https://api.search.brave.com/*"
-  ]
-}
-```
-
-The search page itself (search.html) does not need `web_accessible_resources` — it is an extension page opened via `chrome.runtime.getURL('search.html')`, not embedded in a host page. Extension pages are accessible from within the extension by default.
-
----
+| content ↔ worker | `runtime.sendMessage` `translateImage` (existing contract, new type) | content sends `srcUrl`+`imageId`; never the key |
+| worker ↔ side panel | `sendMessage` broadcast + `session`-storage hydration (or port) | panel may be closed; buffer results |
+| contextMenus ↔ worker | `onClicked` (worker-native) | `srcUrl` arrives in worker directly — no content hop |
+| settings ↔ all | `chrome.storage.local` + `storage.onChanged` | progressive toggle (default OFF), vision key/provider/model |
 
 ## Sources
 
-- Chrome Extension MV3 network request documentation: https://developer.chrome.com/docs/extensions/develop/concepts/network-requests
-- Brave Search API documentation: https://api-dashboard.search.brave.com/app/documentation/web-search/get-started
-- Existing v1.0 codebase (`src/background.ts`, `src/types.ts`, `src/options.ts`, `manifest.json`)
+- Chrome `chrome.sidePanel` — methods, `side_panel` manifest key, `open()` user-gesture rule, context-menu open example — https://developer.chrome.com/docs/extensions/reference/api/sidePanel (HIGH)
+- Chrome `chrome.contextMenus` — `contexts:['image']`, `onClicked.info.srcUrl`/`mediaType`, worker-side registration, `contextMenus` permission — https://developer.chrome.com/docs/extensions/reference/api/contextMenus (HIGH)
+- Chrome cross-origin network requests — content-script same-origin limitation vs worker + host_permissions — https://developer.chrome.com/docs/extensions/develop/concepts/network-requests (HIGH)
+- Chrome `tabs.captureVisibleTab` fallback — `.planning/research/SOURCES.md` #6 (HIGH)
+- Google Vision DOCUMENT_TEXT_DETECTION / Translation v3 + Claude vision tradeoff — `.planning/research/SOURCES.md` #1–4 (HIGH)
+- Existing codebase (read directly): `src/background.ts` (onMessage switch, provider registry, in-flight dedup, recordUsage, classifyError), `src/types.ts` (Message union, Settings, provider interface), `src/serp-render.ts` (DOM-agnostic textContent-only render), `src/providers/openai.ts`+`gemini.ts` (provider fetch/timeout/classify pattern), `src/content.ts` (classic-script no-import constraint), `package.json` (tsc-only build, per-entry HTML) (HIGH)
 
 ---
-*Architecture research for: hime Chrome MV3 extension — v1.2 Translated Search integration*
-*Researched: 2026-06-02*
-*Confidence: HIGH — derived from actual implemented codebase + verified Chrome extension CORS behavior*
+*Architecture research for: Chrome MV3 image OCR+translation, side-panel output, BYOK*
+*Researched: 2026-06-20*

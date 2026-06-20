@@ -1,8 +1,161 @@
 # Feature Research
 
-**Domain:** Browser extension — inline keyboard-driven translation/composition tool + translated search
-**Researched:** 2026-05-24 (v1.0) / 2026-06-02 (v1.2 Translated Search addendum)
-**Confidence:** HIGH (v1.0 is shipped; v1.2 section is HIGH for SERP anatomy/API shape, MEDIUM for cross-lingual UX nuances)
+**Domain:** Browser extension — inline keyboard-driven translation/composition tool + translated search + image-text translation
+**Researched:** 2026-05-24 (v1.0) / 2026-06-02 (v1.2 Translated Search) / 2026-06-20 (v1.3 Image Translation addendum)
+**Confidence:** HIGH (v1.0 shipped; v1.2 HIGH for SERP/API shape; v1.3 HIGH for table-stakes/anti-features, MEDIUM for cost/dedup/cache control specifics)
+
+---
+
+## v1.3 Image Translation — Feature Landscape
+
+> NEW for v1.3: OCR + translate text inside **images**, surfaced as text in a **side panel**. Two triggers: right-click context menu on `<img>` (manual), and opt-in **progressive** viewport auto-translate (default OFF). Cloud vision via BYOK, routed through the background worker.
+>
+> **Scope locked:** side-panel TEXT output only. No in-image overlay, no inpainting, no manga/vertical-CJK craft, no OpenAI/Azure providers — those are anti-features / out-of-scope below, not deferred niceties.
+>
+> Confidence: HIGH for table-stakes/anti-features (corroborated across Google Lens, Yandex, DeepL, Immersive Translate, OCR Translator). MEDIUM for cost/dedup/cache control specifics (vendors don't publish internals; inferred from BYOK economics + IntersectionObserver mechanics).
+
+### Table Stakes — Image Translation (Users Expect These)
+
+Every mainstream image translator (Google Lens, Yandex, DeepL, Immersive Translate, OCR Translator) does these. Missing any one makes hime's image mode feel broken rather than minimal.
+
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| Right-click context menu on `<img>`: "Translate image with hime" | THE discovery surface for per-image translation across every competitor (Yandex, ImageTrans, OCR Translator, DeepL). Users right-click an image and expect a translate entry. | LOW | `chrome.contextMenus.create({contexts:['image']})`; click handler gets `info.srcUrl`. Consumes NO hotkey slot (3/4 used per PROJECT). **Depends on:** background-worker image-byte fetch (host_permissions / CORS, SOURCES #5). |
+| Side panel showing **both** original detected text and its translation | Google Lens "Show original" and Yandex's Original/Translation toggle confirm users want to verify against source. OCR is lossy — a wrong OCR is only visible against the original. | MEDIUM | `chrome.sidePanel` (MV3). Paired text blocks. textContent-only (reuse v1.2 XSS discipline — no innerHTML of model output). |
+| Per-image loading state | Each image = one paid API round-trip (OCR+translate), latency in seconds not ms. Silence reads as "broken." | LOW | Spinner/skeleton row per image; reuse v1.2 progressive-render mindset. |
+| Per-image error state with reason | Network fail, no key, unreadable image, no text found, rate-limit are all common. Red "ERR" badge pattern already exists (v1.0). | LOW | Distinguish "no text detected" (not an error) from "request failed" (retryable). **Per-image, not global** — one bad image must not blank the panel. |
+| Copy translation (and copy original) | Universal: Lens "Copy text", Yandex copy icon. The point is to *use* the extracted text. | LOW | Copy buttons per result block. |
+| Re-translate / retry a single image | Transient failures + OCR variance make one-shot retry expected. | LOW | Re-runs the pipeline for that image; **must bypass cache** (see Differentiators). |
+| Target language reuses the existing hime setting | hime already has source/target language + swap hotkey. A second config would surprise users. | LOW | Read existing target-language setting. **Direction = detected-source → user target** — the inverse of compose mode's English→target. This asymmetry must be explicit in UI copy. |
+| BYOK vision provider + key (no new key paradigm) | hime is BYOK end-to-end; a separate vision key store would surprise users. | MEDIUM | Vision key in existing settings store (`chrome.storage.local`/`.session`). Same key (Claude Vision single-call) or a distinct Google Cloud key — provider decision pending at roadmap review (PROJECT). |
+| Source language auto-detect, displayed | Users translating images often don't know the source language; Lens/Yandex auto-detect. Showing detected language builds trust and explains odd output. | LOW–MEDIUM | Claude Vision infers in-prompt; Google Translate v3 returns `detectedLanguageCode`. Display "Detected: Japanese → English". |
+
+### Differentiators — Image Translation (Competitive Advantage)
+
+Where hime's architecture (BYOK, background worker, already-built settings) does something the mass-market tools don't, or does it more cleanly.
+
+| Feature | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| **Opt-in progressive (viewport) auto-translate, default OFF** | Read an image-heavy page (a Japanese forum, a screenshot thread) without right-clicking each image. Default-OFF respects the per-image cost — the headline differentiator vs one-at-a-time tools. | HIGH | `IntersectionObserver` fires as images approach viewport; `rootMargin` pre-loads slightly before visible (standard pattern). Each intersect → queue an OCR+translate job. The cost/latency controls below are what make this safe rather than a money pit. |
+| **Dedup of already-translated images** | On scroll the same `<img>` re-enters the viewport repeatedly; sites reuse icons/sprites. Without dedup, progressive mode bills the user N times for one image. | MEDIUM | Mark the element once observed+translated; key cache by image URL (or content hash for `data:` URIs). In-flight dedup map (reuse v1.2 SRCH-06 pattern) prevents duplicate concurrent calls for the same src. |
+| **Result cache keyed by image source** | Re-seeing an image (re-enter viewport, manual re-trigger, panel reopen) should be free and instant. BYOK economics make every avoided call real money saved. | MEDIUM | Cache `{srcKey → {detectedLang, original, translation}}` in memory and/or `chrome.storage.session`. Re-translate button explicitly bypasses cache. Bound cache size to avoid unbounded growth on long sessions. |
+| **Single-call OCR+translate pipeline (Claude Vision)** | One round-trip vs OCR-then-translate (Google Vision + Translation v3 = two calls, two billings, two failure points). Half the latency, half the cost surface, simpler errors. | MEDIUM | Side-panel output needs NO bbox geometry (PROJECT) — removes Google Vision's main advantage and favors the single call. FEATURES recommends single-call given side-panel-only scope; decision pending roadmap review. |
+| **Multi-image batch in one panel** | A page with several images shows all results stacked — scannable, comparable, copyable in one place; differentiates from per-image popups that lose history on the next translate. | MEDIUM | Panel holds a growing list of result cards (DOM order or newest-first). Claude Vision supports multi-image input (SOURCES #4) for same-page batching later. |
+| **Cost-aware progressive controls (eagerness / viewport threshold)** | Lets the user dial how aggressively progressive mode spends: "only on full visibility" vs "pre-load 200px early." Directly addresses surprise cost. | MEDIUM | Surface `IntersectionObserver` `threshold` + `rootMargin` as a simple "eagerness" setting (Conservative / Balanced / Eager). Optionally a per-session image-count cap with a "translated N images" indicator. |
+
+### Anti-Features — Image Translation (Explicitly OUT for v1.3)
+
+| Feature | Why Requested | Why Problematic | What to Do Instead |
+|---------|---------------|-----------------|--------------------|
+| **In-image overlay** (translated text on top of the image) | Lens/Yandex/Immersive do it; looks magical. | Needs bbox geometry, font/size/color matching, layout reflow, and a tainted-canvas / cross-origin pixel pipeline. Massively expands scope; explicitly out per PROJECT. Side-panel text already delivers the read-the-text value. | Side-panel paired original+translation — geometry-free, robust, XSS-safe. |
+| **Inpainting** (erase original, repaint background, place translation) | The "natural overlay" wow factor from Immersive/manga tools. | SOTA is a heavy OSS stack (LaMa, comic-text-detector), not a cloud-API single call. Wrong product dimension. | None needed; out of scope. |
+| **Manga / vertical-CJK special handling** | hime targets Japanese; manga seems an obvious fit. | No vendor publishes vertical-CJK OCR guidance (SOURCES "Known gap"); reliable handling needs the deferred OSS stack. High effort, niche payoff. | General OCR via cloud vision; accept reduced vertical-text quality. Revisit only if it becomes the measured bottleneck. |
+| **OpenAI / Azure vision providers** | Parity with hime's existing LLM abstraction (OpenAI/Gemini/OpenRouter). | Scoped to Claude Vision and/or Google Vision+Translate this round (PROJECT/SOURCES). More providers multiply the OCR-prompt + response-shape surface before the core flow is proven. | Ship one vision provider (or the two named candidates); add abstraction later on demand. |
+| **Progressive mode ON by default** | "Just works" convenience. | Every viewport image becomes a silent paid API call — surprise bills, latency, and rate-limits on the user's own key. Erodes BYOK trust instantly. | **Default OFF** (PROJECT mandate). Opt-in toggle + eagerness + dedup + cache so even when ON it's economical. |
+| **Eager translate of EVERY image on the page (no viewport gating)** | Maximal coverage. | Translating off-screen / never-viewed images burns money for zero value; hammers the API on image-dense pages. | Viewport-gated (IntersectionObserver), deduped, and only when progressive mode is explicitly enabled. |
+| **Freeform screen-region / drag-to-select capture** | Power-user "translate any pixels" (OCR Translator does this). | `captureVisibleTab` is a fallback for tainted/cross-origin images (SOURCES #6), not a headline feature; drag-select UI is its own sub-project. | Keep `captureVisibleTab` strictly as the byte-fetch fallback for un-fetchable `<img>`; no region UI this milestone. |
+
+### Feature Dependencies — v1.3 Image Translation
+
+```
+[Right-click context-menu translate]  (table stakes, manual entry point)
+    └──requires──> [Background-worker image-byte fetch + cloud vision call]
+                       └──requires──> [BYOK vision provider + key in settings]
+                       └──fallback──> [chrome.tabs.captureVisibleTab for tainted/cross-origin imgs]
+
+[Side-panel output (original + translation)]
+    └──requires──> [chrome.sidePanel wiring]
+    └──requires──> [Source-language auto-detect display]
+    └──requires──> [existing hime target-language setting]   (direction = detected → target)
+
+[Progressive viewport auto-translate]  (differentiator, default OFF)
+    └──requires──> [Right-click pipeline]   (same OCR+translate path, different trigger)
+    └──requires──> [IntersectionObserver gating + eagerness/threshold setting]
+    └──requires──> [Dedup of already-translated images]   ← without this, progressive = repeat billing
+    └──requires──> [Result cache keyed by image source]
+    └──requires──> [In-flight dedup map]   (reuse v1.2 SRCH-06 pattern)
+
+[Re-translate single image] ──conflicts──> [Result cache]   (must explicitly bypass cache)
+[Single-call Claude Vision] ──resolves──> [bbox-geometry need]   (side-panel needs no geometry)
+```
+
+**Dependency notes:**
+- **Both triggers share one pipeline.** Context-menu (manual) and progressive (viewport) must call the *same* background OCR+translate path. Build the pipeline once; triggers are thin wrappers. Natural phase boundary: pipeline → manual trigger → progressive mode.
+- **Progressive mode requires dedup + cache as hard prerequisites, not enhancements.** Progressive without dedup is a billing hazard (same image re-translated every scroll). They belong in the same phase.
+- **Re-translate conflicts with cache:** the cache must be bypassable on explicit retry, else "re-translate" returns the same stale/wrong result.
+- **Direction asymmetry:** compose/YOLO go English→target; image translation goes detected-source→user's reading language. The target-language setting is reused but its *meaning flips* — UI copy must make this unambiguous.
+- **Geometry decision unblocks provider choice:** side-panel output needs no bounding boxes, so single-call Claude Vision loses no required capability — favoring it (decision pending roadmap review).
+
+### MVP Definition — v1.3 Image Translation
+
+**Launch with (v1.3 core — P1):**
+- [ ] Background-worker OCR+translate pipeline (image bytes → detected text + translation) — the spine.
+- [ ] Right-click context-menu "Translate image with hime" on `<img>` — primary manual entry; zero hotkey cost.
+- [ ] Side panel: **original detected text + translation**, per image, stacked for multiple images.
+- [ ] Source-language auto-detect, displayed ("Detected: X → Y").
+- [ ] Per-image loading + error states (distinguish "no text found" from "request failed").
+- [ ] Copy original / copy translation + per-image re-translate.
+- [ ] BYOK vision provider + key in existing settings store; target language reused from existing setting.
+
+**Add after validation (still v1.3, behind the toggle — P2):**
+- [ ] Progressive viewport auto-translate (default OFF) — add once the manual pipeline is proven reliable and cheap.
+- [ ] Dedup of already-translated images + result cache keyed by source — ship together with progressive mode.
+- [ ] Eagerness / viewport-threshold setting (Conservative/Balanced/Eager) + optional per-session image-count indicator/cap.
+
+**Future / out of this milestone (P3):**
+- [ ] In-image overlay — only if side-panel text proves insufficient; needs geometry pipeline.
+- [ ] Inpainting / natural overlay — wrong product dimension; defer indefinitely.
+- [ ] Manga / vertical-CJK handling — only if it becomes the measured bottleneck; needs OSS stack.
+- [ ] Additional vision providers (OpenAI/Azure) — only on real demand after one provider proven.
+- [ ] Same-page multi-image batched into a single Claude Vision call (cost optimization) — after per-image flow is stable.
+
+### Feature Prioritization Matrix — v1.3
+
+| Feature | User Value | Implementation Cost | Priority |
+|---------|------------|---------------------|----------|
+| Background OCR+translate pipeline | HIGH | MEDIUM | P1 |
+| Right-click context-menu translate | HIGH | LOW | P1 |
+| Side panel: original + translation | HIGH | MEDIUM | P1 |
+| Per-image loading/error states | HIGH | LOW | P1 |
+| Copy + re-translate | MEDIUM | LOW | P1 |
+| Source-language auto-detect display | MEDIUM | LOW | P1 |
+| Reuse target-language + BYOK settings | HIGH | LOW | P1 |
+| Progressive viewport mode (default OFF) | HIGH | HIGH | P2 |
+| Dedup already-translated images | HIGH (for P2) | MEDIUM | P2 |
+| Result cache keyed by source | MEDIUM | MEDIUM | P2 |
+| Eagerness / viewport-threshold setting | MEDIUM | MEDIUM | P2 |
+| In-image overlay | MEDIUM | HIGH | P3 (out of scope) |
+| Inpainting | LOW | HIGH | P3 (out of scope) |
+| Manga/vertical-CJK | LOW–MEDIUM | HIGH | P3 (out of scope) |
+| Extra vision providers | LOW | MEDIUM | P3 (out of scope) |
+
+### Competitor Feature Analysis — v1.3 Image Translation
+
+| Feature | Google Lens / Translate | Yandex | Immersive Translate | hime v1.3 approach |
+|---------|------------------------|--------|---------------------|--------------------|
+| Trigger | In-app / right-click | Long-press / context menu | Right-click + upload | Right-click context menu + opt-in viewport |
+| Output | In-image overlay, "Show original" toggle | Overlay, Original/Translation toggle | Overlay + inpaint | **Side panel, paired original+translation** (no overlay) |
+| Auto-detect source | Yes | Yes | Yes | Yes, displayed |
+| Copy text | Yes | Yes | Yes | Yes (original + translation) |
+| Auto-translate on scroll | No (manual) | No (manual) | Web-image one-click, batch | **Opt-in viewport progressive, default OFF, deduped+cached** |
+| Cost model | Free (Google-hosted) | Free (Yandex-hosted) | Freemium / subscription | **BYOK direct** — user pays per call, so cost controls are first-class |
+| Provider | Proprietary | Proprietary | Multiple | Claude Vision (single-call) or Google Vision+Translate (pending) |
+| Overlay/inpaint polish | Strong | Strong | Strong | **Deliberately none** (anti-feature) |
+
+**Strategic takeaway:** hime can't out-polish Lens/Immersive on overlay craft and shouldn't try. Its edge is **BYOK + cost-disciplined progressive reading** — geometry-free side-panel output that's cheap, private (no key on page, all via background worker), and reuses the user's existing hime settings. Progressive mode's dedup/cache/eagerness controls are the differentiator precisely *because* the user pays per image.
+
+### Sources — v1.3 Image Translation (2026-06-20)
+
+- [Google Translate / Lens image translation (Show original, Copy text)](https://support.google.com/translate/answer/6142483) — HIGH
+- [Google Lens replacing Translate camera, overlay behavior](https://www.androidcentral.com/apps-software/google-lens-will-replace-google-translate-camera-mode) — MEDIUM
+- [Yandex image translate (context menu, Original/Translation toggle, copy)](https://yandex.com/support/translate-desktop/en/phototranslate-desktop) — HIGH
+- [DeepL browser-extension image translation](https://support.deepl.com/hc/en-us/articles/21351571574044-Translate-images-with-DeepL-s-browser-extensions) — MEDIUM
+- [Immersive Translate image translation (OCR + inpaint overlay, web-image one-click, batch)](https://immersivetranslate.com/docs/features/image/) — MEDIUM
+- [OCR Translator (Chrome) — right-click, sidebar output, region capture](https://chromewebstore.google.com/detail/ocr-translator/cdpbhdkhlngcgpojobhaellkoidndddk) — MEDIUM
+- [ImageTrans Chrome extension — translate/copy images on websites](https://github.com/xulihang/ImageTrans_chrome_extension) — MEDIUM
+- [IntersectionObserver rootMargin/threshold for viewport-gated loading](https://blog.logrocket.com/lazy-loading-using-the-intersection-observer-api/) — HIGH
+- Internal: `.planning/research/SOURCES.md` (Google Vision OCR, Translation v3, Claude Vision, MV3 network requests, captureVisibleTab) — HIGH
+- Internal: `.planning/PROJECT.md` (scope, constraints, v1.2 patterns reused) — HIGH
 
 ---
 
@@ -379,5 +532,5 @@ No direct competitor does inline keyboard-driven composition translation. The ne
 - `document.execCommand` deprecation status — confirmed deprecated but functional in Chrome
 
 ---
-*Feature research for: hime — browser inline translation extension + translated search*
-*Researched: 2026-05-24 (v1.0) / 2026-06-02 (v1.2 addendum)*
+*Feature research for: hime — browser inline translation extension + translated search + image translation*
+*Researched: 2026-05-24 (v1.0) / 2026-06-02 (v1.2 addendum) / 2026-06-20 (v1.3 addendum)*
