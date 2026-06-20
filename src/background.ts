@@ -1,14 +1,26 @@
 import { OpenAIProvider } from './providers/openai.js';
 import { GeminiProvider } from './providers/gemini.js';
 import { OpenRouterProvider } from './providers/openrouter.js';
-import type { 
-  TranslationConfig, 
-  TranslationProvider, 
-  Settings, 
+import { BraveSearchClient } from './brave-search.js';
+import type {
+  TranslationConfig,
+  TranslationProvider,
+  TranslationResult,
+  UsageRecord,
+  Settings,
   Message,
   TranslateMessage,
-  SetBadgeMessage 
+  SetBadgeMessage,
+  PredictMessage,
+  SearchTranslatedMessage,
+  SearchResult,
+  TranslateBatchMessage
 } from './types.js';
+import { migrateSettings } from './types.js';
+import { sanitizeSuggestion } from './predict-util.js';
+import { buildBatchTranslatePrompt, parseBatchReply } from './translate-batch.js';
+import { buildQueryTranslateConfig } from './query-translate.js';
+import { classifyError } from './errors.js';
 
 // Provider registry
 const providers: Record<string, TranslationProvider> = {
@@ -16,6 +28,16 @@ const providers: Record<string, TranslationProvider> = {
   gemini: new GeminiProvider(),
   openrouter: new OpenRouterProvider(),
 };
+
+// Brave Search transport (Plan 08-02). Single module-scope instance.
+const braveClient = new BraveSearchClient();
+
+// In-flight dedup map (D-05): keyed on the normalized query (trim().toLowerCase()).
+// While a search for a given normalized query is pending, a second same-query
+// submit awaits the SAME promise rather than issuing a second Brave fetch.
+// Entries are removed in a try/finally so a failed query never leaves a hanging
+// entry (RESEARCH Pitfall 4).
+const inFlightSearches = new Map<string, Promise<SearchResult[]>>();
 
 // Current compose mode state
 let composeState: {
@@ -27,22 +49,7 @@ let composeState: {
 // Get settings from storage
 async function getSettings(): Promise<Settings> {
   const result = await chrome.storage.local.get(['himeSettings']);
-  return result.himeSettings || getDefaultSettings();
-}
-
-function getDefaultSettings(): Settings {
-  return {
-    provider: 'openai',
-    apiKey: '',
-    model: 'gpt-5-mini',
-    storageMode: 'persistent',
-    sourceLanguage: 'English',
-    targetLanguage: 'Japanese',
-    formality: 'auto',
-    composeHotkey: 'Ctrl+Y',
-    yoloHotkey: 'Ctrl+Shift+Y',
-    swapHotkey: 'Ctrl+Shift+S',
-  };
+  return migrateSettings(result.himeSettings || {});
 }
 
 // Swap language direction
@@ -58,27 +65,73 @@ async function swapLanguageDirection(): Promise<void> {
   await chrome.action.setBadgeText({ text: badgeText });
 }
 
+// Record token usage per model
+async function recordUsage(model: string, usage: { inputTokens: number; outputTokens: number }): Promise<void> {
+  const result = await chrome.storage.local.get(['himeUsage']);
+  const stats: Record<string, UsageRecord> = result.himeUsage || {};
+  const prev = stats[model] || { inputTokens: 0, outputTokens: 0, requests: 0 };
+  stats[model] = {
+    inputTokens: prev.inputTokens + usage.inputTokens,
+    outputTokens: prev.outputTokens + usage.outputTokens,
+    requests: prev.requests + 1,
+  };
+  await chrome.storage.local.set({ himeUsage: stats });
+}
+
 // Translate text
-async function translateText(text: string): Promise<string> {
+async function translateText(text: string): Promise<TranslationResult> {
   const settings = await getSettings();
-  
-  if (!settings.apiKey) {
-    throw new Error('API key not configured. Please set it in the extension options.');
+
+  const apiKey = settings.apiKeys[settings.provider] || '';
+  if (!apiKey) {
+    throw new Error(`API key not configured for ${settings.provider}. Please set it in the extension options.`);
   }
-  
+
   const provider = providers[settings.provider];
   if (!provider) {
     throw new Error(`Unknown provider: ${settings.provider}`);
   }
-  
+
+  // Auto-detect: if input contains Japanese, flip direction
+  const jpPattern = /[぀-ゟ゠-ヿ一-鿿]/;
+  const inputIsJP = jpPattern.test(text);
+  const source = inputIsJP ? settings.targetLanguage : settings.sourceLanguage;
+  const target = inputIsJP ? settings.sourceLanguage : settings.targetLanguage;
+
   const config: TranslationConfig = {
-    sourceLanguage: settings.sourceLanguage,
-    targetLanguage: settings.targetLanguage,
+    sourceLanguage: source,
+    targetLanguage: target,
     formality: settings.formality,
     customPrompt: settings.customPrompt,
   };
-  
-  return await provider.translate(text, config, settings.apiKey, settings.model);
+
+  const result = await provider.translate(text, config, apiKey, settings.model);
+  if (result.usage) {
+    await recordUsage(settings.model, result.usage);
+  }
+  return result;
+}
+
+// Predict text — silent, no usage recording (D-10)
+async function predictText(text: string): Promise<TranslationResult> {
+  const settings = await getSettings();
+
+  const apiKey = settings.apiKeys[settings.provider] || '';
+  if (!apiKey) {
+    throw new Error(`API key not configured for ${settings.provider}. Please set it in the extension options.`);
+  }
+
+  const provider = providers[settings.provider];
+  if (!provider) {
+    throw new Error(`Unknown provider: ${settings.provider}`);
+  }
+
+  // T-05-01: Clip to last 500 chars — bounds token cost and limits pre-cursor text transmitted
+  const clipped = text.slice(-500);
+
+  // LANG-02: No source/target config — prompt instructs model to continue in the field's own language
+  // D-10: No recordUsage() — prediction is silent, no badge updates in Phase 5
+  return provider.predict(clipped, apiKey, settings.model);
 }
 
 // Message handler
@@ -91,24 +144,187 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           const s = await getSettings();
           console.log('[hime] translate request', { provider: s.provider, model: s.model, length: translateMsg.payload.text.length });
           try {
-            const translated = await translateText(translateMsg.payload.text);
-            sendResponse({ translatedText: translated });
+            const result = await translateText(translateMsg.payload.text);
+            sendResponse({ translatedText: result.text });
           } catch (err) {
             const kind = (err as any)?.kind ?? 'unknown';
             const status = (err as any)?.status;
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            const settings = await getSettings();
-            const endpoint = settings.provider === 'openai'
-              ? 'https://api.openai.com/v1/chat/completions'
-              : settings.provider === 'openrouter'
-              ? 'https://openrouter.ai/api/v1/chat/completions'
-              : 'generativelanguage.googleapis.com';
-            console.error('[hime] translate failed', { provider: settings.provider, model: settings.model, status, kind, endpoint, message });
-            sendResponse({ error: message, kind });
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            console.error('[hime] translate failed', { provider: s.provider, model: s.model, status, kind, message: errorMessage });
+            sendResponse({ error: errorMessage, kind });
           }
           break;
         }
         
+        case 'predict': {
+          const predictMsg = message as PredictMessage;
+          try {
+            const result = await predictText(predictMsg.payload.text);
+            sendResponse({ suggestion: sanitizeSuggestion(result.text) });
+          } catch (err) {
+            // D-10: silent — never an error badge for predictions
+            sendResponse({ suggestion: '' });
+          }
+          break;
+        }
+
+        case 'searchTranslated': {
+          const msg = message as SearchTranslatedMessage;
+          const { query, sourceLanguage, targetLanguage } = msg.payload;
+          const settings = await getSettings();
+          // XLT-01 / T-08-07: key read from storage ONLY — never from the payload.
+          const apiKey = settings.braveApiKey;
+          if (!apiKey) {
+            // Empty stored key → auth error, no fetch attempted.
+            sendResponse({ error: 'Brave API key not configured — add it in options', kind: 'auth' });
+            break;
+          }
+
+          // D-03: source==target short-circuit flag (query needs no translation).
+          const isDirect = sourceLanguage === targetLanguage;
+
+          // D-01 / D-02: Translate the query with an explicit source→target direction
+          // before Brave search. Only when source != target (not isDirect).
+          // Keys: Brave key from braveApiKey; LLM key from apiKeys[provider] (XLT-01 / T-11-01).
+          let searchQuery = query;
+          let translatedQuery: string | undefined;
+          let translationFailed = false;
+
+          if (!isDirect) {
+            const llmApiKey = settings.apiKeys[settings.provider] || '';
+            const provider = providers[settings.provider];
+            if (!llmApiKey || !provider) {
+              // No LLM key/provider — skip translation, search raw (D-10).
+              translationFailed = true;
+            } else {
+              const queryConfig = buildQueryTranslateConfig(sourceLanguage, targetLanguage, settings.formality);
+              try {
+                // D-10 / T-11-03: race against an 8s timeout (mirrors translateBatch pattern).
+                const result = await Promise.race([
+                  provider.translate(query, queryConfig, llmApiKey, settings.model),
+                  new Promise<never>((_, reject) =>
+                    setTimeout(
+                      () => reject(Object.assign(new Error('Query translation timed out'), { name: 'AbortError' })),
+                      8000
+                    )
+                  ),
+                ]);
+                searchQuery = result.text.trim();
+                translatedQuery = searchQuery;
+                // Mirror translateText L108-110: record usage when present.
+                if (result.usage) await recordUsage(settings.model, result.usage);
+              } catch {
+                // LLM failure/timeout → raw-query fallback (D-10). Never an error response.
+                translationFailed = true;
+                // searchQuery stays = query (raw fallback)
+              }
+            }
+          }
+
+          // D-05: dedup key — normalized search query (what is actually searched).
+          const dedupKey = searchQuery.trim().toLowerCase();
+
+          if (inFlightSearches.has(dedupKey)) {
+            // A search for this query is already in flight — reuse its promise.
+            try {
+              const results = await inFlightSearches.get(dedupKey)!;
+              sendResponse({ results, direct: isDirect, translatedQuery, translationFailed });
+            } catch (err) {
+              // Surface the same { error, kind } the originating caller will see.
+              const kind = (err as { kind?: string })?.kind ?? 'unknown';
+              const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+              sendResponse({ error: errorMessage, kind });
+            }
+            break;
+          }
+
+          // First caller for this query — issue the fetch and register it.
+          // D-07: NO 429 auto-retry; the transport classifies and throws.
+          const promise = braveClient.search(searchQuery, apiKey, { count: 10 });
+          inFlightSearches.set(dedupKey, promise);
+          try {
+            const results = await promise;
+            sendResponse({ results, direct: isDirect, translatedQuery, translationFailed });
+          } catch (err) {
+            const kind = (err as { kind?: string })?.kind ?? 'unknown';
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            sendResponse({ error: errorMessage, kind });
+          } finally {
+            // Cleanup on BOTH success and failure (Pitfall 4) — never leak an entry.
+            inFlightSearches.delete(dedupKey);
+          }
+          break;
+        }
+
+        case 'translateBatch': {
+          const msg = message as TranslateBatchMessage;
+          const { items, config } = msg.payload;
+          const s = await getSettings();
+          const apiKey = s.apiKeys[s.provider] || '';
+          if (!apiKey) {
+            sendResponse({ error: `API key not configured for ${s.provider}`, kind: 'auth' });
+            break;
+          }
+          const provider = providers[s.provider];
+          if (!provider) {
+            sendResponse({ error: `Unknown provider: ${s.provider}`, kind: 'unknown' });
+            break;
+          }
+          // XLT-04: serialize ONLY the page-supplied items — url/hostname never added here.
+          const inputKeys = Object.keys(items);
+          const payloadText = JSON.stringify(items);
+          // Batch prompt is prepended to the user content so the JSON instruction overrides
+          // the system-level "output ONLY translated text" that all providers inject via
+          // buildSystemPrompt. This keeps all provider files untouched (out of scope).
+          // See RESEARCH §"Pattern 2" and §"Pitfall: prompt conflict".
+          const batchInstruction = buildBatchTranslatePrompt(config);
+          const userContent = `${batchInstruction}\n\n${payloadText}`;
+          try {
+            // D-04: race against an 8s timeout. The synthetic error uses name: 'AbortError'
+            // so classifyError maps it to kind: 'network' (errors.ts lines 24-34).
+            const result = await Promise.race([
+              provider.translate(userContent, config, apiKey, s.model),
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(Object.assign(new Error('Translation timed out'), { name: 'AbortError' })),
+                  8000
+                )
+              ),
+            ]);
+            if (result.usage) await recordUsage(s.model, result.usage);
+            const translations = parseBatchReply(result.text, inputKeys);
+            sendResponse({ translations });
+          } catch (err) {
+            // Provider errors already carry .kind; the synthetic 8s-timeout AbortError
+            // does not, so fall back to classifyError (AbortError → 'network', T-10-05/D-04).
+            const kind = (err as { kind?: string })?.kind ?? classifyError(s.provider, err).kind;
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            console.error('[hime] translateBatch failed', { provider: s.provider, model: s.model, kind, message: errorMessage });
+            sendResponse({ error: errorMessage, kind });
+          }
+          break;
+        }
+
+        case 'testBraveKey': {
+          // No payload — key read from storage (D-04 / T-08-01 / XLT-01).
+          const settings = await getSettings();
+          const apiKey = settings.braveApiKey;
+          if (!apiKey) {
+            sendResponse({ ok: false, error: 'Brave API key is empty — enter it in options', kind: 'auth' });
+            break;
+          }
+          try {
+            // D-04: count:1 minimizes quota cost for a validation probe.
+            await braveClient.search('test', apiKey, { count: 1 });
+            sendResponse({ ok: true });
+          } catch (err) {
+            const kind = (err as { kind?: string })?.kind ?? 'unknown';
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            sendResponse({ ok: false, error: errorMessage, kind });
+          }
+          break;
+        }
+
         case 'getSettings': {
           const settings = await getSettings();
           sendResponse({ settings });
@@ -130,7 +346,19 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           sendResponse({ success: true });
           break;
         }
-        
+
+        case 'getUsage': {
+          const usage = await chrome.storage.local.get(['himeUsage']);
+          sendResponse({ usage: usage.himeUsage || {} });
+          break;
+        }
+
+        case 'resetUsage': {
+          await chrome.storage.local.remove('himeUsage');
+          sendResponse({ success: true });
+          break;
+        }
+
         default:
           sendResponse({ error: 'Unknown message type' });
       }

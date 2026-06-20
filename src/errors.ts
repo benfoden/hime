@@ -1,6 +1,6 @@
 // Error classification for hime — no Chrome API imports.
 
-export type ErrorKind = 'auth' | 'rate_limit' | 'network' | 'unknown';
+export type ErrorKind = 'auth' | 'rate_limit' | 'credits' | 'network' | 'search_quota' | 'unknown';
 
 export interface ClassifiedError {
   kind: ErrorKind;
@@ -13,7 +13,7 @@ export interface ClassifiedError {
  *
  * Classification order:
  *  1. AbortError / fetch TypeError → network
- *  2. HTTP status → auth (401/403), rate_limit (429), unknown (other)
+ *  2. HTTP status → auth (401/403), credits (402), rate_limit (429), unknown (other)
  *  3. No status, not network → unknown with error message
  */
 export function classifyError(
@@ -43,6 +43,13 @@ export function classifyError(
         status,
       };
     }
+    if (status === 402) {
+      return {
+        kind: 'credits',
+        message: `Out of credits on ${provider} — add funds or switch provider`,
+        status,
+      };
+    }
     if (status === 429) {
       return {
         kind: 'rate_limit',
@@ -62,5 +69,68 @@ export function classifyError(
   return {
     kind: 'unknown',
     message: `${provider} error: ${err instanceof Error ? err.message : 'unknown'}`,
+  };
+}
+
+/**
+ * Map a Brave Search failure to a typed ClassifiedError.
+ *
+ * Distinct from classifyError so a Brave 429 maps to the dedicated 'search_quota'
+ * kind rather than the LLM 'rate_limit' kind (D-07) — Phase 9 switches on this
+ * discriminator to show "search quota exceeded" copy. No retry semantics here.
+ *
+ * Classification order (mirrors classifyError):
+ *  1. AbortError (timeout) or TypeError (offline) → network
+ *  2. status 401/403 → auth
+ *  3. status 429 → search_quota
+ *  4. any other status → unknown (status + body in message)
+ *
+ * Never logs the API key.
+ */
+export function classifyBraveError(
+  err: unknown,
+  response?: { status?: number; bodyMessage?: string },
+): ClassifiedError {
+  // 1. Network errors: AbortError (timeout) or TypeError (offline / failed to fetch)
+  if (
+    (err instanceof DOMException && err.name === 'AbortError') ||
+    (err instanceof Error && err.name === 'AbortError') ||
+    err instanceof TypeError
+  ) {
+    return {
+      kind: 'network',
+      message: 'Network error — request timed out or offline',
+    };
+  }
+
+  // 2. HTTP status-based classification
+  const status = response?.status;
+  if (status !== undefined) {
+    if (status === 401 || status === 403) {
+      return {
+        kind: 'auth',
+        message: 'Invalid or unauthorized Brave API key — check it in options',
+        status,
+      };
+    }
+    if (status === 429) {
+      return {
+        kind: 'search_quota',
+        message: 'Search quota exceeded — check your Brave plan',
+        status,
+      };
+    }
+    // Any other 4xx / 5xx (or edge status)
+    return {
+      kind: 'unknown',
+      message: `Brave Search error ${status}: ${response?.bodyMessage ?? 'unknown'}`,
+      status,
+    };
+  }
+
+  // 3. No status, not a network error
+  return {
+    kind: 'unknown',
+    message: `Brave Search error: ${err instanceof Error ? err.message : 'unknown'}`,
   };
 }

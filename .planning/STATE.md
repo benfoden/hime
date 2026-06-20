@@ -1,78 +1,76 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Inline Predictions
-status: planning
-stopped_at: Phase 5 context gathered
-last_updated: "2026-05-30T22:37:42.942Z"
-last_activity: 2026-05-30 — v1.1 roadmap created (Phases 5-7)
+milestone: v1.2
+milestone_name: Translated Search
+status: Awaiting next milestone
+stopped_at: v1.2 milestone complete and archived — ready to scope v1.3
+last_updated: "2026-06-20T17:59:25.212Z"
+last_activity: 2026-06-20 — Milestone v1.2 completed and archived
 progress:
-  total_phases: 3
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_phases: 7
+  completed_phases: 5
+  total_plans: 13
+  completed_plans: 13
+  percent: 71
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-30)
+See: .planning/PROJECT.md (updated 2026-06-20)
 
 **Core value:** Type English, get natural Japanese inline — without breaking your keyboard flow.
-**Current focus:** Phase 5 — ghost-text-prediction-engine
+**Last shipped:** v1.2 Translated Search (phases 8-11, 2026-06-20)
+**Current focus:** Scope next milestone v1.3 Image Translation via `/gsd-new-milestone`
 
 ## Current Position
 
-Phase: Not started (roadmap complete, planning pending)
+Phase: Milestone v1.2 complete
 Plan: —
-Status: Roadmap complete — ready to plan Phase 5
-Last activity: 2026-05-30 — v1.1 roadmap created (Phases 5-7)
+Status: Awaiting next milestone
+Last activity: 2026-06-20 — Milestone v1.2 completed and archived
 
 ## Performance Metrics
 
-**Velocity:**
+**Velocity (v1.2):**
 
-- Total plans completed: 6 (Phase 1, pre-GSD)
-- Average duration: n/a (Phase 1 was bulk build)
-- Total execution time: n/a
+- Total plans completed: 9
+- Average duration: — min
+- Total execution time: — hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Core Build | 1 | n/a | n/a |
-| 02.1 | 2 | - | - |
-| 03 | 3 | - | - |
-| 04 | 0 | - | - |
-| 5. Ghost-Text Engine | 0 | - | - |
-| 6. Variations & Cycling | 0 | - | - |
-| 7. Prediction Settings | 0 | - | - |
-
-**Recent Trend:** Baseline (no post-GSD plans yet)
+| 8 | 4 | - | - |
+| 10 | 2 | - | - |
+| 11 | 3 | - | - |
 
 *Updated after each plan completion*
+| Phase 08 P01 | 6 min | 2 tasks | 4 files |
+| Phase 08-api-integration-scaffold P02 | 5 min | 2 tasks | 3 files |
+| Phase 08-api-integration-scaffold P03 | 8 min | 1 tasks | 2 files |
+| Phase 08-api-integration-scaffold P04 | 12 min | 3 tasks | 3 files |
+| Phase 11-page-wiring-popup-entry P01 | 18 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
-### Roadmap Evolution
-
-- Phase 02.1 inserted after Phase 2: OpenRouter Provider Support (URGENT)
-- v1.1 Inline Predictions roadmapped: Phase 5 (engine), Phase 6 (variations), Phase 7 (settings)
-
 ### Decisions
 
-See PROJECT.md Key Decisions table.
+Key architecture decisions for v1.2 (see PROJECT.md for full log):
 
-Recent decisions affecting current work:
+- All network calls (Brave + LLM) routed through background service worker via `searchTranslated` message — no API key exposure on the search page
+- Batch result translation uses keyed JSON object (`{"0": ..., "1": ...}`) with count assertion + raw fallback — never plain array
+- Three-stage progressive render: skeleton → raw Brave results → translated overlay
+- `chrome_url_overrides` rejected; page opened via `chrome.tabs.create(getURL('search.html'))`
+- XSS: Brave `description` HTML stripped to plain text; never assigned to `innerHTML`
+- Query translation uses explicit source→target direction — bypasses the auto-flip in existing `translateText()`
 
-- **Phase 1**: `document.execCommand('insertText')` is deprecated but accepted — no undo-safe alternative exists; monitor Chrome releases
-- **Phase 2**: Auto-formality as default — LLM infers tone from input; needs validation testing before trusting
-- **Phase 3**: Google Docs contenteditable behavior is the highest-risk unknown — may require graceful "unsupported" message rather than a fix
-- **02-01**: node --test 'test/**/*.mjs' glob used (not bare directory) — Node 24 requires explicit file pattern for test runner
-- **02-01**: type:module added to package.json — compiled dist/*.js is ES module format, avoids reparsing overhead
-- **02-01**: ErrorKind re-exported from types.ts — single canonical import site for Plans 02 and 03
-- **v1.1**: Cycle keybinding handled in content script (VAR-02), not Chrome commands — preserves the 4-hotkey cap (3 already used)
+Carried from v1.1:
+
+- `document.execCommand('insertText')` accepted as deprecated but undo-safe; monitor Chrome releases
+- `Ctrl+Shift+T` reopens closed tabs — known conflict; unresolved
 
 ### Pending Todos
 
@@ -80,19 +78,15 @@ None yet.
 
 ### Blockers/Concerns
 
-- **Phase 2**: `Ctrl+Shift+T` reopens closed tabs in Chrome — default hotkey conflict needs verification before Web Store submission
-- **Phase 3 RESOLVED**: Shadow DOM traversal confirmed working — one-level open root check sufficient for Gmail
-- **Phase 3 RESOLVED**: Google Docs canvas detection implemented — graceful degradation, not a fix (correct approach)
-
-## Deferred Items
-
-| Category | Item | Status | Deferred At |
-|----------|------|--------|-------------|
-| *(none)* | | | |
+- Brave free tier: ~1,000 queries/mo; 429 must surface clearly during dev to avoid silent quota drain
+- Service-worker termination risk on slow connections: 3-stage pipeline can reach 15-25s; progressive render is the mitigation
 
 ## Session Continuity
 
-Last session: 2026-05-30T22:37:42.936Z
-Stopped at: Phase 5 context gathered
-Resume file: 
-.planning/phases/05-ghost-text-prediction-engine/05-CONTEXT.md
+Last session: 2026-06-19T22:10:00Z
+Stopped at: Phase 11 Plan 03 Tasks 1-3 complete — awaiting human-verify at Task 4
+Resume file: .planning/phases/11-page-wiring-popup-entry/11-03-PLAN.md
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

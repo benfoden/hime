@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>hime Search</title>
+  <link rel="stylesheet" href="search.css">
+</head>
+<body>
+  <div class="container">
+    <header class="page-header">
+      <h1 class="page-title">hime Search</h1>
+      <a id="open-settings" class="settings-link" href="#" role="button">Settings</a>
+    </header>
+    <form id="search-form">
+      <input id="search-input" type="text" autocomplete="off" placeholder="Search…" aria-label="Search query" />
+      <button id="search-submit" type="submit">Search</button>
+    </form>
+    <div class="search-controls">
+      <label class="translate-toggle">
+        <input id="translate-results" type="checkbox" checked />
+        <span id="translate-results-label">Translate results to source language</span>
+      </label>
+      <span id="search-timer" class="search-timer" role="status" aria-live="polite"></span>
+    </div>
+    <div id="disclosure" class="search-disclosure" role="status" aria-live="polite"></div>
+    <div id="results"></div>
+  </div>
+  <script type="module" src="search.js"></script>
+</body>
+</html>
