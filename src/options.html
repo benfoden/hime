@@ -19,13 +19,14 @@
         <select id="provider">
           <option value="openai">OpenAI</option>
           <option value="gemini">Google Gemini</option>
+          <option value="openrouter">OpenRouter</option>
         </select>
       </div>
       
       <div class="form-group">
-        <label for="apiKey">API Key</label>
+        <label for="apiKey" id="apiKeyLabel">API Key</label>
         <input type="password" id="apiKey" placeholder="Enter your API key">
-        <p class="help-text">Your API key is stored locally in your browser.</p>
+        <p class="help-text">Each provider's key is saved separately. Switching providers loads that provider's key.</p>
       </div>
       
       <div class="form-group">
@@ -44,20 +45,36 @@
       </div>
       
       <button id="testConnection" class="btn-secondary">Test Connection</button>
+      <div id="testStatus" class="status" style="display: none; margin-top: 12px;"></div>
     </section>
-    
+
+    <section>
+      <h2>Translated Search</h2>
+
+      <div class="form-group">
+        <label for="braveApiKey">Brave Search API Key</label>
+        <input type="password" id="braveApiKey" placeholder="Enter your Brave Search API key">
+        <p class="help-text">Bring your own Brave Search key. Brave Search is metered (roughly $0.005 per query as of Feb 2026) — each test or search counts against your Brave quota.</p>
+      </div>
+
+      <button id="testBraveKey" class="btn-secondary">Test Brave Key</button>
+      <div id="braveTestStatus" class="status" style="display: none; margin-top: 12px;"></div>
+    </section>
+
     <section>
       <h2>Translation</h2>
       
-      <div class="form-row">
+      <div class="form-row lang-row">
         <div class="form-group">
           <label for="sourceLanguage">Source Language</label>
-          <input type="text" id="sourceLanguage" value="English">
+          <select id="sourceLanguage"></select>
         </div>
-        
+
+        <button id="swapLanguages" type="button" class="swap-btn" title="Swap source and target" aria-label="Swap source and target language">⇄</button>
+
         <div class="form-group">
           <label for="targetLanguage">Target Language</label>
-          <input type="text" id="targetLanguage" value="Japanese">
+          <select id="targetLanguage"></select>
         </div>
       </div>
       
@@ -87,16 +104,38 @@
       <div id="status" class="status" style="display: none;"></div>
     </div>
     
+    <section>
+      <h2>Usage</h2>
+      <div id="usageContent">
+        <p class="help-text">No usage data yet.</p>
+      </div>
+      <button id="resetUsage" class="btn-secondary" style="margin-top: 12px;">Reset Usage</button>
+    </section>
+
     <section class="hotkeys">
       <h2>Hotkeys</h2>
+      <p class="help-text">Click a field, then press the key combination you want (must include Ctrl, Shift, or Alt). Press Esc to cancel.</p>
+      <!-- Ghost-text inline prediction shelved (v1.1 paused) — hidden, may return. -->
+      <div class="hotkey-row" id="predictHotkeyRow" hidden>
+        <label for="predictHotkey">Predict (inline completion)</label>
+        <button type="button" class="hotkey-capture" id="predictHotkey"></button>
+      </div>
+      <div class="hotkey-row">
+        <label for="composeHotkey">Toggle compose mode</label>
+        <button type="button" class="hotkey-capture" id="composeHotkey"></button>
+      </div>
+      <div class="hotkey-row">
+        <label for="yoloHotkey">YOLO translate</label>
+        <button type="button" class="hotkey-capture" id="yoloHotkey"></button>
+      </div>
+      <div class="hotkey-row">
+        <label for="swapHotkey">Swap language direction</label>
+        <button type="button" class="hotkey-capture" id="swapHotkey"></button>
+      </div>
       <ul>
-        <li><kbd>Ctrl+Shift+T</kbd> — Toggle compose mode</li>
-        <li><kbd>Ctrl+Shift+Y</kbd> — YOLO translate</li>
-        <li><kbd>Ctrl+Shift+S</kbd> — Swap language direction</li>
-        <li><kbd>Escape</kbd> — Cancel compose mode</li>
-        <li><kbd>Ctrl+Z</kbd> — Undo translation</li>
+        <li><kbd>Escape</kbd> — Cancel compose</li>
       </ul>
-      <p class="help-text">Hotkeys can be customized in Chrome's extension shortcuts (chrome://extensions/shortcuts)</p>
+      <p class="help-text">Click <strong>Save Settings</strong> to apply. Changes take effect immediately in open tabs.</p>
     </section>
   </div>
   

@@ -10,7 +10,9 @@
   ],
   "host_permissions": [
     "https://api.openai.com/*",
-    "https://generativelanguage.googleapis.com/*"
+    "https://generativelanguage.googleapis.com/*",
+    "https://openrouter.ai/*",
+    "https://api.search.brave.com/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -23,26 +25,6 @@
       "run_at": "document_end"
     }
   ],
-  "commands": {
-    "toggle-compose": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+T"
-      },
-      "description": "Toggle compose mode"
-    },
-    "yolo-translate": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+Y"
-      },
-      "description": "YOLO translate entire field"
-    },
-    "swap-language": {
-      "suggested_key": {
-        "default": "Ctrl+Shift+S"
-      },
-      "description": "Swap translation direction"
-    }
-  },
   "options_page": "options.html",
   "action": {
     "default_popup": "popup.html",

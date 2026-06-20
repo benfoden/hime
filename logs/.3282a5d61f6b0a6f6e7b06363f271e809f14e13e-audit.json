@@ -1,0 +1,20 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/home/ben/code/hime/logs/.3282a5d61f6b0a6f6e7b06363f271e809f14e13e-audit.json",
+    "files": [
+        {
+            "date": 1779676185050,
+            "name": "/home/ben/code/hime/logs/mcp-puppeteer-2026-05-24.log",
+            "hash": "7b924b2733aa9ed2c5d4647b3daa7b1f4c63ce50c426b0a0e5d5bee6a28ac7bd"
+        },
+        {
+            "date": 1780172534679,
+            "name": "/home/ben/code/hime/logs/mcp-puppeteer-2026-05-30.log",
+            "hash": "9b55cf134af207871d2896a31f0cb2643075c35cdd5acd7eaa7b087f4b8008f7"
+        }
+    ],
+    "hashType": "sha256"
+}

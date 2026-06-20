@@ -3,8 +3,8 @@ import { buildSystemPrompt, buildPredictionPrompt } from './prompt.js';
 import { classifyError } from '../errors.js';
 import { stripWrappers } from '../output.js';
 
-export class OpenAIProvider implements TranslationProvider {
-  name = 'openai';
+export class OpenRouterProvider implements TranslationProvider {
+  name = 'openrouter';
 
   async predict(text: string, apiKey: string, model: string): Promise<TranslationResult> {
     const systemPrompt = buildPredictionPrompt();
@@ -15,11 +15,13 @@ export class OpenAIProvider implements TranslationProvider {
     try {
       let response: Response;
       try {
-        response = await fetch('https://api.openai.com/v1/chat/completions', {
+        response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${apiKey}`,
+            'HTTP-Referer': 'https://github.com/benfoden/hime',
+            'X-Title': 'hime',
           },
           body: JSON.stringify({
             model: model,
@@ -29,12 +31,11 @@ export class OpenAIProvider implements TranslationProvider {
             ],
             max_tokens: 8,
             stop: ['\n', '。', '！', '？'],
-            // gpt-5 models only accept the default temperature; omit it.
           }),
           signal: controller.signal,
         });
       } catch (err) {
-        const c = classifyError('openai', err);
+        const c = classifyError('openrouter', err);
         const e = new Error(c.message);
         (e as any).kind = c.kind;
         throw e;
@@ -43,7 +44,7 @@ export class OpenAIProvider implements TranslationProvider {
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         const bodyMessage = (body as any)?.error?.message;
-        const c = classifyError('openai', null, { status: response.status, bodyMessage });
+        const c = classifyError('openrouter', null, { status: response.status, bodyMessage });
         const e = new Error(c.message);
         (e as any).kind = c.kind;
         (e as any).status = c.status;
@@ -70,11 +71,13 @@ export class OpenAIProvider implements TranslationProvider {
     try {
       let response: Response;
       try {
-        response = await fetch('https://api.openai.com/v1/chat/completions', {
+        response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${apiKey}`,
+            'HTTP-Referer': 'https://github.com/benfoden/hime',
+            'X-Title': 'hime',
           },
           body: JSON.stringify({
             model: model,
@@ -82,13 +85,11 @@ export class OpenAIProvider implements TranslationProvider {
               { role: 'system', content: systemPrompt },
               { role: 'user', content: text },
             ],
-            // gpt-5 models (gpt-5-mini/nano) only accept the default temperature
-            // (1); sending any other value returns HTTP 400. Omit it.
           }),
           signal: controller.signal,
         });
       } catch (err) {
-        const c = classifyError('openai', err);
+        const c = classifyError('openrouter', err);
         const e = new Error(c.message);
         (e as any).kind = c.kind;
         throw e;
@@ -97,7 +98,7 @@ export class OpenAIProvider implements TranslationProvider {
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         const bodyMessage = (body as any)?.error?.message;
-        const c = classifyError('openai', null, { status: response.status, bodyMessage });
+        const c = classifyError('openrouter', null, { status: response.status, bodyMessage });
         const e = new Error(c.message);
         (e as any).kind = c.kind;
         (e as any).status = c.status;
