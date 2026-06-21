@@ -151,7 +151,14 @@ Plans:
   4. The first time progressive mode is enabled, the user sees an explicit warning that page images will be sent to a cloud vision API, and an activity indicator shows while progressive translation is running.
   5. Progressive results badge the translated image and populate the side panel when it is open, but never auto-open the side panel (no user gesture is available to call `sidePanel.open()`).
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 13-01-PLAN.md — pure cost-guard + dedup core (eligibility, budget, concurrency, content-hash key, dwell) — TDD
+- [ ] 13-02-PLAN.md — progressiveEnabled setting + message contract + options toggle/first-enable privacy modal/ack
+- [ ] 13-03-PLAN.md — content-script viewport engine: IntersectionObserver + dwell, guards, dedup, on-image badge + ON indicator, badge-click gesture
+- [ ] 13-04-PLAN.md — worker progressiveTranslate (content-hash dedup, single funnel) + openImagePanel gesture open/scroll + activity push
+
 **UI hint**: yes
 
 ### Phase 14: UX / Quality Hardening + Vision Settings
@@ -186,7 +193,7 @@ Plans:
 | 10. Translation Pipeline | v1.2 | 2/2 | Complete    | 2026-06-10 |
 | 11. Page Wiring & Popup Entry | v1.2 | 3/3 | Complete    | 2026-06-20 |
 | 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 7/7 | Complete | 2026-06-21 |
-| 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 0/0 | Not started | - |
+| 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 0/4 | Planned | - |
 | 14. UX / Quality Hardening + Vision Settings | v1.3 | 0/0 | Not started | - |
 
 ## Backlog
