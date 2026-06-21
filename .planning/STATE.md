@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Image Translation — Phases 12-14 (in progress; started 2026-06-20)
-status: planning
-stopped_at: Phase 12 context gathered
-last_updated: "2026-06-21T03:35:48.132Z"
-last_activity: 2026-06-20 — v1.3 roadmap created (phases 12-14, 16 requirements mapped)
+status: executing
+stopped_at: Completed 12-01-PLAN.md
+last_updated: "2026-06-21T04:40:00.000Z"
+last_activity: 2026-06-21 -- Phase 12 Plan 01 (types/build foundation) complete
 progress:
   total_phases: 6
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 7
+  completed_plans: 1
+  percent: 14
 ---
 
 # Project State
@@ -22,14 +22,14 @@ See: .planning/PROJECT.md (updated 2026-06-20)
 
 **Core value:** Type English, get natural Japanese inline — without breaking your keyboard flow.
 **Last shipped:** v1.2 Translated Search (phases 8-11, 2026-06-20)
-**Current focus:** v1.3 Image Translation roadmapped (phases 12-14) — next, plan Phase 12
+**Current focus:** Phase 12 — image-ocr-pipeline-right-click-side-panel
 
 ## Current Position
 
-Phase: 12 — Image OCR Pipeline + Right-Click + Side Panel (not started)
-Plan: —
-Status: Roadmapped — awaiting phase planning
-Last activity: 2026-06-20 — v1.3 roadmap created (phases 12-14, 16 requirements mapped)
+Phase: 12 (image-ocr-pipeline-right-click-side-panel) — EXECUTING
+Plan: 2 of 7
+Status: Executing Phase 12 (Plan 01 complete)
+Last activity: 2026-06-21 -- Phase 12 Plan 01 (types/build foundation) complete
 
 ## Performance Metrics
 
@@ -63,6 +63,12 @@ v1.3 roadmap decisions (see PROJECT.md / research SUMMARY for full rationale):
 - MV3 worker lifecycle: job/dedup/result state persists in `storage.session` with per-call timeouts so a slept/restarted worker never hangs the panel.
 - Reuse shipped patterns: `translateImage` mirrors v1.2 `searchTranslated`; `panel-render.ts` clones `serp-render.ts` (textContent-only); `sidepanel.ts` clones `search.ts`; key-stays-in-worker invariant unchanged.
 
+Phase 12 Plan 01 (types/build foundation):
+
+- Bumped @types/chrome to ^0.0.304 (planned ^0.0.258 still lacks sidePanel.open(); verified via real tsc check on chrome.sidePanel.open({ tabId })).
+- languageToIso uses region-qualified Chinese codes (zh-CN / zh-TW) since Translation v2 distinguishes Simplified vs Traditional.
+- Wave 0 test files import subjects lazily so each is discovered and runs RED (subjects land Plans 02-04) while fixtures load eagerly — no subject ships untested (Nyquist rule).
+
 Carried forward:
 
 - All network + BYOK keys stay in the background service worker — never on the page.
@@ -83,10 +89,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-21T03:35:48.129Z
-Stopped at: Phase 12 context gathered
-Resume file: .planning/phases/12-image-ocr-pipeline-right-click-side-panel/12-CONTEXT.md
+Last session: 2026-06-21T04:40:00.000Z
+Stopped at: Completed 12-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
-- Plan Phase 12 with /gsd-plan-phase 12 (research-phase recommended)
+- Execute Phase 12 Plan 02 (vision-google provider) next.

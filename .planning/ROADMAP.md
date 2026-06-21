@@ -125,7 +125,7 @@ OCR + translate text inside web-page images via a cloud vision LLM (BYOK), surfa
 **Plans**: 7 plans
 
 Plans:
-- [ ] 12-01-PLAN.md — type contracts (VisionProvider/ImageResult/ImageState/messages) + languageToIso map + @types/chrome bump + Wave 0 test scaffolds
+- [x] 12-01-PLAN.md — type contracts (VisionProvider/ImageResult/ImageState/messages) + languageToIso map + @types/chrome bump + Wave 0 test scaffolds
 - [ ] 12-02-PLAN.md — GoogleVisionProvider (Vision DOCUMENT_TEXT_DETECTION + Translation v2, one BYOK key; TDD)
 - [ ] 12-03-PLAN.md — image-resolve pure utils (downscale math, MIME guard, base64 strip, mean confidence, result-state derivation; TDD)
 - [ ] 12-04-PLAN.md — panel-render renderer (clone of serp-render; prepend, breaks, amber/no-text/error states; TDD)
@@ -181,6 +181,6 @@ Plans:
 | 9. SERP Rendering | v1.2 | 2/2 | Complete   | 2026-06-03 |
 | 10. Translation Pipeline | v1.2 | 2/2 | Complete    | 2026-06-10 |
 | 11. Page Wiring & Popup Entry | v1.2 | 3/3 | Complete    | 2026-06-20 |
-| 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 0/7 | Planned | - |
+| 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 1/7 | In progress | - |
 | 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 0/0 | Not started | - |
 | 14. UX / Quality Hardening + Vision Settings | v1.3 | 0/0 | Not started | - |
