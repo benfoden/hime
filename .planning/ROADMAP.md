@@ -157,8 +157,10 @@ Plans:
 
 - [x] 13-01-PLAN.md — pure cost-guard + dedup core (eligibility, budget, concurrency, content-hash key, dwell) — TDD
 - [x] 13-02-PLAN.md — progressiveEnabled setting + message contract + options toggle/first-enable privacy modal/ack
-- [ ] 13-03-PLAN.md — content-script viewport engine: IntersectionObserver + dwell, guards, dedup, on-image badge + ON indicator, badge-click gesture
+- [x] 13-03-PLAN.md — content-script viewport engine: IntersectionObserver + dwell, guards, dedup, on-image badge + ON indicator, badge-click gesture
 - [x] 13-04-PLAN.md — worker progressiveTranslate (content-hash dedup, single funnel) + openImagePanel gesture open/scroll + activity push
+
+**Post-verify fixes (2026-06-21, human-verify):** (a) context-menu registration made durable — run on every worker load + onStartup, decoupled from badge code (right-click menu was silently dropping when onInstalled didn't fire / its async prefix threw); (b) wired the missing `progressiveBadge` worker→content round-trip so on-image badges actually render; (c) added open-panel entry points — a "Open hime image panel" right-click item + a toolbar-popup "Open Image Panel" button (site-independent gesture to open the panel). Human-verified: right-click, badges, popup all working.
 
 **UI hint**: yes
 
@@ -194,7 +196,7 @@ Plans:
 | 10. Translation Pipeline | v1.2 | 2/2 | Complete    | 2026-06-10 |
 | 11. Page Wiring & Popup Entry | v1.2 | 3/3 | Complete    | 2026-06-20 |
 | 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 7/7 | Complete | 2026-06-21 |
-| 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 3/4 | In Progress|  |
+| 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 4/4 | Complete | 2026-06-21 |
 | 14. UX / Quality Hardening + Vision Settings | v1.3 | 0/0 | Not started | - |
 
 ## Backlog

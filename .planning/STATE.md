@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Image Translation — Phases 12-14 (in progress; started 2026-06-20)
 status: verifying
-stopped_at: Phase 13 context gathered
-last_updated: "2026-06-21T15:55:21.075Z"
-last_activity: 2026-06-21 -- Phase 12 Plan 05 (image pipeline worker controller) complete
+stopped_at: Phase 13 COMPLETE — human-verified (progressive viewport mode, cost guards, privacy opt-in)
+last_updated: "2026-06-21T16:30:00.000Z"
+last_activity: 2026-06-21 -- Phase 13 complete: progressive viewport translation + post-verify fixes (durable context-menu, badge round-trip, popup/menu open-panel), human-verified
 progress:
   total_phases: 8
   completed_phases: 1
