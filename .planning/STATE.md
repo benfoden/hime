@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Image Translation — Phases 12-14 (in progress; started 2026-06-20)
 status: executing
-stopped_at: Completed 12-05-PLAN.md
-last_updated: "2026-06-21T04:31:13.126Z"
-last_activity: 2026-06-21 -- Phase 12 Plan 05 (image pipeline worker controller) complete
+stopped_at: Phase 12 COMPLETE — human-verified all 6 in-browser behaviors PASS
+last_updated: "2026-06-21T05:00:00.000Z"
+last_activity: 2026-06-21 -- Phase 12 complete: image OCR (Vision) + LLM-pipeline translation, human-verified; VIS-02 settings forward-pulled; translation moved off Google Translate v2 (steer)
 progress:
   total_phases: 6
   completed_phases: 0

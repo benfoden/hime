@@ -111,7 +111,7 @@ OCR + translate text inside web-page images via a cloud vision LLM (BYOK), surfa
 
 ### Phase 12: Image OCR Pipeline + Right-Click + Side Panel
 
-**Goal**: A user can right-click any image on a page, OCR and translate the text inside it through Google Cloud (Vision OCR + Translation v2, BYOK), and read the original text plus its translation in a native side panel — the complete manual vertical slice that both triggers later reuse.
+**Goal**: A user can right-click any image on a page, OCR the text inside it via Google Cloud Vision (BYOK, Vision API only), translate that text through the user's configured LLM translation model (the main translation pipeline — NOT Google Translation v2; steer 2026-06-21), and read the original text plus its translation in a native side panel — the complete manual vertical slice that both triggers later reuse.
 **Depends on**: Phase 11 (v1.2 worker onMessage switch, in-flight dedup, recordUsage, classifyError, extension-page + textContent-only render pattern, BYOK key plumbing)
 **Requirements**: IMG-01, IMG-02, IMG-03, IMG-04, IMG-05, IMG-07, VIS-01, VIS-03
 **Success Criteria** (what must be TRUE):
@@ -120,7 +120,9 @@ OCR + translate text inside web-page images via a cloud vision LLM (BYOK), surfa
   2. For an image containing readable text, the panel shows the detected original text, its translation into the user's configured target language, and the detected source language ("Detected: Japanese → English").
   3. Every image translation resolves to exactly one visible state — loading, then one of: text+translation, "no text found", low-confidence, or error — and never renders a silent blank, even for cross-origin, tainted-canvas, or oversized images.
   4. Image bytes are resolved inside the background worker (fetch under host_permissions, with a `captureVisibleTab` crop fallback) and validated/downscaled to the provider's MIME, size, and long-edge limits before send; the BYOK vision key is read only in the worker and never reaches the page.
-  5. A slow or worker-restarted image job still completes or surfaces an explicit error: job/dedup state persists in `storage.session` with a per-call timeout, so the panel never hangs indefinitely.
+  5. A slow image job completes or surfaces an explicit error (per-call timeout, so the panel never hangs). Job/result state is **session-scoped only** (`storage.session`) and is intentionally cleared when the browser session ends — image results MUST NOT persist beyond the session (privacy steer 2026-06-21). Survival across a *manual* worker restart is explicitly NOT required (was relaxed from the original durability wording).
+
+**Deviations (2026-06-21, human-verify):** (a) translation moved off Google Translation v2 → the main LLM pipeline, so the Google key needs only Cloud Vision enabled; (b) criterion #5 reframed to session-only privacy (clearing is desired); (c) VIS-02 vision-key settings UI + connection test forward-pulled from Phase 14 into this slice. Human-verified all 6 in-browser behaviors PASS.
 
 **Plans**: 7 plans
 
@@ -183,7 +185,7 @@ Plans:
 | 9. SERP Rendering | v1.2 | 2/2 | Complete   | 2026-06-03 |
 | 10. Translation Pipeline | v1.2 | 2/2 | Complete    | 2026-06-10 |
 | 11. Page Wiring & Popup Entry | v1.2 | 3/3 | Complete    | 2026-06-20 |
-| 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 6/7 | In Progress|  |
+| 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 7/7 | Complete | 2026-06-21 |
 | 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 0/0 | Not started | - |
 | 14. UX / Quality Hardening + Vision Settings | v1.3 | 0/0 | Not started | - |
 
