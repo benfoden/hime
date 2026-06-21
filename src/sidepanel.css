@@ -96,6 +96,30 @@ body {
   margin-bottom: 8px;
 }
 
+/* ── [hime N] chip (.panel-num) — D-04. Mirrors the content-script on-image badge style. ── */
+
+.panel-num {
+  display: inline-block;
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1a73e8;
+  background: #e8f0fe;
+  border: 1px solid #aecbfa;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-bottom: 6px;
+}
+
+/* ── CJK/vertical quality note (.panel-note) — D-03. Modeled on .panel-direction. ── */
+
+.panel-note {
+  font-size: 12px;
+  color: #4d5156;
+  font-style: italic;
+  margin-top: 4px;
+}
+
 /* ── Text blocks: translation (above) + original. Both pre-wrap (D-02). ── */
 
 .panel-text {
@@ -118,6 +142,47 @@ body {
 
 .panel-original {
   color: #5f6368;
+}
+
+/* ── Copy button (.panel-copy) — D-01 (IMG-06). Minimal button style. ── */
+
+.panel-copy {
+  display: inline-block;
+  font-size: 12px;
+  padding: 3px 10px;
+  margin-top: 4px;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  background: #fff;
+  color: #4A90D9;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.panel-copy:hover {
+  background: #f1f3f4;
+}
+
+/* ── "Show original" toggle (.panel-show-original) — D-01. Link-like style. ── */
+
+.panel-show-original {
+  display: inline-block;
+  font-size: 12px;
+  color: #4d5156;
+  background: none;
+  border: none;
+  padding: 0 4px;
+  margin-top: 4px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ── Collapsed original block (.is-collapsed) — hidden by default (D-01).
+ * Toggle class removed by the sidepanel.ts host on "show original" click. ── */
+
+.is-collapsed {
+  display: none;
 }
 
 /* ── Low-confidence amber badge (.panel-badge.low-confidence.amber) — D-04 ── */
@@ -178,7 +243,9 @@ body {
   font-style: italic;
 }
 
-/* ── Error entry (.panel-error) — never a silent blank (IMG-05) ── */
+/* ── Error entry (.panel-error) — never a silent blank (IMG-05).
+ * D-02: visually distinct from the muted .panel-no-text — amber/red with a left border
+ * accent so the failure card reads as clearly-broken at a glance. ── */
 
 .panel-error .panel-message {
   padding: 10px 12px;
@@ -186,6 +253,7 @@ body {
   color: #c5221f;
   background: #fce8e6;
   border: 1px solid #f5c6c5;
+  border-left: 4px solid #c5221f;
   border-radius: 6px;
 }
 
