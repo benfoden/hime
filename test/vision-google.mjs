@@ -1,5 +1,5 @@
 /**
- * node:test harness for the Google Vision + Translation v2 provider (VIS-01).
+ * node:test harness for the Google Cloud Vision provider (VIS-01 / VIS-02).
  * Subject: dist/providers/vision-google.js (lands in Plan 02).
  *
  * Run individually: npm run build && node --test test/vision-google.mjs
@@ -7,12 +7,13 @@
  *
  * Project law: verify against dist/, NEVER the service-worker console.
  *
- * Pins the full two-call provider contract: Vision images:annotate
- * (DOCUMENT_TEXT_DETECTION, ?key=) → Translation v2 (q/target/format:'text',
- * ?key=, source omitted) → normalized ImageResult. Also pins the no-text
- * short-circuit (Translation v2 NOT called), the low-confidence number, the
- * classifyError('google', ...) → {kind:'auth'} mapping on !response.ok, and the
- * IMG-07 key-safety invariant (key absent from any thrown error message/stack).
+ * Pins the Vision-only OCR contract: Vision images:annotate
+ * (DOCUMENT_TEXT_DETECTION, ?key=) → OcrResult. Translation runs through the
+ * configured LLM provider pipeline, not this key. Also pins the no-text
+ * short-circuit, the low-confidence number, the
+ * classifyError('google', ...) → {kind:'auth'} mapping on !response.ok, the
+ * IMG-07 key-safety invariant (key absent from any thrown error message/stack),
+ * and the VIS-02 connection-test contract (Vision-only probe, key-free errors).
  */
 
 import assert from 'node:assert/strict';
@@ -202,9 +203,11 @@ test('VIS-02a: testConnection probes Vision only and resolves on success', async
   try {
     const provider = new GoogleVisionProvider();
     await provider.testConnection('SECRET_KEY');
-    assert.equal(stub.calls.length, 1, 'testConnection must call ONLY the Vision endpoint');
+    assert.equal(stub.calls.length, 1, 'testConnection must call ONLY the Vision endpoint (translation is the LLM pipeline\'s job)');
     assert.ok(stub.calls[0].url.startsWith(VISION_ENDPOINT), 'call must target VISION_ENDPOINT');
     assert.ok(stub.calls[0].url.includes('key=SECRET_KEY'), 'Vision probe must carry ?key=');
+    // Explicit rejection of any Translation API call (the Google key does NOT validate translation).
+    assert.ok(!stub.calls[0].url.includes('translation.googleapis.com'), 'testConnection must NEVER call translation.googleapis.com');
   } finally {
     stub.restore();
   }
@@ -213,16 +216,20 @@ test('VIS-02a: testConnection probes Vision only and resolves on success', async
 // ---------------------------------------------------------------------------
 // VIS-02b (VIS-02): an invalid key (403) rejects with a classified auth error.
 // ---------------------------------------------------------------------------
-test('VIS-02b: testConnection rejects with a classified auth error on a 403', async () => {
+test('VIS-02b: testConnection rejects with a classified key-free auth error on a 403', async () => {
   const { GoogleVisionProvider } = await loadProvider();
+  const SECRET = 'BAD_KEY_SECRET';
   const stub = stubFetchError(403, { error: { message: 'API key not valid' } });
   try {
     const provider = new GoogleVisionProvider();
     await provider
-      .testConnection('BAD_KEY')
+      .testConnection(SECRET)
       .then(() => assert.fail('expected testConnection to reject on 403'))
       .catch((err) => {
         assert.equal(err.kind, 'auth', 'classifyError maps 403 → auth');
+        // T-14-12: the classified rejection must not echo the API key.
+        const text = `${err?.message ?? ''} ${err?.stack ?? ''}`;
+        assert.ok(!text.includes(SECRET), 'API key must never appear in the 403 error message');
       });
     assert.equal(stub.calls.length, 1, 'one Vision probe');
   } finally {

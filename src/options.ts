@@ -342,11 +342,12 @@ async function testBraveKey(): Promise<void> {
   }
 }
 
-// Test the Google Vision/Translation key. Like testBraveKey, this routes through
-// the background worker (T-12-01): the key is saved to storage first, then a
-// payload-less testVisionKey message is sent — the key is never carried in the
-// message or fetched from this page. The worker probes BOTH Vision + Translation
-// v2 so an only-one-API-enabled key still fails.
+// Test the Google Cloud Vision key (VIS-02). Like testBraveKey, this routes
+// through the background worker (T-12-01): the key is saved to storage first,
+// then a payload-less testVisionKey message is sent — the key is never carried
+// in the message or fetched from this page. The worker probes the Vision
+// endpoint ONLY (translation now runs through the configured LLM provider,
+// not this key) — the key needs only Cloud Vision API enabled.
 async function testVisionKey(): Promise<void> {
   if (!googleApiKeyInput.value) {
     showStatus('Vision/OCR key required — enter it first', 'error', visionTestStatusDiv);

@@ -763,8 +763,9 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
 
         case 'testVisionKey': {
           // No payload — key read from storage ONLY (T-12-01 / testBraveKey precedent).
-          // Probes both Vision + Translation v2 so the test validates the same
-          // two-call path image translation uses.
+          // Probes the Vision endpoint ONLY — translation runs through the
+          // configured LLM provider (not this key), so the key needs only Cloud
+          // Vision API enabled.
           const settings = await getSettings();
           const apiKey = settings.googleApiKey;
           if (!apiKey) {
