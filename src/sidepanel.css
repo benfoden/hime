@@ -96,6 +96,30 @@ body {
   margin-bottom: 8px;
 }
 
+/* ── [hime N] chip (.panel-num) — D-04. Mirrors the content-script on-image badge style. ── */
+
+.panel-num {
+  display: inline-block;
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1a73e8;
+  background: #e8f0fe;
+  border: 1px solid #aecbfa;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-bottom: 6px;
+}
+
+/* ── CJK/vertical quality note (.panel-note) — D-03. Modeled on .panel-direction. ── */
+
+.panel-note {
+  font-size: 12px;
+  color: #4d5156;
+  font-style: italic;
+  margin-top: 4px;
+}
+
 /* ── Text blocks: translation (above) + original. Both pre-wrap (D-02). ── */
 
 .panel-text {
@@ -178,7 +202,9 @@ body {
   font-style: italic;
 }
 
-/* ── Error entry (.panel-error) — never a silent blank (IMG-05) ── */
+/* ── Error entry (.panel-error) — never a silent blank (IMG-05).
+ * D-02: visually distinct from the muted .panel-no-text — amber/red with a left border
+ * accent so the failure card reads as clearly-broken at a glance. ── */
 
 .panel-error .panel-message {
   padding: 10px 12px;
@@ -186,6 +212,7 @@ body {
   color: #c5221f;
   background: #fce8e6;
   border: 1px solid #f5c6c5;
+  border-left: 4px solid #c5221f;
   border-radius: 6px;
 }
 

@@ -26,7 +26,7 @@ import { parseHTML } from 'linkedom';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const { IMAGE_RESULT_POPULATED, XSS_PROBE } = await import(
+const { IMAGE_RESULT_POPULATED, IMAGE_RESULT_POPULATED_CJK, XSS_PROBE } = await import(
   path.join(__dirname, '../dist/panel-mock.js')
 );
 
@@ -219,4 +219,135 @@ test('IMG-02: XSS_PROBE renders as inert text (no injected <img>/<script>)', () 
   // any <img> present would have to come from the OCR text — which must not happen.
   assert.equal(mount.querySelector('img[src="x"]'), null, 'no probe-sourced <img src="x"> may be injected');
   assert.ok((mount.textContent ?? '').includes('onerror=alert(1)'), 'payload must appear as inert text');
+});
+
+// ---------------------------------------------------------------------------
+// 8. D-04: [hime N] chip renders on every entry kind when himeNum is set.
+// ---------------------------------------------------------------------------
+test('D-04: [hime N] chip renders on populated entry when himeNum is set', () => {
+  const mount = freshMount();
+  renderPanel(
+    {
+      kind: 'list',
+      entries: [{ kind: 'populated', id: 'h1', result: IMAGE_RESULT_POPULATED, lowConfidence: false, himeNum: 3 }],
+    },
+    document,
+    mount,
+  );
+  const chip = mount.querySelector('.panel-num');
+  assert.ok(chip !== null, 'populated entry with himeNum must render a .panel-num chip');
+  assert.ok((chip.textContent ?? '').includes('[hime 3]'), 'chip text must be "[hime 3]"');
+});
+
+test('D-04: [hime N] chip renders on no-text entry when himeNum is set', () => {
+  const mount = freshMount();
+  renderPanel(
+    { kind: 'list', entries: [{ kind: 'no-text', id: 'h2', himeNum: 7 }] },
+    document,
+    mount,
+  );
+  const chip = mount.querySelector('.panel-num');
+  assert.ok(chip !== null, 'no-text entry with himeNum must render a .panel-num chip');
+  assert.ok((chip.textContent ?? '').includes('[hime 7]'), 'chip text must be "[hime 7]"');
+});
+
+test('D-04: [hime N] chip renders on error entry when himeNum is set', () => {
+  const mount = freshMount();
+  renderPanel(
+    { kind: 'list', entries: [{ kind: 'error', id: 'h3', errorKind: 'auth', message: 'auth failed', himeNum: 2 }] },
+    document,
+    mount,
+  );
+  const chip = mount.querySelector('.panel-num');
+  assert.ok(chip !== null, 'error entry with himeNum must render a .panel-num chip');
+  assert.ok((chip.textContent ?? '').includes('[hime 2]'), 'chip text must be "[hime 2]"');
+});
+
+test('D-04: [hime N] chip absent when himeNum is not set (legacy entry safety)', () => {
+  const mount = freshMount();
+  renderPanel(
+    { kind: 'list', entries: [{ kind: 'populated', id: 'h4', result: IMAGE_RESULT_POPULATED, lowConfidence: false }] },
+    document,
+    mount,
+  );
+  assert.equal(mount.querySelector('.panel-num'), null, 'legacy entry without himeNum must NOT render a chip');
+});
+
+// ---------------------------------------------------------------------------
+// 9. D-03: CJK note appears only when verticalOrCjk is true.
+// ---------------------------------------------------------------------------
+test('D-03: CJK note appears only on populated entries with verticalOrCjk:true', () => {
+  const cjkMount = freshMount();
+  renderPanel(
+    {
+      kind: 'list',
+      entries: [{ kind: 'populated', id: 'cjk1', result: IMAGE_RESULT_POPULATED_CJK, lowConfidence: false, verticalOrCjk: true }],
+    },
+    document,
+    cjkMount,
+  );
+  const note = cjkMount.querySelector('.panel-note');
+  assert.ok(note !== null, 'verticalOrCjk:true entry must render a .panel-note');
+  assert.ok((note.textContent ?? '').includes('vertical/CJK'), 'CJK note text must mention "vertical/CJK"');
+
+  const nonCjkMount = freshMount();
+  renderPanel(
+    {
+      kind: 'list',
+      entries: [{ kind: 'populated', id: 'cjk2', result: IMAGE_RESULT_POPULATED, lowConfidence: false, verticalOrCjk: false }],
+    },
+    document,
+    nonCjkMount,
+  );
+  assert.equal(nonCjkMount.querySelector('.panel-note'), null, 'verticalOrCjk:false must NOT render a .panel-note');
+
+  const absentMount = freshMount();
+  renderPanel(
+    {
+      kind: 'list',
+      entries: [{ kind: 'populated', id: 'cjk3', result: IMAGE_RESULT_POPULATED, lowConfidence: false }],
+    },
+    document,
+    absentMount,
+  );
+  assert.equal(absentMount.querySelector('.panel-note'), null, 'absent verticalOrCjk must NOT render a .panel-note');
+});
+
+// ---------------------------------------------------------------------------
+// 10. D-02: error card and no-text card render as different classes.
+// ---------------------------------------------------------------------------
+test('D-02: error entry uses .panel-error (distinct from .panel-no-text)', () => {
+  const errorMount = freshMount();
+  renderPanel(
+    { kind: 'list', entries: [{ kind: 'error', id: 'e1', errorKind: 'quota', message: 'quota exceeded' }] },
+    document,
+    errorMount,
+  );
+  assert.ok(errorMount.querySelector('.panel-error') !== null, 'error entry must have .panel-error class');
+  assert.equal(errorMount.querySelector('.panel-no-text'), null, 'error entry must NOT have .panel-no-text class');
+  assert.ok((errorMount.querySelector('.panel-message')?.textContent ?? '').includes('quota exceeded'), 'error message names the reason');
+
+  const noTextMount = freshMount();
+  renderPanel(
+    { kind: 'list', entries: [{ kind: 'no-text', id: 'nt1' }] },
+    document,
+    noTextMount,
+  );
+  assert.ok(noTextMount.querySelector('.panel-no-text') !== null, 'no-text entry must have .panel-no-text class');
+  assert.equal(noTextMount.querySelector('.panel-error'), null, 'no-text entry must NOT have .panel-error class');
+});
+
+// ---------------------------------------------------------------------------
+// 11. T-14-07 (XSS): XSS_PROBE via himeNum chip name + note renders inert.
+// ---------------------------------------------------------------------------
+test('T-14-07: XSS_PROBE as message in error entry renders as inert text', () => {
+  const mount = freshMount();
+  renderPanel(
+    { kind: 'list', entries: [{ kind: 'error', id: 'xss2', errorKind: 'unknown', message: XSS_PROBE }] },
+    document,
+    mount,
+  );
+  assert.equal(mount.querySelectorAll('script').length, 0, 'XSS_PROBE in error message must not inject <script>');
+  assert.equal(mount.querySelector('img[src="x"]'), null, 'XSS_PROBE must not inject <img src="x">');
+  assert.ok((mount.textContent ?? '').includes('onerror=alert(1)'), 'XSS_PROBE must appear as inert text in error message');
 });

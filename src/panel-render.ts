@@ -100,6 +100,10 @@ function entryEl(doc: Document, entry: ImageEntry): HTMLElement {
     case 'loading': {
       const row = el(doc, 'div', { className: 'panel-entry panel-loading' });
       row.setAttribute('data-entry-id', entry.id);
+      // D-04: [hime N] chip correlates the row to its on-image badge (guard: legacy entries may lack himeNum).
+      if (entry.himeNum != null) {
+        row.appendChild(el(doc, 'span', { text: `[hime ${entry.himeNum}]`, className: 'panel-num' }));
+      }
       if (entry.thumbnailUrl) row.appendChild(thumbnailEl(doc, entry.thumbnailUrl));
       row.appendChild(el(doc, 'div', { className: 'panel-skeleton' }));
       return row;
@@ -107,6 +111,11 @@ function entryEl(doc: Document, entry: ImageEntry): HTMLElement {
     case 'populated': {
       const row = el(doc, 'div', { className: 'panel-entry' });
       row.setAttribute('data-entry-id', entry.id);
+
+      // D-04: [hime N] chip — first in DOM order, guarded for legacy entries.
+      if (entry.himeNum != null) {
+        row.appendChild(el(doc, 'span', { text: `[hime ${entry.himeNum}]`, className: 'panel-num' }));
+      }
 
       // Thumbnail (optional) — first in DOM order (D-02).
       if (entry.thumbnailUrl) row.appendChild(thumbnailEl(doc, entry.thumbnailUrl));
@@ -124,18 +133,28 @@ function entryEl(doc: Document, entry: ImageEntry): HTMLElement {
         el(doc, 'div', { text: entry.result.translatedText, className: 'panel-translation panel-text pre-wrap' }),
       );
       row.appendChild(
-        el(doc, 'div', { text: entry.result.originalText, className: 'panel-original panel-text pre-wrap' }),
+        el(doc, 'div', { text: entry.result.originalText, className: 'panel-original panel-text pre-wrap is-collapsed' }),
       );
 
       // Low-confidence amber badge (D-04) — a populated entry carrying a badge.
       if (entry.lowConfidence) {
         row.appendChild(el(doc, 'span', { text: 'low confidence', className: 'panel-badge low-confidence amber' }));
       }
+
+      // D-03: per-result CJK/vertical quality note — only on flagged entries (no standing disclaimer).
+      if (entry.verticalOrCjk) {
+        row.appendChild(el(doc, 'div', { text: 'vertical/CJK text — OCR may be imperfect', className: 'panel-note' }));
+      }
+
       return row;
     }
     case 'no-text': {
       const row = el(doc, 'div', { className: 'panel-entry panel-no-text' });
       row.setAttribute('data-entry-id', entry.id);
+      // D-04: [hime N] chip — guarded for legacy entries.
+      if (entry.himeNum != null) {
+        row.appendChild(el(doc, 'span', { text: `[hime ${entry.himeNum}]`, className: 'panel-num' }));
+      }
       if (entry.thumbnailUrl) row.appendChild(thumbnailEl(doc, entry.thumbnailUrl));
       row.appendChild(el(doc, 'div', { text: 'No text found in image.', className: 'panel-message' }));
       return row;
@@ -144,7 +163,12 @@ function entryEl(doc: Document, entry: ImageEntry): HTMLElement {
       const row = el(doc, 'div', { className: 'panel-entry panel-error' });
       row.setAttribute('data-entry-id', entry.id);
       row.setAttribute('data-error-kind', entry.errorKind);
+      // D-04: [hime N] chip — guarded for legacy entries.
+      if (entry.himeNum != null) {
+        row.appendChild(el(doc, 'span', { text: `[hime ${entry.himeNum}]`, className: 'panel-num' }));
+      }
       if (entry.thumbnailUrl) row.appendChild(thumbnailEl(doc, entry.thumbnailUrl));
+      // D-02: entry.message is the worker's reason-naming string (classified error from 14-01).
       row.appendChild(el(doc, 'div', { text: entry.message, className: 'panel-message' }));
       return row;
     }
