@@ -186,3 +186,23 @@ Plans:
 | 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 6/7 | In Progress|  |
 | 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 0/0 | Not started | - |
 | 14. UX / Quality Hardening + Vision Settings | v1.3 | 0/0 | Not started | - |
+
+## Backlog
+
+### Phase 999.1: Two-pass SERP translation (headings first, then descriptions) (BACKLOG)
+
+**Goal:** [Captured for future planning] Translate all search-result headings in a first pass, then descriptions in a second pass, so the user gets the most useful information (titles) fastest — progressive SERP rendering instead of waiting for the full batch.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.2: Auto-translate destination page on search-result clickthrough (BACKLOG)
+
+**Goal:** [Captured for future planning] When the user clicks a hime SERP result, auto-translate the destination page after navigation — carry the translate intent through the clickthrough so the landing page is translated without a second manual action.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
