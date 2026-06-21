@@ -437,9 +437,9 @@ export class GoogleVisionProvider implements VisionProvider {
 | A4 | `@types/chrome ≥ 0.0.258` includes `sidePanel.open()` | Standard Stack / Pitfall 7 | If the exact version is wrong, `tsc` still flags it — planner runs `tsc` to confirm; bump further if needed. Latest `0.2.0` definitely has it. |
 | A5 | Per-call timeout of 25s is safely under the 30s SW fetch-stall ceiling for a two-call (annotate+translate) sequence | Pitfall 5 | If the *sequence* (not a single fetch) approaches 30s idle, may need per-fetch timeouts instead of one wrapping race. Recommend timing each Google call separately. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Detected-language source of truth (Vision vs Translation v2).**
+1. **Detected-language source of truth (Vision vs Translation v2).** RESOLVED: display Translation v2's `detectedSourceLanguage`, Vision fallback (baked into 12-02).
    - What we know: both return it — Vision `detectedLanguages[].languageCode` (per page/block), Translation v2 `detectedSourceLanguage` (when `source` omitted).
    - What's unclear: which to display when they disagree.
    - Recommendation: display Translation v2's `detectedSourceLanguage` (it reflects what was actually translated); use Vision's as a fallback if v2 omits it.
