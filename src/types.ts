@@ -82,7 +82,10 @@ export interface ImageResult {
 // (amber badge), NOT a distinct kind.
 export type ImageEntry =
   | { kind: 'loading'; id: string; thumbnailUrl?: string }
-  | { kind: 'populated'; id: string; thumbnailUrl?: string; result: ImageResult; lowConfidence: boolean }
+  // `target` is the resolved target-language display name/code for the
+  // "Detected: X → Y" direction line (D-02/IMG-03); supplied by the panel/worker
+  // and rendered verbatim via textContent. Optional so legacy entries never break.
+  | { kind: 'populated'; id: string; thumbnailUrl?: string; result: ImageResult; lowConfidence: boolean; target?: string }
   | { kind: 'no-text'; id: string; thumbnailUrl?: string }
   | { kind: 'error'; id: string; thumbnailUrl?: string; errorKind: import('./errors.js').ErrorKind; message: string };
 
