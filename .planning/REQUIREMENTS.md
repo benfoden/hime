@@ -24,11 +24,11 @@
 ### Progressive Mode (PROG) — opt-in, default OFF
 
 - [ ] **PROG-01**: A settings toggle enables progressive image translation; it is **OFF by default** and takes effect without reloading the extension.
-- [ ] **PROG-02**: With progressive mode on, images are auto-translated as they enter or approach the viewport (IntersectionObserver with a viewport margin), results delivered to the side panel.
+- [x] **PROG-02**: With progressive mode on, images are auto-translated as they enter or approach the viewport (IntersectionObserver with a viewport margin), results delivered to the side panel.
 - [x] **PROG-03**: Already-translated images are deduped by content hash and their results cached, so re-scrolling past an image never re-bills the same translation.
 - [x] **PROG-04**: Progressive mode applies cost guards — a concurrency cap, a per-page budget, a dwell debounce before firing, and a minimum-size eligibility filter — so scrolling a media-heavy page cannot fan out unbounded paid API calls.
 - [ ] **PROG-05**: The first time progressive mode is enabled, the user sees an explicit privacy warning that page images will be sent to a cloud vision API, and an activity indicator shows while progressive translation is running.
-- [ ] **PROG-06**: Progressive results badge the image and populate the side panel when it is open, but never auto-open the side panel (IntersectionObserver is not a user gesture, so `sidePanel.open()` cannot fire from it).
+- [x] **PROG-06**: Progressive results badge the image and populate the side panel when it is open, but never auto-open the side panel (IntersectionObserver is not a user gesture, so `sidePanel.open()` cannot fire from it).
 
 ## Future Requirements (deferred)
 
