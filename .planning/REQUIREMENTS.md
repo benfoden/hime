@@ -17,9 +17,9 @@
 
 ### Vision Provider (VIS)
 
-- [ ] **VIS-01**: A provider-agnostic `VisionProvider` interface performs single-call OCR+translate (image in → `{originalText, translatedText, detectedLang}` out), implemented for Claude Vision as the v1.3 provider.
-- [ ] **VIS-02**: User can enter a Claude vision BYOK key in settings (stored client-side like existing keys), with a connection test.
-- [ ] **VIS-03**: Images are validated and downscaled to the provider's size / dimension / MIME limits before send (e.g. ≤10 MB, long-edge cap), so oversized or unsupported images fail gracefully rather than erroring opaquely.
+- [ ] **VIS-01**: A provider-agnostic `VisionProvider` interface performs OCR+translate (image in → `{originalText, translatedText, detectedLang}` out), implemented for **Google Cloud** as the v1.3 provider: Vision API `images:annotate` (DOCUMENT_TEXT_DETECTION) for OCR + detected language, then Cloud Translation **v2** (API-key auth) for the translation. Both endpoints authenticate with the same Google Cloud API key (BYOK), routed through the worker.
+- [ ] **VIS-02**: User can enter a Google Cloud API key in settings (stored client-side like existing keys), with a connection test that exercises the Vision + Translation endpoints.
+- [ ] **VIS-03**: Images are validated and downscaled to Google's limits before send (≤10 MB JSON request, ≤75M-px OCR cap, supported MIME), so oversized or unsupported images fail gracefully rather than erroring opaquely.
 
 ### Progressive Mode (PROG) — opt-in, default OFF
 
@@ -33,7 +33,7 @@
 ## Future Requirements (deferred)
 
 - **IMG-F1** (was IMG-07): On-demand re-translate of an already-translated image from the panel — deferred; v1.3 shows the first result only.
-- **VIS-F1**: Multi-provider vision support (Gemini / OpenAI vision) + provider/model dropdown — deferred; the `VisionProvider` abstraction is built internally in v1.3 but only Claude is wired and surfaced.
+- **VIS-F1**: Multi-provider vision support (Claude / Gemini / OpenAI single-call vision) + provider/model dropdown — deferred; the `VisionProvider` abstraction is built internally in v1.3 but only Google Cloud (Vision + Translation v2) is wired and surfaced.
 - **PROG-F1**: Per-site scoping / allowlist for progressive mode — deferred; v1.3 ships a single global toggle + first-enable warning.
 - **IMG-F2**: Same-page multi-image batching into one vision call (cost optimization) — deferred pending real-usage validation.
 
@@ -41,17 +41,30 @@
 
 - **In-image overlay / inpainting** — translated text rendered over the original image with background restoration. Side-panel text output is the v1.3 scope; overlay is a separate, much harder problem (no vendor guidance; OSS-only). Reasoning: geometry/inpaint craft is out of proportion to the read-the-text goal.
 - **Manga / vertical-CJK special handling** — dedicated detectors/recognizers for stylized or vertical comic text. No authoritative cloud-vendor guidance exists; deferred to a possible future spike if CJK quality becomes the bottleneck.
-- **Google Vision + Translation v3 stack** — rejected: Translation v3 accepts no API key (requires service-account OAuth, breaking the BYOK/no-backend constraint), and its bbox geometry advantage is moot for text-only side-panel output.
-- **Azure / OpenAI as the primary stack** — single-provider focus for v1.3 (Claude); abstraction leaves the door open.
+- **Cloud Translation v3** — rejected for v1.3: v3 accepts no API key (requires service-account OAuth, breaking BYOK/no-backend). v1.3 uses Translation **v2**, which is API-key-authed. (Vision API `images:annotate` is also API-key-authed.)
+- **Single-call vision LLMs (Claude / OpenAI / Azure) as the v1.3 provider** — deferred: v1.3 uses Google Cloud (Vision + Translation v2). The `VisionProvider` abstraction leaves the door open to add single-call providers later (VIS-F1).
 - **Progressive-mode ON by default / eager whole-page translation** — cost and privacy risk; opt-in only.
 - **Freeform region screenshot capture** (drag-select arbitrary screen region) — `<img>` + viewport triggers cover the milestone; region capture deferred.
 
 ## Traceability
 
-Filled by the roadmapper — every requirement maps to exactly one phase (12–14).
+Every v1.3 requirement maps to exactly one phase (12–14). Coverage: 16/16.
 
 | Requirement | Phase |
 |-------------|-------|
-| IMG-01..07 | TBD |
-| VIS-01..03 | TBD |
-| PROG-01..06 | TBD |
+| IMG-01 | Phase 12 |
+| IMG-02 | Phase 12 |
+| IMG-03 | Phase 12 |
+| IMG-04 | Phase 12 |
+| IMG-05 | Phase 12 |
+| IMG-06 | Phase 14 |
+| IMG-07 | Phase 12 |
+| VIS-01 | Phase 12 |
+| VIS-02 | Phase 14 |
+| VIS-03 | Phase 12 |
+| PROG-01 | Phase 13 |
+| PROG-02 | Phase 13 |
+| PROG-03 | Phase 13 |
+| PROG-04 | Phase 13 |
+| PROG-05 | Phase 13 |
+| PROG-06 | Phase 13 |

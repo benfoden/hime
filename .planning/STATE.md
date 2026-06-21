@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Image Translation
-status: planning
-last_updated: "2026-06-20T21:57:27.201Z"
+status: roadmapped
+last_updated: "2026-06-20T22:30:00.000Z"
 last_activity: 2026-06-20
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,20 +21,20 @@ See: .planning/PROJECT.md (updated 2026-06-20)
 
 **Core value:** Type English, get natural Japanese inline — without breaking your keyboard flow.
 **Last shipped:** v1.2 Translated Search (phases 8-11, 2026-06-20)
-**Current focus:** Scope next milestone v1.3 Image Translation via `/gsd-new-milestone`
+**Current focus:** v1.3 Image Translation roadmapped (phases 12-14) — next, plan Phase 12
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 12 — Image OCR Pipeline + Right-Click + Side Panel (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-20 — Milestone v1.3 started
+Status: Roadmapped — awaiting phase planning
+Last activity: 2026-06-20 — v1.3 roadmap created (phases 12-14, 16 requirements mapped)
 
 ## Performance Metrics
 
 **Velocity (v1.2):**
 
-- Total plans completed: 9
+- Total plans completed: 11
 - Average duration: — min
 - Total execution time: — hours
 
@@ -47,29 +47,26 @@ Last activity: 2026-06-20 — Milestone v1.3 started
 | 11 | 3 | - | - |
 
 *Updated after each plan completion*
-| Phase 08 P01 | 6 min | 2 tasks | 4 files |
-| Phase 08-api-integration-scaffold P02 | 5 min | 2 tasks | 3 files |
-| Phase 08-api-integration-scaffold P03 | 8 min | 1 tasks | 2 files |
-| Phase 08-api-integration-scaffold P04 | 12 min | 3 tasks | 3 files |
-| Phase 11-page-wiring-popup-entry P01 | 18 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
 ### Decisions
 
-Key architecture decisions for v1.2 (see PROJECT.md for full log):
+v1.3 roadmap decisions (see PROJECT.md / research SUMMARY for full rationale):
 
-- All network calls (Brave + LLM) routed through background service worker via `searchTranslated` message — no API key exposure on the search page
-- Batch result translation uses keyed JSON object (`{"0": ..., "1": ...}`) with count assertion + raw fallback — never plain array
-- Three-stage progressive render: skeleton → raw Brave results → translated overlay
-- `chrome_url_overrides` rejected; page opened via `chrome.tabs.create(getURL('search.html'))`
-- XSS: Brave `description` HTML stripped to plain text; never assigned to `innerHTML`
-- Query translation uses explicit source→target direction — bypasses the auto-flip in existing `translateText()`
+- 3 phases (12-14): manual vertical slice → progressive + cost control → UX/quality hardening + vision settings. Pipeline built once in Phase 12; both triggers funnel through the single `translateImage` worker case.
+- Vision provider: single-call vision LLM (Claude Vision) behind a provider-agnostic `VisionProvider` interface. Rejected Google Vision + Translation v3 (v3 takes no API key → breaks BYOK/no-backend); abstraction leaves Gemini/OpenAI swappable later.
+- Side-panel text output only — no in-image overlay/inpaint, no manga/vertical-CJK craft this milestone.
+- Context menu adds no hotkey slot (still 3/4 Chrome commands); `chrome.sidePanel.open()` must fire synchronously inside the gesture handler before any `await`.
+- Progressive mode is OFF by default; its cost guards (content-hash dedup + cache, concurrency cap, per-page budget, dwell debounce, min-size filter) and first-enable privacy warning are hard prerequisites, not enhancements.
+- MV3 worker lifecycle: job/dedup/result state persists in `storage.session` with per-call timeouts so a slept/restarted worker never hangs the panel.
+- Reuse shipped patterns: `translateImage` mirrors v1.2 `searchTranslated`; `panel-render.ts` clones `serp-render.ts` (textContent-only); `sidepanel.ts` clones `search.ts`; key-stays-in-worker invariant unchanged.
 
-Carried from v1.1:
+Carried forward:
 
-- `document.execCommand('insertText')` accepted as deprecated but undo-safe; monitor Chrome releases
-- `Ctrl+Shift+T` reopens closed tabs — known conflict; unresolved
+- All network + BYOK keys stay in the background service worker — never on the page.
+- `document.execCommand('insertText')` accepted as deprecated but undo-safe; monitor Chrome releases.
+- `content.ts` is a classic script — pure observer logic lives in a node-testable `image-observer.ts`; IntersectionObserver wiring is inlined.
 
 ### Pending Todos
 
@@ -77,15 +74,18 @@ None yet.
 
 ### Blockers/Concerns
 
-- Brave free tier: ~1,000 queries/mo; 429 must surface clearly during dev to avoid silent quota drain
-- Service-worker termination risk on slow connections: 3-stage pipeline can reach 15-25s; progressive render is the mitigation
+- Progressive mode cost/privacy: one paid call per image per scroll if naively wired — dedup/cache/budget/concurrency/debounce/min-size + default-OFF + first-enable warning are mandatory (Phase 13).
+- Cross-origin / tainted-canvas image bytes: resolve in the worker under host_permissions with `captureVisibleTab` crop fallback; validate MIME/size before send (Phase 12).
+- MV3 worker termination on slow image jobs: durable `storage.session` state + per-call timeout < 30s (Phase 12).
+- CJK / vertical-text OCR quality: known vendor gap, no manga-grade guidance; set expectations, show original alongside translation, defer OSS stack (Phase 14).
+- Final per-provider image request shape (Claude image block) to confirm in Phase 12 planning; `--research-phase` recommended for Phases 12 and 13.
 
 ## Session Continuity
 
-Last session: 2026-06-19T22:10:00Z
-Stopped at: Phase 11 Plan 03 Tasks 1-3 complete — awaiting human-verify at Task 4
-Resume file: .planning/phases/11-page-wiring-popup-entry/11-03-PLAN.md
+Last session: 2026-06-20T22:30:00Z
+Stopped at: v1.3 roadmap created — ROADMAP.md (phases 12-14), REQUIREMENTS.md traceability, STATE.md updated
+Resume file: .planning/ROADMAP.md
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 12 with /gsd-plan-phase 12 (research-phase recommended)
