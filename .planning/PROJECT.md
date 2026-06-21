@@ -8,15 +8,31 @@ A Chrome extension that lets you type in English and get inline Japanese (or any
 
 Type English, get natural Japanese inline — without breaking your keyboard flow.
 
-## Current Milestone: v1.1 Inline Predictions
+## Current Milestone: v1.3 Image Translation
 
-**Goal:** Live 2-3 word inline completions in any text field, any language, with cycleable alternate variations.
+**Goal:** Let the user read text inside images on any page — OCR'd and translated (target→user language) via a cloud vision API (BYOK) — surfaced as readable text in a side panel. Phases 12+.
 
 **Target features:**
-- Ghost-text inline prediction engine — debounced context capture → provider call → render 2-3 word suggestion as inline ghost text
-- Multiple alternate variations per prediction, cycled via in-field keybinding
-- Tab/Enter to accept (undo-safe `execCommand insertText`), Esc to dismiss
-- Settings: enable/disable, debounce timing, max variations, trigger behavior, keybindings
+- Right-click context menu on any `<img>`: "Translate image with hime" (manual, one-off; consumes no hotkey slot)
+- Opt-in **progressive** mode (default OFF): auto-translate images as they enter/approach the viewport (IntersectionObserver)
+- Translated output rendered in a **side panel / popup** — original + translation as text; no in-image overlay/inpaint this milestone
+- Cloud vision provider via BYOK; OCR+translate pipeline routed through the background service worker (no key on page)
+
+**Key context:**
+- Provider choice (Claude Vision single-call vs Google Vision + Translation v3) decided at roadmap review; side-panel output means bbox geometry is not strictly required, which favors single-call but is left open
+- Curated research sources at `.planning/research/SOURCES.md` (cloud-API path; built-in-AI / OpenAI-Azure / manga-overlay craft scoped out)
+- After v1.3: v1.4 contextual-hints. v1.1 inline-predictions stays PAUSED behind `PREDICT_ENABLED`.
+
+## Shipped Milestone: v1.2 Translated Search
+
+**Shipped 2026-06-20** (phases 8–11, 11 plans). Audit passed 17/18 — see `milestones/v1.2-MILESTONE-AUDIT.md`.
+An in-extension search page: query translated user→target language, run against Brave Search (BYOK), results rendered as a classic Google-style SERP back-translated target→user, each linking to the verbatim original page. Three-stage progressive render (skeleton → raw → translated overlay), XSS-safe, all network through the background worker.
+
+## Paused Milestone: v1.1 Inline Predictions
+
+**Status:** PAUSED 2026-06-02 (not archived). Phase 5 ghost-text engine built but shelved behind `PREDICT_ENABLED=false` (content.ts) with the Predict hotkey row hidden in options. Phases 6 (alternate variations/cycling) and 7 (prediction settings) unbuilt. Resume by flipping the flag, unhiding `#predictHotkeyRow`, and roadmapping phases 6–7.
+
+**Goal:** Live 2-3 word inline completions in any text field, any language, with cycleable alternate variations.
 
 ## Requirements
 
@@ -42,10 +58,17 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 - ✓ Loading overlay with guaranteed cleanup on failure — Phase 3
 - ✓ Cursor-end positioning after translation — Phase 3
 - ✓ Focus-leave compose cleanup via focusout handler — Phase 3
+- ✓ In-extension Translated Search page: query translation (source→target) + Brave Search BYOK + classic SERP — v1.2
+- ✓ Batched keyed-JSON result translation (target→source) with count-assertion raw fallback — v1.2
+- ✓ Three-stage progressive render (skeleton → raw Brave → translated overlay) — v1.2
+- ✓ XSS-safe SERP rendering (textContent-only, verbatim original hrefs) — v1.2
+- ✓ All search/translation network routed through background worker (no key on page) — v1.2
 
 ### Active
 
-- v1.1 Inline Predictions — see REQUIREMENTS.md (ghost-text completions, alternate variations, cycle keybinding, settings)
+- v1.3 Image Translation — CURRENT milestone (phases 12+); requirements scoped this cycle
+- v1.4 Contextual Hints — queued after v1.3
+- v1.1 Inline Predictions — PAUSED (phase 5 shelved behind PREDICT_ENABLED flag; phases 6–7 unbuilt)
 
 ### Out of Scope (v1.0)
 
@@ -61,9 +84,10 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 
 ## Current State
 
-**Shipped:** v1.0 MVP (2026-05-25) — 5 phases, 8 plans, 63 commits
-**Codebase:** ~2,000 LOC TypeScript + 480 LOC tests (40 passing)
-**Providers:** OpenAI, Gemini, OpenRouter (3 providers via abstraction layer)
+**Shipped:** v1.0 MVP (2026-05-25); v1.2 Translated Search (2026-06-20, phases 8–11)
+**Paused:** v1.1 Inline Predictions (phase 5 shelved behind `PREDICT_ENABLED=false`; phases 6–7 unbuilt)
+**Codebase:** TypeScript + Chrome MV3; 137 tests passing / 1 skip
+**Providers:** OpenAI, Gemini, OpenRouter (LLM); Brave Search (search, BYOK)
 **Compatibility:** Verified on Gmail, GitHub, Twitter/X, Notion, Slack, Discord; Google Docs graceful degradation
 
 ## Context
@@ -101,6 +125,11 @@ Type English, get natural Japanese inline — without breaking your keyboard flo
 | One-level Shadow DOM traversal | Closed roots are inaccessible per spec; multi-level traversal is over-engineering | ✓ Good — Phase 3 |
 | OpenRouter via OpenAI-compatible API | Single integration pattern, dynamic model fetching, minimal code | ✓ Good — Phase 02.1 |
 | Skip Web Store for v1.0 | Dev load-unpacked sufficient; store submission deferred to future milestone | ✓ Good — Phase 4 |
+| Brave Search as the v1.2 search backend (BYOK) | Single-provider focus; abstraction deferred until a second provider is needed | ✓ Good — v1.2 |
+| Keyed-JSON batch translation with count-assertion fallback | One LLM call for all results; on count mismatch fall back to raw text — never blank/mismapped | ✓ Good — v1.2 |
+| Three-stage progressive render (skeleton → raw → translated overlay) | A worker timeout or translation failure still leaves usable untranslated results | ✓ Good — v1.2 |
+| XSS-safe SERP via textContent-only + verbatim hrefs | Brave description HTML stripped to text; URLs never mutated/translated (SERP-02/03) | ✓ Good — v1.2 |
+| SRCH-06: in-flight dedup instead of literal ~1s submit debounce | Worker dedup map covers duplicate-call intent; a literal debounce would delay deliberate submits | ✓ Good — v1.2 audit |
 
 ## Evolution
 
@@ -120,4 +149,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-30 — milestone v1.1 Inline Predictions started*
+*Last updated: 2026-06-20 — v1.3 Image Translation milestone started (phases 12+); v1.1 paused, v1.4 queued*

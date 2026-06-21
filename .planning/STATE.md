@@ -1,78 +1,89 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Inline Predictions
-status: planning
-stopped_at: Phase 5 context gathered
-last_updated: "2026-05-30T22:37:42.942Z"
-last_activity: 2026-05-30 — v1.1 roadmap created (Phases 5-7)
+milestone: v1.3
+milestone_name: Image Translation — Phases 12-14 (in progress; started 2026-06-20)
+status: executing
+stopped_at: Phase 12 COMPLETE — human-verified all 6 in-browser behaviors PASS
+last_updated: "2026-06-21T05:00:00.000Z"
+last_activity: 2026-06-21 -- Phase 12 complete: image OCR (Vision) + LLM-pipeline translation, human-verified; VIS-02 settings forward-pulled; translation moved off Google Translate v2 (steer)
 progress:
-  total_phases: 3
+  total_phases: 6
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 7
+  completed_plans: 6
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-30)
+See: .planning/PROJECT.md (updated 2026-06-20)
 
 **Core value:** Type English, get natural Japanese inline — without breaking your keyboard flow.
-**Current focus:** Phase 5 — ghost-text-prediction-engine
+**Last shipped:** v1.2 Translated Search (phases 8-11, 2026-06-20)
+**Current focus:** Phase 12 — image-ocr-pipeline-right-click-side-panel
 
 ## Current Position
 
-Phase: Not started (roadmap complete, planning pending)
-Plan: —
-Status: Roadmap complete — ready to plan Phase 5
-Last activity: 2026-05-30 — v1.1 roadmap created (Phases 5-7)
+Phase: 12 (image-ocr-pipeline-right-click-side-panel) — EXECUTING
+Plan: 7 of 7
+Status: Ready to execute
+Last activity: 2026-06-21 -- Phase 12 Plan 05 (image pipeline worker controller) complete
 
 ## Performance Metrics
 
-**Velocity:**
+**Velocity (v1.2):**
 
-- Total plans completed: 6 (Phase 1, pre-GSD)
-- Average duration: n/a (Phase 1 was bulk build)
-- Total execution time: n/a
+- Total plans completed: 11
+- Average duration: — min
+- Total execution time: — hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Core Build | 1 | n/a | n/a |
-| 02.1 | 2 | - | - |
-| 03 | 3 | - | - |
-| 04 | 0 | - | - |
-| 5. Ghost-Text Engine | 0 | - | - |
-| 6. Variations & Cycling | 0 | - | - |
-| 7. Prediction Settings | 0 | - | - |
-
-**Recent Trend:** Baseline (no post-GSD plans yet)
+| 8 | 4 | - | - |
+| 10 | 2 | - | - |
+| 11 | 3 | - | - |
 
 *Updated after each plan completion*
+| Phase 12 P06 | ~8m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
-### Roadmap Evolution
-
-- Phase 02.1 inserted after Phase 2: OpenRouter Provider Support (URGENT)
-- v1.1 Inline Predictions roadmapped: Phase 5 (engine), Phase 6 (variations), Phase 7 (settings)
-
 ### Decisions
 
-See PROJECT.md Key Decisions table.
+v1.3 roadmap decisions (see PROJECT.md / research SUMMARY for full rationale):
 
-Recent decisions affecting current work:
+- 3 phases (12-14): manual vertical slice → progressive + cost control → UX/quality hardening + vision settings. Pipeline built once in Phase 12; both triggers funnel through the single `translateImage` worker case.
+- Vision provider: single-call vision LLM (Claude Vision) behind a provider-agnostic `VisionProvider` interface. Rejected Google Vision + Translation v3 (v3 takes no API key → breaks BYOK/no-backend); abstraction leaves Gemini/OpenAI swappable later.
+- Side-panel text output only — no in-image overlay/inpaint, no manga/vertical-CJK craft this milestone.
+- Context menu adds no hotkey slot (still 3/4 Chrome commands); `chrome.sidePanel.open()` must fire synchronously inside the gesture handler before any `await`.
+- Progressive mode is OFF by default; its cost guards (content-hash dedup + cache, concurrency cap, per-page budget, dwell debounce, min-size filter) and first-enable privacy warning are hard prerequisites, not enhancements.
+- MV3 worker lifecycle: job/dedup/result state persists in `storage.session` with per-call timeouts so a slept/restarted worker never hangs the panel.
+- Reuse shipped patterns: `translateImage` mirrors v1.2 `searchTranslated`; `panel-render.ts` clones `serp-render.ts` (textContent-only); `sidepanel.ts` clones `search.ts`; key-stays-in-worker invariant unchanged.
 
-- **Phase 1**: `document.execCommand('insertText')` is deprecated but accepted — no undo-safe alternative exists; monitor Chrome releases
-- **Phase 2**: Auto-formality as default — LLM infers tone from input; needs validation testing before trusting
-- **Phase 3**: Google Docs contenteditable behavior is the highest-risk unknown — may require graceful "unsupported" message rather than a fix
-- **02-01**: node --test 'test/**/*.mjs' glob used (not bare directory) — Node 24 requires explicit file pattern for test runner
-- **02-01**: type:module added to package.json — compiled dist/*.js is ES module format, avoids reparsing overhead
-- **02-01**: ErrorKind re-exported from types.ts — single canonical import site for Plans 02 and 03
-- **v1.1**: Cycle keybinding handled in content script (VAR-02), not Chrome commands — preserves the 4-hotkey cap (3 already used)
+Phase 12 Plan 01 (types/build foundation):
+
+- Bumped @types/chrome to ^0.0.304 (planned ^0.0.258 still lacks sidePanel.open(); verified via real tsc check on chrome.sidePanel.open({ tabId })).
+- languageToIso uses region-qualified Chinese codes (zh-CN / zh-TW) since Translation v2 distinguishes Simplified vs Traditional.
+- Wave 0 test files import subjects lazily so each is discovered and runs RED (subjects land Plans 02-04) while fixtures load eagerly — no subject ships untested (Nyquist rule).
+
+Phase 12 Plan 05 (image pipeline worker controller):
+
+- dedupKey is a djb2 content-key over info.srcUrl, used as BOTH the storage.session map key and the panel entry id (D-01). The right-click context exposes no reliable dimensions, so srcUrl is the identity; re-clicking replays the cached entry without re-billing.
+- Image job/dedup/result persists to chrome.storage.session under `himeImageJobs` ({ [dedupKey]: ImageEntry }); a finished entry is replayed, an in-flight `loading` entry is not restarted — survives MV3 worker termination (Pitfall 5).
+- onClicked owns gesture-first `sidePanel.open({ tabId })` (before any await — Pitfall 1) and the dedupKey; the `translateImage` message case is a secondary replay/(re-)run path so Plan 06's panel can query a durable entry by dedupKey.
+- contextMenus registered in the EXISTING onInstalled via removeAll-then-create (Pitfall 6 duplicate-id), not at module top level.
+- Byte ladder + OffscreenCanvas downscale/re-encode live in background.ts (SW-only); the pure dimension math is imported from image-resolve (Pattern law). Pixels always resolved in the worker (fetch / captureVisibleTab), never a tainted page canvas.
+
+Carried forward:
+
+- All network + BYOK keys stay in the background service worker — never on the page.
+- `document.execCommand('insertText')` accepted as deprecated but undo-safe; monitor Chrome releases.
+- `content.ts` is a classic script — pure observer logic lives in a node-testable `image-observer.ts`; IntersectionObserver wiring is inlined.
+- [Phase ?]: Phase 12 Plan 06 (side panel page): sidepanel.{ts,html,css} clone search.* — rebuild list from storage.session himeImageJobs on open (Pitfall 5/IMG-05), runtime.onMessage prepends/swaps worker pushes via prependEntry (D-01), getSettings target language as defensive fallback (D-03); all rendering via panel-render.ts textContent-only, no innerHTML in the page.
 
 ### Pending Todos
 
@@ -80,19 +91,18 @@ None yet.
 
 ### Blockers/Concerns
 
-- **Phase 2**: `Ctrl+Shift+T` reopens closed tabs in Chrome — default hotkey conflict needs verification before Web Store submission
-- **Phase 3 RESOLVED**: Shadow DOM traversal confirmed working — one-level open root check sufficient for Gmail
-- **Phase 3 RESOLVED**: Google Docs canvas detection implemented — graceful degradation, not a fix (correct approach)
-
-## Deferred Items
-
-| Category | Item | Status | Deferred At |
-|----------|------|--------|-------------|
-| *(none)* | | | |
+- Progressive mode cost/privacy: one paid call per image per scroll if naively wired — dedup/cache/budget/concurrency/debounce/min-size + default-OFF + first-enable warning are mandatory (Phase 13).
+- Cross-origin / tainted-canvas image bytes: resolve in the worker under host_permissions with `captureVisibleTab` crop fallback; validate MIME/size before send (Phase 12).
+- MV3 worker termination on slow image jobs: durable `storage.session` state + per-call timeout < 30s (Phase 12).
+- CJK / vertical-text OCR quality: known vendor gap, no manga-grade guidance; set expectations, show original alongside translation, defer OSS stack (Phase 14).
+- Final per-provider image request shape (Claude image block) to confirm in Phase 12 planning; `--research-phase` recommended for Phases 12 and 13.
 
 ## Session Continuity
 
-Last session: 2026-05-30T22:37:42.936Z
-Stopped at: Phase 5 context gathered
-Resume file: 
-.planning/phases/05-ghost-text-prediction-engine/05-CONTEXT.md
+Last session: 2026-06-21T04:30:57.488Z
+Stopped at: Completed 12-05-PLAN.md
+Resume file: None
+
+## Operator Next Steps
+
+- Execute Phase 12 Plan 06 (side panel page: sidepanel.ts/html/css, getSettings, rebuild-on-open from storage.session, prepend listener) next.
