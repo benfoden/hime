@@ -3,6 +3,7 @@ import { GeminiProvider } from './providers/gemini.js';
 import { OpenRouterProvider } from './providers/openrouter.js';
 import { GoogleVisionProvider } from './providers/vision-google.js';
 import { BraveSearchClient } from './brave-search.js';
+import { contentDedupKey } from './progressive-guard.js';
 import type {
   TranslationConfig,
   TranslationProvider,
@@ -17,6 +18,8 @@ import type {
   SearchResult,
   TranslateBatchMessage,
   TranslateImageMessage,
+  ProgressiveTranslateMessage,
+  OpenImagePanelMessage,
   ImageEntry,
   ImageResult
 } from './types.js';
@@ -320,11 +323,45 @@ async function ocrAndTranslateImage(
   };
 }
 
-// The async pipeline kicked off from the onClicked gesture. Writes a 'loading'
-// entry, resolves bytes → guards/downscales → races OCR+LLM-translate against the
-// 25s ceiling → persists + pushes the final populated/no-text/error entry. Never
-// leaves the entry on 'loading' (IMG-05) and never re-bills a finished dedupKey.
-async function runImageJob(srcUrl: string, tabId: number, dedupKey: string): Promise<void> {
+// ----------------------------------------------------------------------------
+// Progressive mode worker counters (D-04a / PROG-02).
+// Tracks pending (in-flight) and done (finished) progressive jobs in the
+// service worker so the activity push (progressiveActivity) reflects worker
+// truth. Right-click jobs do not increment these counters — they are
+// gesture-backed and never go through the progressive path.
+// ----------------------------------------------------------------------------
+let progressivePending = 0;
+let progressiveDone = 0;
+
+// Push activity counts to any open content / panel listeners (D-04a).
+// Best-effort: no receiver is silently swallowed (same pattern as pushEntry).
+function pushProgressiveActivity(): void {
+  chrome.runtime.sendMessage({
+    type: 'progressiveActivity',
+    payload: { pending: progressivePending, done: progressiveDone },
+  }).catch(() => {
+    // No listener registered yet / panel closed — not an error.
+  });
+}
+
+// ----------------------------------------------------------------------------
+// Shared OCR+translate pipeline body (PROG-02 "one funnel, two triggers").
+//
+// runImagePipeline is the factored inner body previously inlined in runImageJob.
+// It accepts an optional pre-resolved `preResolved` image to avoid fetching
+// twice when the caller (progressiveTranslate) already resolved the bytes in
+// order to compute the content-hash dedup key.
+//
+// Right-click keeps calling runImageJob (unchanged public contract) which
+// immediately delegates here with preResolved=undefined.
+// Progressive calls this directly after resolving bytes for the content key.
+// ----------------------------------------------------------------------------
+async function runImagePipeline(
+  srcUrl: string,
+  tabId: number,
+  dedupKey: string,
+  preResolved?: { base64: string; mime: string },
+): Promise<void> {
   // Dedup (Pitfall 5): a finished job is reused; an in-flight one is not restarted.
   const existing = await getJob(dedupKey);
   if (existing) {
@@ -352,7 +389,8 @@ async function runImageJob(srcUrl: string, tabId: number, dedupKey: string): Pro
   }
 
   try {
-    const resolved = await resolveImageBytes(srcUrl, tabId);
+    // Use caller-supplied bytes (progressive path) or fetch+decode them (right-click).
+    const resolved = preResolved ?? await resolveImageBytes(srcUrl, tabId);
     const guarded = await downscaleAndGuard(resolved.base64, resolved.mime);
 
     // Race the whole OCR→LLM-translate sequence against the 25s ceiling so a slow
@@ -393,6 +431,13 @@ async function runImageJob(srcUrl: string, tabId: number, dedupKey: string): Pro
     await setJob(dedupKey, entry);
     pushEntry(entry);
   }
+}
+
+// The async pipeline kicked off from the onClicked gesture. Delegates to
+// runImagePipeline — keeps the right-click public contract intact (PROG-02).
+// Never re-bills a finished dedupKey (Pitfall 5); never leaves entry on 'loading' (IMG-05).
+async function runImageJob(srcUrl: string, tabId: number, dedupKey: string): Promise<void> {
+  return runImagePipeline(srcUrl, tabId, dedupKey);
 }
 
 // Translate text
@@ -728,6 +773,116 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           break;
         }
 
+        // ── Phase 13: Progressive Viewport Mode handlers ─────────────────────
+
+        case 'progressiveTranslate': {
+          // PROG-02 / PROG-03: progressive image job from IntersectionObserver.
+          // The content script sends a cheap srcUrl-derived dedupKey as a
+          // first-pass filter, but the AUTHORITATIVE dedup key is content-hash
+          // over the actual image bytes — so two CDN URLs serving the same bytes
+          // never double-bill (PROG-03). Resolve bytes first, compute the content
+          // key, then check the job map before committing to a new job.
+          //
+          // PROG-06: sidePanel.open is NEVER called here — the observer is not a
+          // human gesture; only openImagePanel (badge-click relay) may open the panel.
+          //
+          // T-13-11: googleApiKey is read from storage in the pipeline (runImagePipeline
+          // → getSettings), NEVER from the message payload.
+          const msg = message as ProgressiveTranslateMessage;
+          const { srcUrl: pSrcUrl, tabId: pTabIdRaw } = msg.payload;
+          const pTabId = pTabIdRaw ?? sender.tab?.id;
+          if (!pSrcUrl || typeof pTabId !== 'number') {
+            sendResponse({ error: 'progressiveTranslate: srcUrl and tabId are required' });
+            break;
+          }
+
+          // Read BYOK key from storage only — missing key → auth reply, no work.
+          const pSettings = await getSettings();
+          if (!pSettings.googleApiKey) {
+            sendResponse({ error: 'Google Cloud API key not configured', kind: 'auth' });
+            break;
+          }
+
+          // Resolve bytes to compute the AUTHORITATIVE content-hash dedup key.
+          // This is the only place bytes are available before the pipeline runs.
+          let pResolved: { base64: string; mime: string };
+          try {
+            pResolved = await resolveImageBytes(pSrcUrl, pTabId);
+          } catch {
+            // Resolution failed (network, permissions) — skip silently; progressive
+            // jobs are best-effort and the user did not explicitly request this one.
+            sendResponse({ accepted: false });
+            break;
+          }
+
+          // Convert base64 → Uint8Array for contentDedupKey (djb2 over bytes).
+          const pBinary = atob(pResolved.base64);
+          const pBytes = new Uint8Array(pBinary.length);
+          for (let i = 0; i < pBinary.length; i++) pBytes[i] = pBinary.charCodeAt(i);
+          const contentKey = contentDedupKey(pBytes);
+
+          // PROG-03 dedup: finished entry → replay via pushEntry, no re-bill.
+          // loading entry → already in-flight, do not start a second.
+          const pExisting = await getJob(contentKey);
+          if (pExisting) {
+            if (pExisting.kind !== 'loading') {
+              // Replay the finished/error/no-text entry without any API call.
+              pushEntry(pExisting);
+            }
+            // In-flight or replayed — either way, accepted without new billing.
+            sendResponse({ accepted: true });
+            break;
+          }
+
+          // New job: bump pending counter and start the pipeline. The pipeline
+          // runs asynchronously (void); we reply immediately so the content
+          // script is not blocked on the full OCR+translate sequence.
+          progressivePending++;
+          pushProgressiveActivity();
+
+          void runImagePipeline(pSrcUrl, pTabId, contentKey, pResolved).finally(() => {
+            // Move from pending → done regardless of success/error/no-text.
+            if (progressivePending > 0) progressivePending--;
+            progressiveDone++;
+            pushProgressiveActivity();
+          });
+
+          sendResponse({ accepted: true });
+          break;
+        }
+
+        case 'openImagePanel': {
+          // D-04 / PROG-06: relay the badge-click gesture into chrome.sidePanel.open().
+          //
+          // PITFALL 1 (gesture-first): chrome.sidePanel.open({ tabId }) MUST be the
+          // FIRST synchronous statement in this handler — BEFORE any await — or Chrome
+          // will reject the open as "not in a user gesture". The message relay from the
+          // content script preserves gesture eligibility only if open() fires here
+          // synchronously before any microtask/macrotask boundary.
+          const msg = message as OpenImagePanelMessage;
+          const { tabId: oTabId, dedupKey: oDedupKey } = msg.payload;
+          const resolvedTabId = oTabId ?? sender.tab?.id;
+
+          // Gesture-first: open the panel synchronously, before any await (Pitfall 1).
+          if (typeof resolvedTabId === 'number') {
+            void chrome.sidePanel.open({ tabId: resolvedTabId });
+          }
+
+          // After opening, push a scroll-to-entry signal to the panel. The panel may
+          // have JUST been opened and not yet attached its listener, so this is
+          // best-effort (catch like pushEntry). The type reuses 'openImagePanel' so
+          // the panel can discriminate "open+scroll" from a plain push.
+          chrome.runtime.sendMessage({
+            type: 'openImagePanel',
+            payload: { dedupKey: oDedupKey },
+          }).catch(() => {
+            // Panel not yet listening (freshly opened / closed) — no-op.
+          });
+
+          sendResponse({ accepted: true });
+          break;
+        }
+
         default:
           sendResponse({ error: 'Unknown message type' });
       }
@@ -735,7 +890,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
       sendResponse({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   })();
-  
+
   return true; // Keep message channel open for async
 });
 

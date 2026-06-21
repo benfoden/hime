@@ -92,12 +92,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ── Live worker pushes: prepend / swap the matching skeleton (D-01) ────────
+  // Also handles openImagePanel scroll-to-entry from the badge-click relay (D-04).
   chrome.runtime.onMessage.addListener((message: unknown) => {
     try {
-      const msg = message as { type?: string; payload?: { entry?: ImageEntry } } | null;
-      if (msg?.type !== 'translateImage' || !msg.payload?.entry) return;
-      if (status) status.textContent = '';
-      prependEntry(withTarget(msg.payload.entry), document, mount);
+      const msg = message as { type?: string; payload?: { entry?: ImageEntry; dedupKey?: string } } | null;
+
+      if (msg?.type === 'translateImage') {
+        // Standard push: prepend or swap entry in the panel.
+        if (!msg.payload?.entry) return;
+        if (status) status.textContent = '';
+        prependEntry(withTarget(msg.payload.entry), document, mount);
+        return;
+      }
+
+      if (msg?.type === 'openImagePanel') {
+        // D-04 scroll-to-entry: find the row by data-entry-id and scroll into view.
+        // The id may contain characters special to CSS selectors — escape them the
+        // same way panel-render.ts cssEscape does (replace " and \ with \X).
+        const dedupKey = msg.payload?.dedupKey;
+        if (!dedupKey) return;
+        const escaped = dedupKey.replace(/["\\]/g, '\\$&');
+        const row = mount.querySelector(`[data-entry-id="${escaped}"]`);
+        if (row) {
+          row.scrollIntoView({ block: 'center' });
+        }
+        // If the row is not present yet (entry not rendered), no-op gracefully —
+        // the job may still be in-flight; the entry will prepend when it finishes.
+        return;
+      }
     } catch {
       // A malformed/unexpected push must not blank the panel — surface an error
       // entry instead of failing silently (IMG-05 / T-12-17).
