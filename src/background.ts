@@ -789,7 +789,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           // T-13-11: googleApiKey is read from storage in the pipeline (runImagePipeline
           // → getSettings), NEVER from the message payload.
           const msg = message as ProgressiveTranslateMessage;
-          const { srcUrl: pSrcUrl, tabId: pTabIdRaw } = msg.payload;
+          const { srcUrl: pSrcUrl, tabId: pTabIdRaw, dedupKey: pSrcKey } = msg.payload;
           const pTabId = pTabIdRaw ?? sender.tab?.id;
           if (!pSrcUrl || typeof pTabId !== 'number') {
             sendResponse({ error: 'progressiveTranslate: srcUrl and tabId are required' });
@@ -845,6 +845,21 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             if (progressivePending > 0) progressivePending--;
             progressiveDone++;
             pushProgressiveActivity();
+            // D-04 badge round-trip (was missing — content listened, worker never
+            // emitted, so 0 badges despite "N done"). Relay the ORIGINAL content
+            // srcUrl key (pSrcKey / imgs_…) back to the page — that's what
+            // content.ts matches against its <img>→key map, NOT the worker's
+            // content-hash key. Only badge when a usable (populated) result landed.
+            void getJob(contentKey)
+              .then((entry) => {
+                if (entry && entry.kind === 'populated') {
+                  void chrome.tabs.sendMessage(pTabId, {
+                    type: 'progressiveBadge',
+                    payload: { dedupKey: pSrcKey },
+                  }).catch(() => {});
+                }
+              })
+              .catch(() => {});
           });
 
           sendResponse({ accepted: true });
@@ -907,38 +922,72 @@ chrome.runtime.onStartup.addListener(async () => {
   await chrome.action.setBadgeText({ text: badgeText });
 });
 
-// Also set badge on install. ALSO register the image context menu here (NOT at
-// module top level) so a duplicate-id error never fires on SW re-spawn (Pitfall
-// 6): removeAll() first, then create the single 'hime-translate-image' item.
-chrome.runtime.onInstalled.addListener(async () => {
-  const settings = await getSettings();
-  const badgeText = settings.targetLanguage.slice(0, 2).toUpperCase();
-  await chrome.action.setBadgeText({ text: badgeText });
-
+// (Re)register hime's context-menu items. Idempotent — removeAll() first so a
+// duplicate-id error never fires on re-create (Pitfall 6).
+//
+// CRITICAL (right-click regression fix): this MUST run on every service-worker
+// load, NOT only inside onInstalled. onInstalled fires on install/update only —
+// not on every SW wake — and it previously ran the create AFTER an
+// `await getSettings()` + `setBadgeText()`, so any throw there (or an
+// onInstalled that simply didn't fire on a rebuild/SW recycle) left the menu
+// silently unregistered → "no right-click menu". Registering at top level on
+// every worker load makes the items durably present.
+function ensureContextMenus(): void {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: 'hime-translate-image',
       title: 'Translate image with hime',
       contexts: ['image'],
     });
+    // Site-independent way to open the image panel from any right-click (the
+    // panel can't auto-open without a gesture; this menu click is a gesture).
+    chrome.contextMenus.create({
+      id: 'hime-open-panel',
+      title: 'Open hime image panel',
+      contexts: ['all'],
+    });
   });
+}
+
+// Register on every worker load (top level) + on browser startup. This is the
+// durable fix — the menu no longer depends on onInstalled firing.
+ensureContextMenus();
+chrome.runtime.onStartup.addListener(ensureContextMenus);
+
+// Badge-on-install is now INDEPENDENT of menu registration: a failing
+// getSettings/setBadgeText must never block the context menu from registering.
+chrome.runtime.onInstalled.addListener(async () => {
+  ensureContextMenus();
+  try {
+    const settings = await getSettings();
+    const badgeText = settings.targetLanguage.slice(0, 2).toUpperCase();
+    await chrome.action.setBadgeText({ text: badgeText });
+  } catch {
+    // Non-fatal — never let a badge error suppress the context menu.
+  }
 });
 
-// Right-click → "Translate image with hime" (IMG-01). Top-level listener (NOT
-// inside onInstalled). Pitfall 1: chrome.sidePanel.open({ tabId }) MUST be the
-// FIRST synchronous statement inside the user-gesture handler — no await, no
-// preceding async call — or Chrome rejects the open as "not in a user gesture".
-// Only AFTER opening the panel do we kick off the async image job.
+// Right-click handlers. Top-level listener (NOT inside onInstalled). Pitfall 1:
+// chrome.sidePanel.open({ tabId }) MUST be the FIRST synchronous statement inside
+// the user-gesture handler — no await, no preceding async call — or Chrome
+// rejects the open as "not in a user gesture".
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== 'hime-translate-image' || !tab?.id) return;
-  // Open the panel synchronously inside the gesture — before any await.
-  void chrome.sidePanel.open({ tabId: tab.id });
+  if (!tab?.id) return;
 
-  const srcUrl = info.srcUrl;
-  if (!srcUrl) return;
-  // Content-key dedup id (Pitfall 5): a stable string derived from the source
-  // URL. The right-click context exposes no reliable dimensions, so the srcUrl
-  // is the identity; same image right-clicked twice reuses the cached entry.
-  const dedupKey = imageDedupKey(srcUrl);
-  void runImageJob(srcUrl, tab.id, dedupKey);
+  if (info.menuItemId === 'hime-translate-image') {
+    // Open the panel synchronously inside the gesture — before any await.
+    void chrome.sidePanel.open({ tabId: tab.id });
+    const srcUrl = info.srcUrl;
+    if (!srcUrl) return;
+    // Content-key dedup id (Pitfall 5): a stable string derived from the source
+    // URL. Same image right-clicked twice reuses the cached entry.
+    const dedupKey = imageDedupKey(srcUrl);
+    void runImageJob(srcUrl, tab.id, dedupKey);
+    return;
+  }
+
+  if (info.menuItemId === 'hime-open-panel') {
+    // Open the panel only (gesture-first); no image job.
+    void chrome.sidePanel.open({ tabId: tab.id });
+  }
 });

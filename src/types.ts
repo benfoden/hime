@@ -148,7 +148,8 @@ export type MessageType =
   // Phase 13 progressive viewport mode messages:
   | 'progressiveTranslate'  // content → worker: enqueue a progressive image job (gated, content-hash dedupKey)
   | 'openImagePanel'        // content → worker: badge-click gesture asks worker to sidePanel.open + scroll to entry (D-04, PROG-06)
-  | 'progressiveActivity';  // worker → content (and toolbar): activity count update (pending+done, D-04a)
+  | 'progressiveActivity'   // worker → content (and toolbar): activity count update (pending+done, D-04a)
+  | 'progressiveBadge';     // worker → content: a progressive job landed → add the on-image badge (D-04)
 
 export interface Message {
   type: MessageType;
@@ -294,6 +295,17 @@ export interface ProgressiveActivityMessage extends Message {
     pending: number;
     // Jobs completed (successes + no-text + errors) this page session (D-02a).
     done: number;
+  };
+}
+
+// worker → content: a progressive job produced a usable result → the content
+// script adds the on-image badge for the matching image (D-04). The dedupKey is
+// the content-side srcUrl key (imgs_…) the content originally sent — NOT the
+// worker's content-hash key — so content.ts can match it to the right <img>.
+export interface ProgressiveBadgeMessage extends Message {
+  type: 'progressiveBadge';
+  payload: {
+    dedupKey: string;
   };
 }
 
