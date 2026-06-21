@@ -75,6 +75,50 @@
     </section>
 
     <section>
+      <h2>Progressive Image Translation</h2>
+
+      <div class="form-group">
+        <label class="toggle-label">
+          <input type="checkbox" id="progressiveEnabled" class="toggle-checkbox">
+          <span>Auto-translate images as you scroll (opt-in)</span>
+        </label>
+        <p class="help-text">
+          When enabled, images you pause near are automatically sent for OCR and translation.
+          Off by default — enabling uploads page images to external services (see below).
+        </p>
+      </div>
+
+      <div id="progressiveStatus" class="status" style="display: none; margin-top: 12px;"></div>
+
+      <!-- Blocking first-enable privacy modal (PROG-05 / D-03). Hidden until the user
+           tries to enable progressive mode without a prior acknowledgement. -->
+      <div id="progressiveModal" class="modal-overlay" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="progressiveModalTitle">
+        <div class="modal-dialog">
+          <h3 id="progressiveModalTitle">Enable Progressive Image Translation?</h3>
+          <p>
+            When you enable this feature, as you scroll a page, images you pause near are
+            <strong>automatically uploaded to external services</strong>:
+          </p>
+          <ul class="privacy-list">
+            <li><strong>Image bytes</strong> are uploaded to <strong>Google Cloud Vision</strong> for OCR (text extraction).</li>
+            <li><strong>The detected text</strong> is then sent to <strong>your configured translation provider</strong> (your selected LLM) for translation.</li>
+          </ul>
+          <p>
+            This happens automatically — you do not need to right-click each image.
+            Your acknowledgement is remembered; this prompt will not appear again.
+          </p>
+          <p class="help-text">
+            To stop uploads at any time, toggle this setting off. The per-page budget limits auto-translation to 10 images per page.
+          </p>
+          <div class="modal-actions">
+            <button id="progressiveModalEnable" class="btn-primary">Enable</button>
+            <button id="progressiveModalCancel" class="btn-secondary">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
       <h2>Translation</h2>
       
       <div class="form-row lang-row">

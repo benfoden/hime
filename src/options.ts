@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, PROVIDER_MODELS, OPENROUTER_ALLOWLIST, MODEL_META, SUPPORTED_LANGUAGES, migrateSettings, metaLabel, type Settings, type UsageRecord } from './types.js';
+import { DEFAULT_SETTINGS, PROVIDER_MODELS, OPENROUTER_ALLOWLIST, MODEL_META, SUPPORTED_LANGUAGES, migrateSettings, metaLabel, STORAGE_PROGRESSIVE_ACK, type Settings, type UsageRecord } from './types.js';
 
 // DOM Elements
 let providerSelect: HTMLSelectElement;
@@ -26,6 +26,12 @@ let predictHotkeyBtn: HTMLButtonElement;
 let composeHotkeyBtn: HTMLButtonElement;
 let yoloHotkeyBtn: HTMLButtonElement;
 let swapHotkeyBtn: HTMLButtonElement;
+// Progressive Image Translation elements (Plan 13-02 / PROG-01)
+let progressiveToggle: HTMLInputElement;
+let progressiveStatusDiv: HTMLDivElement;
+let progressiveModal: HTMLDivElement;
+let progressiveModalEnableBtn: HTMLButtonElement;
+let progressiveModalCancelBtn: HTMLButtonElement;
 
 // Current settings
 let currentSettings: Settings = { ...DEFAULT_SETTINGS };
@@ -131,6 +137,8 @@ function populateForm(): void {
   composeHotkeyBtn.textContent = currentSettings.composeHotkey;
   yoloHotkeyBtn.textContent = currentSettings.yoloHotkey;
   swapHotkeyBtn.textContent = currentSettings.swapHotkey;
+  // PROG-01: reflect persisted toggle state.
+  progressiveToggle.checked = currentSettings.progressiveEnabled;
 }
 
 // Update model options based on selected provider
@@ -236,8 +244,8 @@ async function saveSettings(): Promise<void> {
     // Top-level Google Vision/Translation key (braveApiKey precedent). Persisted
     // from the Image Translation input (VIS-02).
     googleApiKey: googleApiKeyInput.value,
-    // PROG-01: persisted from the progressive toggle (wired in Task 2 / Plan 13-02).
-    progressiveEnabled: currentSettings.progressiveEnabled,
+    // PROG-01: persisted from the progressive toggle (D-03 ack gate enforced in change handler).
+    progressiveEnabled: progressiveToggle.checked,
   };
 
   await chrome.storage.local.set({ himeSettings: newSettings });
@@ -441,6 +449,67 @@ function showStatus(message: string, type: 'success' | 'error' | 'info', target:
   }
 }
 
+// Wire the progressive toggle + first-enable privacy modal (PROG-01, PROG-05, D-03).
+//
+// Flow when the user turns the toggle ON:
+//   1. Read chrome.storage.local[STORAGE_PROGRESSIVE_ACK].
+//   2. If NOT acknowledged → show blocking modal, revert checkbox to OFF.
+//      Enable click → set ack, hide modal, re-check toggle, save settings.
+//      Cancel click → hide modal, leave toggle OFF.
+//   3. If acknowledged → skip modal; save settings immediately.
+//
+// The "save and propagate live" is achieved by calling saveSettings() on Enable,
+// which persists progressiveEnabled:true to himeSettings in storage.local.
+// content.ts already watches chrome.storage.onChanged for himeSettings, so the
+// change propagates without an extension reload (PROG-01).
+function showProgressiveModal(): void {
+  progressiveModal.style.display = 'flex';
+}
+
+function hideProgressiveModal(): void {
+  progressiveModal.style.display = 'none';
+}
+
+function setupProgressiveToggle(): void {
+  progressiveToggle.addEventListener('change', () => {
+    if (!progressiveToggle.checked) {
+      // Turning OFF: just save — no modal needed.
+      void saveSettings();
+      return;
+    }
+
+    // Turning ON: check if the user has already acknowledged the privacy warning.
+    void chrome.storage.local.get([STORAGE_PROGRESSIVE_ACK]).then((result) => {
+      const acked = result[STORAGE_PROGRESSIVE_ACK] === true;
+      if (acked) {
+        // Already consented — enable immediately.
+        void saveSettings();
+      } else {
+        // First enable: show the blocking privacy modal and revert the toggle until
+        // the user explicitly clicks Enable (D-03 / PROG-05 consent requirement).
+        progressiveToggle.checked = false;
+        showProgressiveModal();
+      }
+    });
+  });
+
+  progressiveModalEnableBtn.addEventListener('click', () => {
+    // Persist the one-time acknowledgement to storage.local (D-03).
+    void chrome.storage.local.set({ [STORAGE_PROGRESSIVE_ACK]: true }).then(() => {
+      hideProgressiveModal();
+      // Re-enable the toggle and save settings so the feature activates immediately.
+      progressiveToggle.checked = true;
+      void saveSettings();
+    });
+  });
+
+  progressiveModalCancelBtn.addEventListener('click', () => {
+    // User declined — hide modal, leave toggle OFF (D-03 decline → stays off).
+    hideProgressiveModal();
+    progressiveToggle.checked = false;
+  });
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   // Get DOM elements
@@ -469,11 +538,18 @@ document.addEventListener('DOMContentLoaded', () => {
   composeHotkeyBtn = document.getElementById('composeHotkey') as HTMLButtonElement;
   yoloHotkeyBtn = document.getElementById('yoloHotkey') as HTMLButtonElement;
   swapHotkeyBtn = document.getElementById('swapHotkey') as HTMLButtonElement;
+  // Progressive toggle elements (Plan 13-02)
+  progressiveToggle = document.getElementById('progressiveEnabled') as HTMLInputElement;
+  progressiveStatusDiv = document.getElementById('progressiveStatus') as HTMLDivElement;
+  progressiveModal = document.getElementById('progressiveModal') as HTMLDivElement;
+  progressiveModalEnableBtn = document.getElementById('progressiveModalEnable') as HTMLButtonElement;
+  progressiveModalCancelBtn = document.getElementById('progressiveModalCancel') as HTMLButtonElement;
 
   setupHotkeyCapture(predictHotkeyBtn, 'predictHotkey');
   setupHotkeyCapture(composeHotkeyBtn, 'composeHotkey');
   setupHotkeyCapture(yoloHotkeyBtn, 'yoloHotkey');
   setupHotkeyCapture(swapHotkeyBtn, 'swapHotkey');
+  setupProgressiveToggle();
 
   // Event listeners
   providerSelect.addEventListener('change', () => {
