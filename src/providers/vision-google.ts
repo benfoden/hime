@@ -29,6 +29,12 @@ export const TRANSLATE_V2_ENDPOINT = 'https://translation.googleapis.com/languag
 // Per-call timeout. Two sequential ~12s calls stay under the MV3 30s ceiling (A5).
 const CALL_TIMEOUT_MS = 12000;
 
+// A 1×1 transparent PNG (base64, no data: prefix) used only by testConnection as
+// a minimal Vision probe — a valid key returns 200 with an empty annotation, no
+// readable text required.
+const PROBE_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
 // Distinct no-text sentinel: a text-free image short-circuits here WITHOUT
 // calling Translation v2 and WITHOUT throwing (Pitfall 4). The worker maps a
 // null return to the panel's no-text state.
@@ -130,6 +136,39 @@ export class GoogleVisionProvider implements VisionProvider {
       // Char-count usage so the worker's recordUsage('google-vision', ...) has data.
       usage: { inputTokens: originalText.length, outputTokens: translatedText.length },
     };
+  }
+
+  /**
+   * Connection test for the BYOK key (Phase 14 / VIS-02). Exercises BOTH the
+   * Vision and the Translation v2 endpoints — the same two-call path image
+   * translation uses — so an enabled-Vision-but-not-Translation key (or vice
+   * versa) still fails. Resolves on success; rejects with a classified Error
+   * (.kind / .status, key never in the message) on any failure, mirroring
+   * postJson's throw shape so the worker handler treats it like ocrTranslate.
+   *
+   * Probes are minimal: a 1×1 transparent PNG for Vision (a valid key returns 200
+   * with an empty annotation — no readable text needed) and a one-word translate
+   * for Translation v2. Both are tiny but DO bill against the key.
+   */
+  async testConnection(apiKey: string): Promise<void> {
+    const visionUrl = new URL(VISION_ENDPOINT);
+    visionUrl.searchParams.set('key', apiKey); // encoded; never interpolated/logged.
+    await this.postJson<unknown>(visionUrl, {
+      requests: [
+        {
+          image: { content: PROBE_PNG_BASE64 },
+          features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+        },
+      ],
+    });
+
+    const translateUrl = new URL(TRANSLATE_V2_ENDPOINT);
+    translateUrl.searchParams.set('key', apiKey);
+    await this.postJson<unknown>(translateUrl, {
+      q: 'test',
+      target: 'es',
+      format: 'text',
+    });
   }
 
   /**

@@ -616,6 +616,27 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           break;
         }
 
+        case 'testVisionKey': {
+          // No payload — key read from storage ONLY (T-12-01 / testBraveKey precedent).
+          // Probes both Vision + Translation v2 so the test validates the same
+          // two-call path image translation uses.
+          const settings = await getSettings();
+          const apiKey = settings.googleApiKey;
+          if (!apiKey) {
+            sendResponse({ ok: false, error: 'Google Cloud API key is empty — enter it in options', kind: 'auth' });
+            break;
+          }
+          try {
+            await visionProvider.testConnection(apiKey);
+            sendResponse({ ok: true });
+          } catch (err) {
+            const kind = (err as { kind?: string })?.kind ?? 'unknown';
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            sendResponse({ ok: false, error: errorMessage, kind });
+          }
+          break;
+        }
+
         case 'getSettings': {
           const settings = await getSettings();
           sendResponse({ settings });

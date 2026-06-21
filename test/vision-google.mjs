@@ -204,3 +204,71 @@ test('VIS-01c: the API key never leaks into a thrown error message', async () =>
     globalThis.fetch = original;
   }
 });
+
+// ---------------------------------------------------------------------------
+// VIS-02a (VIS-02): testConnection probes BOTH endpoints — Vision images:annotate
+//          (?key=) then Translation v2 (?key=) — and resolves when both return ok.
+//          This is the settings "Test Vision Key" path; it must exercise the same
+//          two-call sequence image translation uses so a half-enabled key fails.
+// ---------------------------------------------------------------------------
+test('VIS-02a: testConnection hits Vision then Translation v2 and resolves on success', async () => {
+  const { GoogleVisionProvider, VISION_ENDPOINT, TRANSLATE_V2_ENDPOINT } = await loadProvider();
+  // Empty Vision annotation + a translation sample — both 200 → connection ok.
+  const stub = stubFetch([VISION_EMPTY, TRANSLATE_V2_SAMPLE]);
+  try {
+    const provider = new GoogleVisionProvider();
+    await provider.testConnection('SECRET_KEY');
+    assert.equal(stub.calls.length, 2, 'testConnection must call both endpoints');
+    assert.ok(stub.calls[0].url.startsWith(VISION_ENDPOINT), 'first call must target VISION_ENDPOINT');
+    assert.ok(stub.calls[0].url.includes('key=SECRET_KEY'), 'Vision probe must carry ?key=');
+    assert.ok(stub.calls[1].url.startsWith(TRANSLATE_V2_ENDPOINT), 'second call must target TRANSLATE_V2_ENDPOINT');
+    assert.ok(stub.calls[1].url.includes('key=SECRET_KEY'), 'Translation probe must carry ?key=');
+  } finally {
+    stub.restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// VIS-02b (VIS-02): an invalid key (403 on the Vision probe) rejects with a
+//          classified auth error and never calls Translation v2.
+// ---------------------------------------------------------------------------
+test('VIS-02b: testConnection rejects with a classified auth error on a 403', async () => {
+  const { GoogleVisionProvider } = await loadProvider();
+  const stub = stubFetchError(403, { error: { message: 'API key not valid' } });
+  try {
+    const provider = new GoogleVisionProvider();
+    await provider
+      .testConnection('BAD_KEY')
+      .then(() => assert.fail('expected testConnection to reject on 403'))
+      .catch((err) => {
+        assert.equal(err.kind, 'auth', 'classifyError maps 403 → auth');
+      });
+    assert.equal(stub.calls.length, 1, 'a failed Vision probe must short-circuit before Translation v2');
+  } finally {
+    stub.restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// VIS-02c (IMG-07): the key never appears in a testConnection error string.
+// ---------------------------------------------------------------------------
+test('VIS-02c: the API key never leaks into a testConnection error message', async () => {
+  const { GoogleVisionProvider } = await loadProvider();
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error('network down');
+  };
+  try {
+    const provider = new GoogleVisionProvider();
+    const SECRET = 'super-secret-google-key';
+    await provider
+      .testConnection(SECRET)
+      .then(() => assert.fail('expected testConnection to reject'))
+      .catch((err) => {
+        const text = `${err?.message ?? ''} ${err?.stack ?? ''}`;
+        assert.ok(!text.includes(SECRET), 'API key must never appear in a thrown error');
+      });
+  } finally {
+    globalThis.fetch = original;
+  }
+});

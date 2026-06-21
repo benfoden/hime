@@ -14,6 +14,9 @@ let testConnectionBtn: HTMLButtonElement;
 let braveApiKeyInput: HTMLInputElement;
 let testBraveKeyBtn: HTMLButtonElement;
 let braveTestStatusDiv: HTMLDivElement;
+let googleApiKeyInput: HTMLInputElement;
+let testVisionKeyBtn: HTMLButtonElement;
+let visionTestStatusDiv: HTMLDivElement;
 let saveBtn: HTMLButtonElement;
 let statusDiv: HTMLDivElement;
 let testStatusDiv: HTMLDivElement;
@@ -117,6 +120,7 @@ function populateForm(): void {
   providerSelect.value = currentSettings.provider;
   apiKeyInput.value = currentSettings.apiKeys[currentSettings.provider] || '';
   braveApiKeyInput.value = currentSettings.braveApiKey || '';
+  googleApiKeyInput.value = currentSettings.googleApiKey || '';
   modelSelect.value = currentSettings.model;
   storageModeSelect.value = currentSettings.storageMode;
   populateLanguageSelect(sourceLanguageSelect, currentSettings.sourceLanguage);
@@ -229,10 +233,9 @@ async function saveSettings(): Promise<void> {
     swapHotkey: currentSettings.swapHotkey,
     // D-03: top-level field (NOT inside apiKeys). Persisted from the Translated Search input.
     braveApiKey: braveApiKeyInput.value,
-    // Phase 12: top-level Google Vision/Translation key (braveApiKey precedent).
-    // No options-page input yet (lands in a later Phase 12 plan); carry the
-    // persisted value through so saving settings never clears it.
-    googleApiKey: currentSettings.googleApiKey,
+    // Top-level Google Vision/Translation key (braveApiKey precedent). Persisted
+    // from the Image Translation input (VIS-02).
+    googleApiKey: googleApiKeyInput.value,
   };
 
   await chrome.storage.local.set({ himeSettings: newSettings });
@@ -329,6 +332,45 @@ async function testBraveKey(): Promise<void> {
   }
 }
 
+// Test the Google Vision/Translation key. Like testBraveKey, this routes through
+// the background worker (T-12-01): the key is saved to storage first, then a
+// payload-less testVisionKey message is sent — the key is never carried in the
+// message or fetched from this page. The worker probes BOTH Vision + Translation
+// v2 so an only-one-API-enabled key still fails.
+async function testVisionKey(): Promise<void> {
+  if (!googleApiKeyInput.value) {
+    showStatus('Vision/OCR key required — enter it first', 'error', visionTestStatusDiv);
+    return;
+  }
+
+  // Save the key to storage FIRST (partial save merged into currentSettings). On
+  // save failure, surface it and do NOT test against a stale key.
+  const merged: Settings = { ...currentSettings, googleApiKey: googleApiKeyInput.value };
+  try {
+    await chrome.storage.local.set({ himeSettings: merged });
+    currentSettings = merged;
+  } catch (error) {
+    showStatus(`Could not save Vision key: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error', visionTestStatusDiv);
+    return;
+  }
+
+  showStatus('Testing Vision key…', 'info', visionTestStatusDiv);
+  testVisionKeyBtn.disabled = true;
+  try {
+    // No key in the payload — the worker reads it from storage (T-12-01).
+    const response = await chrome.runtime.sendMessage({ type: 'testVisionKey' });
+    if (response?.ok) {
+      showStatus('Vision key valid!', 'success', visionTestStatusDiv);
+    } else {
+      showStatus(response?.error ?? 'Vision key test failed', 'error', visionTestStatusDiv);
+    }
+  } catch {
+    showStatus('Could not reach background worker', 'error', visionTestStatusDiv);
+  } finally {
+    testVisionKeyBtn.disabled = false;
+  }
+}
+
 function formatNumber(n: number): string {
   return n.toLocaleString();
 }
@@ -413,6 +455,9 @@ document.addEventListener('DOMContentLoaded', () => {
   braveApiKeyInput = document.getElementById('braveApiKey') as HTMLInputElement;
   testBraveKeyBtn = document.getElementById('testBraveKey') as HTMLButtonElement;
   braveTestStatusDiv = document.getElementById('braveTestStatus') as HTMLDivElement;
+  googleApiKeyInput = document.getElementById('googleApiKey') as HTMLInputElement;
+  testVisionKeyBtn = document.getElementById('testVisionKey') as HTMLButtonElement;
+  visionTestStatusDiv = document.getElementById('visionTestStatus') as HTMLDivElement;
   saveBtn = document.getElementById('save') as HTMLButtonElement;
   statusDiv = document.getElementById('status') as HTMLDivElement;
   testStatusDiv = document.getElementById('testStatus') as HTMLDivElement;
@@ -450,6 +495,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   testConnectionBtn.addEventListener('click', testConnection);
   testBraveKeyBtn.addEventListener('click', testBraveKey);
+  testVisionKeyBtn.addEventListener('click', testVisionKey);
   saveBtn.addEventListener('click', saveSettings);
   resetUsageBtn.addEventListener('click', async () => {
     await chrome.runtime.sendMessage({ type: 'resetUsage' });

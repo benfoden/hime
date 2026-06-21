@@ -121,6 +121,7 @@ export type MessageType =
   | 'predict'
   | 'searchTranslated'
   | 'testBraveKey'
+  | 'testVisionKey'
   | 'translateBatch'
   | 'translateImage';
 
@@ -185,6 +186,15 @@ export interface SearchTranslatedResponse {
 // worker (D-04), never passed in the message (T-08-01 / XLT-01).
 export interface TestBraveKeyMessage extends Message {
   type: 'testBraveKey';
+}
+
+// Probe the stored Google Cloud Vision/Translation key. NO payload — the key is
+// read from storage in the worker (T-12-01 precedent: testBraveKey), never passed
+// in the message, never logged. The worker exercises BOTH the Vision and the
+// Translation v2 endpoints so the test validates the same two-call path image
+// translation uses.
+export interface TestVisionKeyMessage extends Message {
+  type: 'testVisionKey';
 }
 
 // Page/worker request to OCR+translate one image (right-click or progressive).
