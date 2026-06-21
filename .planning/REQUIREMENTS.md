@@ -8,10 +8,10 @@
 ### Image OCR Pipeline (IMG)
 
 - [ ] **IMG-01**: User can right-click any `<img>` on a page and choose "Translate image with hime" to OCR and translate the text inside it.
-- [ ] **IMG-02**: The side panel shows both the detected original text and its translation for the image.
-- [ ] **IMG-03**: The detected source language is displayed, and the image text is translated detected-source → the user's configured target language.
+- [x] **IMG-02**: The side panel shows both the detected original text and its translation for the image.
+- [x] **IMG-03**: The detected source language is displayed, and the image text is translated detected-source → the user's configured target language.
 - [ ] **IMG-04**: Image bytes are resolved in the background worker (fetch under host_permissions), with a `captureVisibleTab` fallback for cross-origin / tainted-canvas / CSS-background images that can't be fetched directly.
-- [ ] **IMG-05**: Each image translation surfaces an explicit per-image state — loading, no-text-found, low-confidence, or error — and never renders a silent blank.
+- [x] **IMG-05**: Each image translation surfaces an explicit per-image state — loading, no-text-found, low-confidence, or error — and never renders a silent blank.
 - [ ] **IMG-06**: User can copy the translated text (and the detected original text) from the side panel.
 - [ ] **IMG-07**: All vision API calls are routed through the background service worker; the BYOK key is never exposed to the page.
 

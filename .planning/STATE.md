@@ -4,14 +4,14 @@ milestone: v1.3
 milestone_name: Image Translation — Phases 12-14 (in progress; started 2026-06-20)
 status: executing
 stopped_at: Completed 12-05-PLAN.md
-last_updated: "2026-06-21T04:25:00.000Z"
+last_updated: "2026-06-21T04:31:13.126Z"
 last_activity: 2026-06-21 -- Phase 12 Plan 05 (image pipeline worker controller) complete
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 7
-  completed_plans: 5
-  percent: 71
+  completed_plans: 6
+  percent: 0
 ---
 
 # Project State
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-06-20)
 ## Current Position
 
 Phase: 12 (image-ocr-pipeline-right-click-side-panel) — EXECUTING
-Plan: 6 of 7
-Status: Executing Phase 12 (Plans 01-05 complete; Wave 3 worker controller wired)
+Plan: 7 of 7
+Status: Ready to execute
 Last activity: 2026-06-21 -- Phase 12 Plan 05 (image pipeline worker controller) complete
 
 ## Performance Metrics
@@ -48,6 +48,7 @@ Last activity: 2026-06-21 -- Phase 12 Plan 05 (image pipeline worker controller)
 | 11 | 3 | - | - |
 
 *Updated after each plan completion*
+| Phase 12 P06 | ~8m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,7 @@ Carried forward:
 - All network + BYOK keys stay in the background service worker — never on the page.
 - `document.execCommand('insertText')` accepted as deprecated but undo-safe; monitor Chrome releases.
 - `content.ts` is a classic script — pure observer logic lives in a node-testable `image-observer.ts`; IntersectionObserver wiring is inlined.
+- [Phase ?]: Phase 12 Plan 06 (side panel page): sidepanel.{ts,html,css} clone search.* — rebuild list from storage.session himeImageJobs on open (Pitfall 5/IMG-05), runtime.onMessage prepends/swaps worker pushes via prependEntry (D-01), getSettings target language as defensive fallback (D-03); all rendering via panel-render.ts textContent-only, no innerHTML in the page.
 
 ### Pending Todos
 
@@ -97,7 +99,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-21T04:25:00.000Z
+Last session: 2026-06-21T04:30:57.488Z
 Stopped at: Completed 12-05-PLAN.md
 Resume file: None
 

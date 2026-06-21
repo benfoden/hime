@@ -131,7 +131,7 @@ Plans:
 - [x] 12-03-PLAN.md — image-resolve pure utils (downscale math, MIME guard, base64 strip, mean confidence, result-state derivation; TDD)
 - [x] 12-04-PLAN.md — panel-render renderer (clone of serp-render; prepend, breaks, amber/no-text/error states; TDD)
 - [x] 12-05-PLAN.md — translateImage worker case + contextMenus + sidePanel gesture + byte ladder + OffscreenCanvas downscale + storage.session + manifest deltas
-- [ ] 12-06-PLAN.md — side panel page (sidepanel.ts/html/css, clone of search.*) — getSettings, rebuild-on-open, prepend listener
+- [x] 12-06-PLAN.md — side panel page (sidepanel.ts/html/css, clone of search.*) — getSettings, rebuild-on-open, prepend listener
 - [ ] 12-07-PLAN.md — live provider smoke (opt-in, dist/) + in-browser end-to-end human-verify checkpoint
 
 **UI hint**: yes
@@ -183,6 +183,6 @@ Plans:
 | 9. SERP Rendering | v1.2 | 2/2 | Complete   | 2026-06-03 |
 | 10. Translation Pipeline | v1.2 | 2/2 | Complete    | 2026-06-10 |
 | 11. Page Wiring & Popup Entry | v1.2 | 3/3 | Complete    | 2026-06-20 |
-| 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 4/7 | In Progress|  |
+| 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 6/7 | In Progress|  |
 | 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 0/0 | Not started | - |
 | 14. UX / Quality Hardening + Vision Settings | v1.3 | 0/0 | Not started | - |
