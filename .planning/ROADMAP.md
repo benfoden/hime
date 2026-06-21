@@ -220,3 +220,23 @@ Plans:
 Plans:
 
 - [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.3: In-place image overlay translation (text-on-image, swap) (BACKLOG)
+
+**Goal:** [Captured for future planning] Overlay the translated text directly ON the image, positioned over each source-text region, with a swap toggle (show original ↔ translation in place) — like Google Lens / manga-translation overlays. Architecture note: Vision DOCUMENT_TEXT_DETECTION already returns per-block `boundingPoly` boxes (currently discarded); render absolutely-positioned DOM overlays on top of the `<img>` (no canvas edits → no tainted-canvas issue), mapping natural-pixel boxes to the rendered rect (badge-positioning math) and repositioning on scroll/resize. Hard parts: masking the original text (sampled bg / blur box), fitting translated text to the box (auto font-shrink), translating PER block (pipeline change from the single whole-image call), and vertical/CJK reading order. Medium effort; likely its own v1.4 phase.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.4: Per-image numbering in badge + sidebar (BACKLOG)
+
+**Goal:** [Captured for future planning] Give each progressively/right-click translated image a stable sequential number shown in BOTH the on-image badge (e.g. `[hime 3]`) and its side-panel entry, so the user can correlate a badge with its panel entry at a glance. Badge-click → open panel scrolled to that entry is ALREADY shipped (phase 13 `openImagePanel`); this adds the visible numbering tied to the dedup key/translation order. Small UX enhancement — natural candidate to fold into Phase 14 (UX hardening) rather than a standalone phase.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (promote with /gsd-review-backlog when ready)
