@@ -37,9 +37,14 @@ export function classifyError(
   const status = response?.status;
   if (status !== undefined) {
     if (status === 401 || status === 403) {
+      // Append the provider's own reason when present — a 403 is often NOT a bad
+      // key (Vision/Translation API disabled, billing off, key restricted), and
+      // the bare "check it in options" hides which. Google never echoes the key
+      // in error.message (it lives only in the URL ?key=), so this stays safe.
+      const detail = response?.bodyMessage ? ` (${provider}: ${response.bodyMessage})` : '';
       return {
         kind: 'auth',
-        message: 'Invalid or unauthorized API key — check it in options',
+        message: `Invalid or unauthorized API key — check it in options${detail}`,
         status,
       };
     }
