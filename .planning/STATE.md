@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Image Translation — Phases 12-14 (in progress; started 2026-06-20)
 status: executing
-stopped_at: Completed 12-01-PLAN.md
-last_updated: "2026-06-21T04:40:00.000Z"
-last_activity: 2026-06-21 -- Phase 12 Plan 01 (types/build foundation) complete
+stopped_at: Completed 12-05-PLAN.md
+last_updated: "2026-06-21T04:25:00.000Z"
+last_activity: 2026-06-21 -- Phase 12 Plan 05 (image pipeline worker controller) complete
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 7
-  completed_plans: 1
-  percent: 14
+  completed_plans: 5
+  percent: 71
 ---
 
 # Project State
@@ -27,9 +27,9 @@ See: .planning/PROJECT.md (updated 2026-06-20)
 ## Current Position
 
 Phase: 12 (image-ocr-pipeline-right-click-side-panel) — EXECUTING
-Plan: 2 of 7
-Status: Executing Phase 12 (Plan 01 complete)
-Last activity: 2026-06-21 -- Phase 12 Plan 01 (types/build foundation) complete
+Plan: 6 of 7
+Status: Executing Phase 12 (Plans 01-05 complete; Wave 3 worker controller wired)
+Last activity: 2026-06-21 -- Phase 12 Plan 05 (image pipeline worker controller) complete
 
 ## Performance Metrics
 
@@ -69,6 +69,14 @@ Phase 12 Plan 01 (types/build foundation):
 - languageToIso uses region-qualified Chinese codes (zh-CN / zh-TW) since Translation v2 distinguishes Simplified vs Traditional.
 - Wave 0 test files import subjects lazily so each is discovered and runs RED (subjects land Plans 02-04) while fixtures load eagerly — no subject ships untested (Nyquist rule).
 
+Phase 12 Plan 05 (image pipeline worker controller):
+
+- dedupKey is a djb2 content-key over info.srcUrl, used as BOTH the storage.session map key and the panel entry id (D-01). The right-click context exposes no reliable dimensions, so srcUrl is the identity; re-clicking replays the cached entry without re-billing.
+- Image job/dedup/result persists to chrome.storage.session under `himeImageJobs` ({ [dedupKey]: ImageEntry }); a finished entry is replayed, an in-flight `loading` entry is not restarted — survives MV3 worker termination (Pitfall 5).
+- onClicked owns gesture-first `sidePanel.open({ tabId })` (before any await — Pitfall 1) and the dedupKey; the `translateImage` message case is a secondary replay/(re-)run path so Plan 06's panel can query a durable entry by dedupKey.
+- contextMenus registered in the EXISTING onInstalled via removeAll-then-create (Pitfall 6 duplicate-id), not at module top level.
+- Byte ladder + OffscreenCanvas downscale/re-encode live in background.ts (SW-only); the pure dimension math is imported from image-resolve (Pattern law). Pixels always resolved in the worker (fetch / captureVisibleTab), never a tainted page canvas.
+
 Carried forward:
 
 - All network + BYOK keys stay in the background service worker — never on the page.
@@ -89,10 +97,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-21T04:40:00.000Z
-Stopped at: Completed 12-01-PLAN.md
+Last session: 2026-06-21T04:25:00.000Z
+Stopped at: Completed 12-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
-- Execute Phase 12 Plan 02 (vision-google provider) next.
+- Execute Phase 12 Plan 06 (side panel page: sidepanel.ts/html/css, getSettings, rebuild-on-open from storage.session, prepend listener) next.

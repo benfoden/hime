@@ -130,7 +130,7 @@ Plans:
 - [x] 12-02-PLAN.md — GoogleVisionProvider (Vision DOCUMENT_TEXT_DETECTION + Translation v2, one BYOK key; TDD)
 - [x] 12-03-PLAN.md — image-resolve pure utils (downscale math, MIME guard, base64 strip, mean confidence, result-state derivation; TDD)
 - [x] 12-04-PLAN.md — panel-render renderer (clone of serp-render; prepend, breaks, amber/no-text/error states; TDD)
-- [ ] 12-05-PLAN.md — translateImage worker case + contextMenus + sidePanel gesture + byte ladder + OffscreenCanvas downscale + storage.session + manifest deltas
+- [x] 12-05-PLAN.md — translateImage worker case + contextMenus + sidePanel gesture + byte ladder + OffscreenCanvas downscale + storage.session + manifest deltas
 - [ ] 12-06-PLAN.md — side panel page (sidepanel.ts/html/css, clone of search.*) — getSettings, rebuild-on-open, prepend listener
 - [ ] 12-07-PLAN.md — live provider smoke (opt-in, dist/) + in-browser end-to-end human-verify checkpoint
 
