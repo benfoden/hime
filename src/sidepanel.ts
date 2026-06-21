@@ -64,15 +64,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   const status = document.getElementById('panel-status') as HTMLElement | null;
   const settingsLink = document.getElementById('open-settings') as HTMLElement | null;
+  const searchBtn = document.getElementById('nav-search') as HTMLElement | null;
+  const swapBtn = document.getElementById('nav-swap') as HTMLElement | null;
+  const directionEl = document.getElementById('nav-direction') as HTMLElement | null;
+
+  // Render the source→target direction in the top-nav (textContent only — IMG-02 law).
+  const renderDirection = (source?: string, target?: string): void => {
+    if (!directionEl) return;
+    if (source && target) {
+      directionEl.textContent = `${source} → ${target}`;
+    }
+  };
 
   // ── Read settings once for the global target language (D-03) ───────────────
   try {
     const settingsReply = (await chrome.runtime.sendMessage({ type: 'getSettings' })) as
-      | { settings?: { targetLanguage?: string } }
+      | { settings?: { sourceLanguage?: string; targetLanguage?: string } }
       | null;
     if (settingsReply?.settings?.targetLanguage) {
       targetLanguage = settingsReply.settings.targetLanguage;
     }
+    renderDirection(settingsReply?.settings?.sourceLanguage, settingsReply?.settings?.targetLanguage);
   } catch {
     // Worker not available — keep the default; the panel degrades gracefully.
   }
@@ -186,7 +198,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Synchronous handler — no response channel kept open.
   });
 
-  // ── Settings nav: open the extension's options page ────────────────────────
+  // ── Top-nav: Settings / Search / Swap (mirrors the toolbar popup) ──────────
   settingsLink?.addEventListener('click', (event) => {
     event.preventDefault();
     try {
@@ -194,6 +206,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch {
       // Options page unavailable — no-op.
     }
+  });
+
+  // Search: open the translated-search page in a new tab.
+  searchBtn?.addEventListener('click', () => {
+    try {
+      void chrome.tabs.create({ url: chrome.runtime.getURL('search.html') });
+    } catch {
+      // tabs API unavailable — no-op.
+    }
+  });
+
+  // Swap direction: tell the worker to swap, then refresh the direction display.
+  swapBtn?.addEventListener('click', () => {
+    void (async () => {
+      try {
+        await chrome.runtime.sendMessage({ type: 'swapDirection' });
+        const reply = (await chrome.runtime.sendMessage({ type: 'getSettings' })) as
+          | { settings?: { sourceLanguage?: string; targetLanguage?: string } }
+          | null;
+        if (reply?.settings?.targetLanguage) {
+          targetLanguage = reply.settings.targetLanguage;
+        }
+        renderDirection(reply?.settings?.sourceLanguage, reply?.settings?.targetLanguage);
+      } catch {
+        // Worker unavailable — no-op.
+      }
+    })();
   });
 });
 

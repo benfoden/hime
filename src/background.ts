@@ -1015,13 +1015,11 @@ function ensureContextMenus(): void {
 ensureContextMenus();
 chrome.runtime.onStartup.addListener(ensureContextMenus);
 
-// Reliable gesture path to open the side panel: clicking the toolbar icon. This is
-// a true extension user-gesture (unlike a content→SW relayed badge click), so it
-// always satisfies chrome.sidePanel.open()'s gesture requirement. Gives the on-image
-// badge a working fallback when its relayed open is rejected.
-chrome.sidePanel
-  .setPanelBehavior({ openPanelOnActionClick: true })
-  .catch(() => {});
+// NOTE: do NOT enable openPanelOnActionClick — it makes the toolbar icon TOGGLE the
+// side panel and overrides the action default_popup (popup.html), removing the popup
+// navigation menu. The icon must keep showing the popup. The side panel is opened via
+// the context-menu items and the popup's "Open Image Panel" button (both true gestures),
+// and the sidebar's own top-nav (added below) provides Search/Swap/Settings in-panel.
 
 // Badge-on-install is now INDEPENDENT of menu registration: a failing
 // getSettings/setBadgeText must never block the context menu from registering.

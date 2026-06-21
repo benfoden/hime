@@ -55,6 +55,38 @@ body {
   text-decoration: underline;
 }
 
+/* ── Top-nav (Search / Swap / Settings — mirrors the toolbar popup) ── */
+
+.panel-nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-direction {
+  font-size: 11px;
+  color: #888;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+
+.nav-btn {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #4A90D9;
+  background: none;
+  border: 1px solid transparent;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.nav-btn:hover {
+  border-color: #4A90D9;
+}
+
 /* ── Status line (role=status aria-live) ── */
 
 .panel-status {

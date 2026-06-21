@@ -10,7 +10,12 @@
   <div class="container">
     <header class="page-header">
       <h1 class="page-title">hime Image</h1>
-      <a id="open-settings" class="settings-link" href="#" role="button">Settings</a>
+      <nav class="panel-nav" aria-label="hime navigation">
+        <span id="nav-direction" class="nav-direction" aria-live="polite"></span>
+        <button id="nav-search" class="nav-btn" type="button">Search</button>
+        <button id="nav-swap" class="nav-btn" type="button">Swap</button>
+        <button id="open-settings" class="nav-btn" type="button">Settings</button>
+      </nav>
     </header>
     <div id="panel-status" class="panel-status" role="status" aria-live="polite"></div>
     <div id="results"></div>
