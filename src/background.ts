@@ -1015,11 +1015,16 @@ function ensureContextMenus(): void {
 ensureContextMenus();
 chrome.runtime.onStartup.addListener(ensureContextMenus);
 
-// NOTE: do NOT enable openPanelOnActionClick — it makes the toolbar icon TOGGLE the
-// side panel and overrides the action default_popup (popup.html), removing the popup
-// navigation menu. The icon must keep showing the popup. The side panel is opened via
-// the context-menu items and the popup's "Open Image Panel" button (both true gestures),
-// and the sidebar's own top-nav (added below) provides Search/Swap/Settings in-panel.
+// EXPLICITLY disable openPanelOnActionClick. This setting is PERSISTENT Chrome state:
+// once enabled it stays on across reloads/sessions, so simply removing the enabling
+// call does NOT restore the popup — the icon keeps toggling the side panel. Force it
+// false on every worker load so the toolbar icon always shows the action default_popup
+// (popup.html: Search / Swap / Settings / Open Image Panel). The side panel opens via
+// the context-menu items and the popup's "Open Image Panel" button (both true gestures);
+// the sidebar's own top-nav provides Search/Swap/Settings in-panel.
+chrome.sidePanel
+  .setPanelBehavior({ openPanelOnActionClick: false })
+  .catch(() => {});
 
 // Badge-on-install is now INDEPENDENT of menu registration: a failing
 // getSettings/setBadgeText must never block the context menu from registering.
