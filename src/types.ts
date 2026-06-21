@@ -56,9 +56,13 @@ export interface TranslationProvider {
 // performs OCR then translation (provider may issue 1+ network calls internally)
 // and returns a normalized ImageResult. The apiKey is read from storage in the
 // worker and passed in here; it is NEVER serialized into a message (T-12-01).
+//
+// A text-free image short-circuits to the distinct no-text sentinel `null`
+// WITHOUT calling translation and WITHOUT throwing (Pitfall 4 / IMG-05): the
+// worker maps a null return to TranslateImageResponse `{ noText: true }`.
 export interface VisionProvider {
   name: string;
-  ocrTranslate(imageBase64: string, mime: string, targetLang: string, apiKey: string): Promise<ImageResult>;
+  ocrTranslate(imageBase64: string, mime: string, targetLang: string, apiKey: string): Promise<ImageResult | null>;
 }
 
 // Normalized OCR+translation result rendered by the side panel.
