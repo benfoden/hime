@@ -240,6 +240,16 @@ Plans:
 
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.5: Basic page-text auto-translate (default-on, page-language gated) (BACKLOG)
+
+**Goal:** [Captured for future planning] A basic whole-page TEXT translation feature (distinct from image OCR), ON by default, that auto-translates a page's visible text when the page is in a foreign source language relative to the user's reading/target language. Mirror the D-05 page-language gate already built for progressive image mode (`shouldGateByLanguage` in progressive-guard.ts: compare `<html lang>` vs target, gate-ON when same/missing) so it spends nothing on pages already in the target language. Open questions: in-place DOM text replacement vs side-panel output; per-block vs whole-page translation call (cost); handling dynamic/SPA content (MutationObserver); show-original toggle; opt-out per-site. User report (phase 14 verify): "we need a basic page text translate feature thats on by default when visiting a page in the target language." Likely its own v1.4+ phase. Medium-large effort.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ### Phase 999.4: Per-image numbering in badge + sidebar (BACKLOG)
 
 **Goal:** [Captured for future planning] Give each progressively/right-click translated image a stable sequential number shown in BOTH the on-image badge (e.g. `[hime 3]`) and its side-panel entry, so the user can correlate a badge with its panel entry at a glance. Badge-click → open panel scrolled to that entry is ALREADY shipped (phase 13 `openImagePanel`); this adds the visible numbering tied to the dedup key/translation order. Small UX enhancement — natural candidate to fold into Phase 14 (UX hardening) rather than a standalone phase.
