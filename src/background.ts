@@ -1,6 +1,7 @@
 import { OpenAIProvider } from './providers/openai.js';
 import { GeminiProvider } from './providers/gemini.js';
 import { OpenRouterProvider } from './providers/openrouter.js';
+import { GoogleVisionProvider } from './providers/vision-google.js';
 import { BraveSearchClient } from './brave-search.js';
 import type {
   TranslationConfig,
@@ -14,12 +15,21 @@ import type {
   PredictMessage,
   SearchTranslatedMessage,
   SearchResult,
-  TranslateBatchMessage
+  TranslateBatchMessage,
+  TranslateImageMessage,
+  ImageEntry,
+  ImageResult
 } from './types.js';
 import { migrateSettings } from './types.js';
 import { sanitizeSuggestion } from './predict-util.js';
 import { buildBatchTranslatePrompt, parseBatchReply } from './translate-batch.js';
 import { buildQueryTranslateConfig } from './query-translate.js';
+import {
+  downscaleTarget,
+  needsReencode,
+  stripBase64Prefix,
+  deriveImageEntry,
+} from './image-resolve.js';
 import { classifyError } from './errors.js';
 
 // Provider registry
@@ -31,6 +41,12 @@ const providers: Record<string, TranslationProvider> = {
 
 // Brave Search transport (Plan 08-02). Single module-scope instance.
 const braveClient = new BraveSearchClient();
+
+// Google Vision + Translation provider (Phase 12 / v1.3). Single module-scope
+// instance, mirroring braveClient. The two-call OCR+translate sequence lives
+// behind visionProvider.ocrTranslate; the BYOK key is read from storage in the
+// worker and passed in — never carried in a message (IMG-07 / T-12-11).
+const visionProvider = new GoogleVisionProvider();
 
 // In-flight dedup map (D-05): keyed on the normalized query (trim().toLowerCase()).
 // While a search for a given normalized query is pending, a second same-query
@@ -76,6 +92,250 @@ async function recordUsage(model: string, usage: { inputTokens: number; outputTo
     requests: prev.requests + 1,
   };
   await chrome.storage.local.set({ himeUsage: stats });
+}
+
+// ----------------------------------------------------------------------------
+// Image OCR+translate pipeline (Phase 12 / v1.3 — IMG-01/04/05/07, VIS-03).
+//
+// This is the manual vertical slice's controller. It reuses the v1.2 worker
+// doctrine (key-from-storage invariant, recordUsage, classifyError) and the
+// Plan 02 provider + Plan 03 pure math, diverging only where MV3 lifecycle
+// (Pitfall 5 → storage.session) and the sidePanel gesture (Pitfall 1) demand.
+// ----------------------------------------------------------------------------
+
+// ~25s budget for the full OCR+translate sequence (RESEARCH Pattern 1 / A5).
+// The provider already times EACH Google call separately (~12s, vision-google
+// CALL_TIMEOUT_MS); this outer race is the belt-and-suspenders ceiling so a
+// stalled sequence surfaces a typed error instead of hanging the panel.
+const IMAGE_JOB_TIMEOUT_MS = 25000;
+
+// storage.session key under which the durable job/dedup/result map lives. The
+// map is { [dedupKey]: ImageEntry } — survives MV3 worker termination so the
+// panel can rebuild from it on open and a re-entry never re-bills a finished job.
+const IMAGE_JOBS_KEY = 'himeImageJobs';
+
+// Stable content-key for an image source URL. Used as the dedup id AND the panel
+// entry id (D-01 prepend). djb2 over the srcUrl — collision-resistant enough for
+// per-session dedup and avoids carrying a long data:/blob: URL as the id.
+function imageDedupKey(srcUrl: string): string {
+  let hash = 5381;
+  for (let i = 0; i < srcUrl.length; i++) {
+    hash = ((hash << 5) + hash + srcUrl.charCodeAt(i)) | 0;
+  }
+  return `img_${(hash >>> 0).toString(36)}`;
+}
+
+type ImageJobMap = Record<string, ImageEntry>;
+
+async function getJobs(): Promise<ImageJobMap> {
+  const result = await chrome.storage.session.get([IMAGE_JOBS_KEY]);
+  return (result[IMAGE_JOBS_KEY] as ImageJobMap | undefined) ?? {};
+}
+
+async function getJob(dedupKey: string): Promise<ImageEntry | undefined> {
+  const jobs = await getJobs();
+  return jobs[dedupKey];
+}
+
+async function setJob(dedupKey: string, entry: ImageEntry): Promise<void> {
+  const jobs = await getJobs();
+  jobs[dedupKey] = entry;
+  await chrome.storage.session.set({ [IMAGE_JOBS_KEY]: jobs });
+}
+
+// Push the current entry to the side panel. The panel (Plan 06) listens for this
+// and swaps the matching skeleton by id. Wrapped in a catch because no panel may
+// be open/listening yet — a missing receiver must never throw into the pipeline.
+function pushEntry(entry: ImageEntry): void {
+  chrome.runtime.sendMessage({ type: 'translateImage', payload: { entry } }).catch(() => {
+    // No panel listening (not yet open / already closed) — durable state in
+    // storage.session is the source of truth; the panel rebuilds on open.
+  });
+}
+
+// Convert an ArrayBuffer to a base64 string without a data: prefix (Vision's
+// bare-content form). Chunked to stay under the String.fromCharCode arg cap.
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// IMG-04 byte-resolution ladder (Pitfall 2 / T-12-13): resolve the right-clicked
+// image to { base64, mime } WITHOUT ever reading a tainted page canvas.
+//   (a) data: URL          → strip prefix, parse its own MIME directly.
+//   (b) fetch(srcUrl)       → blob → base64 (works under <all_urls> for most
+//                             same/cross-origin images that allow GET).
+//   (c) fetch failure / blob: the worker cannot read → captureVisibleTab(png).
+// The right-clicked image is visible by definition; precise scroll/sub-pixel
+// cropping is a Phase 14 polish item (RESEARCH Open Question 3) — here the
+// visible-tab capture is used as-is.
+async function resolveImageBytes(
+  srcUrl: string,
+  tabId: number,
+): Promise<{ base64: string; mime: string }> {
+  // (a) data: URL — bytes are inline; derive MIME from the prefix.
+  if (srcUrl.startsWith('data:')) {
+    const mimeMatch = /^data:([^;,]*)[;,]/.exec(srcUrl);
+    return {
+      base64: stripBase64Prefix(srcUrl),
+      mime: mimeMatch?.[1] || 'image/png',
+    };
+  }
+
+  // (b) fetch under host_permissions. Only the user-selected info.srcUrl is ever
+  // fetched here (not arbitrary worker input) — bounded SSRF surface (T-12-12).
+  if (!srcUrl.startsWith('blob:')) {
+    try {
+      const response = await fetch(srcUrl);
+      if (response.ok) {
+        const blob = await response.blob();
+        const base64 = arrayBufferToBase64(await blob.arrayBuffer());
+        return { base64, mime: blob.type || 'image/png' };
+      }
+    } catch {
+      // Fall through to the capture fallback (403 / opaque / network).
+    }
+  }
+
+  // (c) captureVisibleTab fallback — for blob:, tainted, or fetch-blocked images.
+  const tab = await chrome.tabs.get(tabId);
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  return { base64: stripBase64Prefix(dataUrl), mime: 'image/png' };
+}
+
+// VIS-03 MIME guard + downscale (Pitfall 3 / T-12-15). Re-encodes exotic MIME to
+// PNG and/or downscales to the Vision long-edge cap using Plan 03's pure math.
+// OffscreenCanvas/createImageBitmap/convertToBlob are SW-only and live here; the
+// dimension math is imported from image-resolve. Returns the send-ready bytes.
+async function downscaleAndGuard(
+  base64: string,
+  mime: string,
+): Promise<{ base64: string; mime: string }> {
+  const reencode = needsReencode(mime);
+
+  // Decode to measure real dimensions. createImageBitmap from a Blob handles
+  // every Vision-supported MIME the SW can decode.
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const sourceBlob = new Blob([bytes], { type: reencode ? 'image/png' : mime });
+
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(sourceBlob);
+  } catch (err) {
+    // Unsupported-and-un-decodable → typed error so the entry shows an explicit
+    // error, never a blank (IMG-05). classifyError gives a stable kind.
+    const e = new Error(`Unsupported image format: ${mime}`);
+    (e as Error & { kind?: string }).kind = 'unknown';
+    throw e;
+  }
+
+  const target = downscaleTarget(bitmap.width, bitmap.height);
+
+  // Fast path: already a supported MIME at an in-bounds size → pass through.
+  if (!reencode && !target.scaled) {
+    bitmap.close();
+    return { base64, mime };
+  }
+
+  const canvas = new OffscreenCanvas(target.width, target.height);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    bitmap.close();
+    const e = new Error('OffscreenCanvas 2D context unavailable');
+    (e as Error & { kind?: string }).kind = 'unknown';
+    throw e;
+  }
+  ctx.drawImage(bitmap, 0, 0, target.width, target.height);
+  bitmap.close();
+
+  // Exotic MIME → PNG (lossless, broadly Vision-accepted). Supported MIME that
+  // only needed downscaling stays as-is (jpeg/webp keep their codec).
+  const outMime = reencode ? 'image/png' : mime;
+  const outBlob = await canvas.convertToBlob({ type: outMime });
+  const outBase64 = arrayBufferToBase64(await outBlob.arrayBuffer());
+  return { base64: outBase64, mime: outBlob.type || outMime };
+}
+
+// The async pipeline kicked off from the onClicked gesture. Writes a 'loading'
+// entry, resolves bytes → guards/downscales → races ocrTranslate against the
+// 25s ceiling → persists + pushes the final populated/no-text/error entry. Never
+// leaves the entry on 'loading' (IMG-05) and never re-bills a finished dedupKey.
+async function runImageJob(srcUrl: string, tabId: number, dedupKey: string): Promise<void> {
+  // Dedup (Pitfall 5): a finished job is reused; an in-flight one is not restarted.
+  const existing = await getJob(dedupKey);
+  if (existing) {
+    if (existing.kind === 'loading') return; // in-flight — don't start a second.
+    pushEntry(existing); // populated / no-text / error — replay, don't re-bill.
+    return;
+  }
+
+  const loading: ImageEntry = { kind: 'loading', id: dedupKey, thumbnailUrl: srcUrl };
+  await setJob(dedupKey, loading);
+  pushEntry(loading);
+
+  const settings = await getSettings();
+  // IMG-07 / T-12-11: key read from storage ONLY — never from a message, never logged.
+  const apiKey = settings.googleApiKey;
+  if (!apiKey) {
+    const entry = deriveImageEntry({
+      id: dedupKey,
+      thumbnailUrl: srcUrl,
+      error: { kind: 'auth', message: 'Google Cloud API key not configured — add it in options' },
+    });
+    await setJob(dedupKey, entry);
+    pushEntry(entry);
+    return;
+  }
+
+  try {
+    const resolved = await resolveImageBytes(srcUrl, tabId);
+    const guarded = await downscaleAndGuard(resolved.base64, resolved.mime);
+
+    const result = await Promise.race([
+      visionProvider.ocrTranslate(guarded.base64, guarded.mime, settings.targetLanguage, apiKey),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(Object.assign(new Error('Image translation timed out'), { name: 'AbortError' })),
+          IMAGE_JOB_TIMEOUT_MS,
+        ),
+      ),
+    ]);
+
+    let entry: ImageEntry;
+    if (result === null) {
+      // No-text sentinel (Pitfall 4) — explicit no-text entry, off the error channel.
+      entry = deriveImageEntry({ id: dedupKey, thumbnailUrl: srcUrl, ocr: { noText: true } });
+    } else {
+      const ocr: ImageResult = result;
+      if (ocr.usage) await recordUsage('google-vision', ocr.usage);
+      entry = deriveImageEntry({ id: dedupKey, thumbnailUrl: srcUrl, ocr });
+      // D-02 / IMG-03 direction line: surface the resolved target display name so
+      // the panel can render "Detected: X → Y" (entry.target on a populated entry).
+      if (entry.kind === 'populated') entry.target = settings.targetLanguage;
+    }
+    await setJob(dedupKey, entry);
+    pushEntry(entry);
+  } catch (err) {
+    // Provider errors already carry .kind; the synthetic timeout AbortError does
+    // not, so fall back to classifyError (AbortError → 'network').
+    const kind = (err as { kind?: import('./errors.js').ErrorKind })?.kind
+      ?? classifyError('google', err).kind;
+    const message = err instanceof Error ? err.message : 'Image translation failed';
+    const entry = deriveImageEntry({
+      id: dedupKey,
+      thumbnailUrl: srcUrl,
+      error: { kind, message },
+    });
+    await setJob(dedupKey, entry);
+    pushEntry(entry);
+  }
 }
 
 // Translate text
@@ -305,6 +565,37 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           break;
         }
 
+        case 'translateImage': {
+          // The actual OCR+translate work is driven by runImageJob from the
+          // contextMenus.onClicked gesture (which must open the panel before any
+          // await — Pitfall 1). This message-handler path exists so the message
+          // contract is complete and the panel has a dedup/replay query path:
+          // given a dedupKey it replays the durable storage.session entry; given
+          // a fresh { srcUrl, tabId, dedupKey } it (re-)runs the job.
+          const msg = message as TranslateImageMessage;
+          const { srcUrl, tabId, dedupKey } = msg.payload;
+          const settings = await getSettings();
+          // IMG-07 / T-12-11: key read from storage ONLY — never from the payload,
+          // never logged. Empty key → auth error, no work attempted.
+          const apiKey = settings.googleApiKey;
+          if (!apiKey) {
+            sendResponse({ error: 'Google Cloud API key not configured', kind: 'auth' });
+            break;
+          }
+          // Replay a finished durable entry if present (no re-bill); otherwise run.
+          const existing = dedupKey ? await getJob(dedupKey) : undefined;
+          if (existing && existing.kind !== 'loading') {
+            pushEntry(existing);
+            sendResponse({ entry: existing });
+            break;
+          }
+          if (srcUrl && typeof tabId === 'number' && dedupKey) {
+            void runImageJob(srcUrl, tabId, dedupKey);
+          }
+          sendResponse({ accepted: true });
+          break;
+        }
+
         case 'testBraveKey': {
           // No payload — key read from storage (D-04 / T-08-01 / XLT-01).
           const settings = await getSettings();
@@ -383,9 +674,38 @@ chrome.runtime.onStartup.addListener(async () => {
   await chrome.action.setBadgeText({ text: badgeText });
 });
 
-// Also set badge on install
+// Also set badge on install. ALSO register the image context menu here (NOT at
+// module top level) so a duplicate-id error never fires on SW re-spawn (Pitfall
+// 6): removeAll() first, then create the single 'hime-translate-image' item.
 chrome.runtime.onInstalled.addListener(async () => {
   const settings = await getSettings();
   const badgeText = settings.targetLanguage.slice(0, 2).toUpperCase();
   await chrome.action.setBadgeText({ text: badgeText });
+
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: 'hime-translate-image',
+      title: 'Translate image with hime',
+      contexts: ['image'],
+    });
+  });
+});
+
+// Right-click → "Translate image with hime" (IMG-01). Top-level listener (NOT
+// inside onInstalled). Pitfall 1: chrome.sidePanel.open({ tabId }) MUST be the
+// FIRST synchronous statement inside the user-gesture handler — no await, no
+// preceding async call — or Chrome rejects the open as "not in a user gesture".
+// Only AFTER opening the panel do we kick off the async image job.
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== 'hime-translate-image' || !tab?.id) return;
+  // Open the panel synchronously inside the gesture — before any await.
+  void chrome.sidePanel.open({ tabId: tab.id });
+
+  const srcUrl = info.srcUrl;
+  if (!srcUrl) return;
+  // Content-key dedup id (Pitfall 5): a stable string derived from the source
+  // URL. The right-click context exposes no reliable dimensions, so the srcUrl
+  // is the identity; same image right-clicked twice reuses the cached entry.
+  const dedupKey = imageDedupKey(srcUrl);
+  void runImageJob(srcUrl, tab.id, dedupKey);
 });
