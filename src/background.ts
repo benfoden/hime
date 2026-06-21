@@ -925,8 +925,17 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           const resolvedTabId = oTabId ?? sender.tab?.id;
 
           // Gesture-first: open the panel synchronously, before any await (Pitfall 1).
+          // BUGFIX: a content→SW runtime message does NOT carry a user-gesture token,
+          // so chrome.sidePanel.open() rejects here with "may only be called in response
+          // to a user gesture". The previous bare `void` left that rejection UNCAUGHT
+          // (red error in the SW console). Catch it: the panel still opens reliably via
+          // the toolbar action (openPanelOnActionClick, set at top level) and the
+          // context-menu items, which ARE genuine extension gestures.
           if (typeof resolvedTabId === 'number') {
-            void chrome.sidePanel.open({ tabId: resolvedTabId });
+            chrome.sidePanel.open({ tabId: resolvedTabId }).catch(() => {
+              // Gesture not propagated through messaging — expected; open via the
+              // toolbar icon or a context-menu item instead.
+            });
           }
 
           // After opening, push a scroll-to-entry signal to the panel. The panel may
@@ -987,10 +996,16 @@ function ensureContextMenus(): void {
     });
     // Site-independent way to open the image panel from any right-click (the
     // panel can't auto-open without a gesture; this menu click is a gesture).
+    //
+    // FLATTEN: contexts deliberately EXCLUDE 'image' so the two hime items never
+    // appear in the same menu at once. Chrome auto-nests an extension's items
+    // under a single parent submenu whenever 2+ are simultaneously visible; by
+    // making translate-image (image only) and open-panel (everything-but-image)
+    // mutually exclusive, each shows at the TOP LEVEL of the right-click menu.
     chrome.contextMenus.create({
       id: 'hime-open-panel',
       title: 'Open hime image panel',
-      contexts: ['all'],
+      contexts: ['page', 'selection', 'link', 'editable', 'video', 'audio', 'frame'],
     });
   });
 }
@@ -999,6 +1014,14 @@ function ensureContextMenus(): void {
 // durable fix — the menu no longer depends on onInstalled firing.
 ensureContextMenus();
 chrome.runtime.onStartup.addListener(ensureContextMenus);
+
+// Reliable gesture path to open the side panel: clicking the toolbar icon. This is
+// a true extension user-gesture (unlike a content→SW relayed badge click), so it
+// always satisfies chrome.sidePanel.open()'s gesture requirement. Gives the on-image
+// badge a working fallback when its relayed open is rejected.
+chrome.sidePanel
+  .setPanelBehavior({ openPanelOnActionClick: true })
+  .catch(() => {});
 
 // Badge-on-install is now INDEPENDENT of menu registration: a failing
 // getSettings/setBadgeText must never block the context menu from registering.
@@ -1022,7 +1045,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
   if (info.menuItemId === 'hime-translate-image') {
     // Open the panel synchronously inside the gesture — before any await.
-    void chrome.sidePanel.open({ tabId: tab.id });
+    chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
     const srcUrl = info.srcUrl;
     if (!srcUrl) return;
     // Content-key dedup id (Pitfall 5): a stable string derived from the source
@@ -1034,6 +1057,6 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
   if (info.menuItemId === 'hime-open-panel') {
     // Open the panel only (gesture-first); no image job.
-    void chrome.sidePanel.open({ tabId: tab.id });
+    chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
   }
 });
