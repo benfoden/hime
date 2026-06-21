@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Image Translation — Phases 12-14 (in progress; started 2026-06-20)
-status: executing
+status: verifying
 stopped_at: Phase 13 context gathered
-last_updated: "2026-06-21T14:58:04.814Z"
+last_updated: "2026-06-21T15:42:40.471Z"
 last_activity: 2026-06-21 -- Phase 12 Plan 05 (image pipeline worker controller) complete
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 11
+  completed_plans: 8
   percent: 13
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-20)
 
 Phase: 12 (image-ocr-pipeline-right-click-side-panel) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-21 -- Phase 12 Plan 05 (image pipeline worker controller) complete
 
 ## Performance Metrics
@@ -49,6 +49,7 @@ Last activity: 2026-06-21 -- Phase 12 Plan 05 (image pipeline worker controller)
 
 *Updated after each plan completion*
 | Phase 12 P06 | ~8m | 2 tasks | 3 files |
+| Phase 13-progressive-viewport-mode-cost-control-privacy-opt-in P01 | 25 | - tasks | - files |
 
 ## Accumulated Context
 
@@ -84,6 +85,7 @@ Carried forward:
 - `document.execCommand('insertText')` accepted as deprecated but undo-safe; monitor Chrome releases.
 - `content.ts` is a classic script — pure observer logic lives in a node-testable `image-observer.ts`; IntersectionObserver wiring is inlined.
 - [Phase ?]: Phase 12 Plan 06 (side panel page): sidepanel.{ts,html,css} clone search.* — rebuild list from storage.session himeImageJobs on open (Pitfall 5/IMG-05), runtime.onMessage prepends/swaps worker pushes via prependEntry (D-01), getSettings target language as defensive fallback (D-03); all rendering via panel-render.ts textContent-only, no innerHTML in the page.
+- [Phase ?]: imgc_ prefix for content-hash dedup keys
 
 ### Pending Todos
 
@@ -99,7 +101,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-21T14:58:04.811Z
+Last session: 2026-06-21T15:42:37.106Z
 Stopped at: Phase 13 context gathered
 Resume file: .planning/phases/13-progressive-viewport-mode-cost-control-privacy-opt-in/13-CONTEXT.md
 
