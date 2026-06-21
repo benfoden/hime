@@ -91,6 +91,64 @@ document.addEventListener('DOMContentLoaded', async () => {
     );
   }
 
+  // ── IMG-06: Delegated copy + show-original handler (D-01) ──────────────────
+  // ONE listener on mount covers both open-time and live-prepended entries —
+  // no per-entry binding needed. All label changes use textContent (IMG-02 law).
+  // The clipboard API and event wiring are browser-only; panel-render.ts is
+  // node-testable and attaches no listeners.
+  mount.addEventListener('click', (event: Event) => {
+    const target = event.target as Element | null;
+
+    // ── Copy button (.panel-copy) ────────────────────────────────────────────
+    const copyBtn = target?.closest('.panel-copy') as HTMLElement | null;
+    if (copyBtn) {
+      const value = copyBtn.getAttribute('data-copy');
+      if (value == null) return;
+
+      // Guard against double-fire: if a pending restore is already in flight,
+      // skip starting another (the existing timeout will restore the label).
+      if (copyBtn.dataset['copyPending'] === '1') return;
+
+      navigator.clipboard.writeText(value).then(() => {
+        copyBtn.textContent = 'Copied';
+        copyBtn.dataset['copyPending'] = '1';
+        setTimeout(() => {
+          // Restore the original label based on which copy button this is.
+          const kind = copyBtn.getAttribute('data-copy-kind');
+          copyBtn.textContent = kind === 'original' ? 'Copy original' : 'Copy';
+          delete copyBtn.dataset['copyPending'];
+        }, 1200);
+      }).catch(() => {
+        copyBtn.textContent = 'Copy failed';
+        setTimeout(() => {
+          const kind = copyBtn.getAttribute('data-copy-kind');
+          copyBtn.textContent = kind === 'original' ? 'Copy original' : 'Copy';
+        }, 1200);
+      });
+      return;
+    }
+
+    // ── Show/hide original toggle (.panel-show-original) ────────────────────
+    const toggleBtn = target?.closest('.panel-show-original') as HTMLElement | null;
+    if (toggleBtn) {
+      // Walk up to the entry row (data-entry-id is set on the row in panel-render.ts:119).
+      const row = toggleBtn.closest('[data-entry-id]') as HTMLElement | null;
+      if (!row) return;
+      const originalBlock = row.querySelector('.panel-original') as HTMLElement | null;
+      if (!originalBlock) return;
+
+      const isCollapsed = originalBlock.classList.contains('is-collapsed');
+      if (isCollapsed) {
+        originalBlock.classList.remove('is-collapsed');
+        toggleBtn.textContent = 'hide original';
+      } else {
+        originalBlock.classList.add('is-collapsed');
+        toggleBtn.textContent = 'show original';
+      }
+      return;
+    }
+  });
+
   // ── Live worker pushes: prepend / swap the matching skeleton (D-01) ────────
   // Also handles openImagePanel scroll-to-entry from the badge-click relay (D-04).
   chrome.runtime.onMessage.addListener((message: unknown) => {
