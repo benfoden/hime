@@ -946,6 +946,39 @@ function progIsEligibleSize(width: number, height: number): boolean {
   return Math.max(width, height) >= PROG_MIN_LONG_EDGE_PX;
 }
 
+// --- Mirrored shouldGateByLanguage from progressive-guard.ts (D-05) ---
+// Classic-script law: content.ts cannot import progressive-guard.ts, so the
+// logic is mirrored verbatim here.  Keep both in sync.
+// Display-name → ISO base subtag map (mirrors GUARD_LANGUAGE_ISO in progressive-guard.ts).
+// MUST stay in sync with progressive-guard.ts GUARD_LANGUAGE_ISO.
+const PROG_LANGUAGE_ISO: Record<string, string> = {
+  English: 'en', Japanese: 'ja', Korean: 'ko',
+  'Chinese (Simplified)': 'zh', 'Chinese (Traditional)': 'zh',
+  Spanish: 'es', French: 'fr', German: 'de', Italian: 'it',
+  Portuguese: 'pt', Dutch: 'nl', Russian: 'ru', Polish: 'pl',
+  Turkish: 'tr', Arabic: 'ar', Hindi: 'hi', Vietnamese: 'vi',
+  Thai: 'th', Indonesian: 'id',
+};
+function progNormalizeToBase(lang: string): string {
+  const trimmed = lang.trim();
+  if (!trimmed) return '';
+  const mapped = PROG_LANGUAGE_ISO[trimmed];
+  if (mapped) return mapped;
+  return trimmed.split('-')[0].toLowerCase();
+}
+/**
+ * D-05 page-language gate.
+ * Returns true  → GATE ON (do NOT start progressive auto-translation).
+ * Returns false → GATE OFF (allow progressive).
+ * Conservative: missing/whitespace pageLang → gate ON (spend nothing).
+ */
+function progShouldGateByLanguage(pageLang: string, targetLang: string): boolean {
+  const base = progNormalizeToBase(pageLang);
+  if (!base) return true; // missing or ambiguous → gate ON
+  const target = progNormalizeToBase(targetLang);
+  return base === target; // same language → gate ON
+}
+
 // --- Mirrored djb2 srcUrl dedup key (PROG-03 cheap first filter) ---
 // The worker owns the authoritative content-hash dedup via storage.session
 // (PROG-03 / getJob/setJob in background.ts).  This is a cheap per-srcUrl
@@ -1077,7 +1110,9 @@ function progPositionBadge(badge: HTMLElement, img: HTMLImageElement): void {
 
 // Create and attach an on-image badge for a translated image (D-04, T-13-06).
 // textContent-only — NEVER innerHTML.
-function progAddBadge(img: HTMLImageElement, srcKey: string): void {
+// himeNum: worker-assigned, dedup-keyed image number (D-04).  Badge reads
+// '[hime N]' matching the panel entry so the user can cross-reference them.
+function progAddBadge(img: HTMLImageElement, srcKey: string, himeNum: number): void {
   if (progKeyToBadge.has(srcKey)) return; // already badged
   const badge = document.createElement('div');
   badge.className = HIME_PROG_BADGE_CLASS;
@@ -1094,7 +1129,7 @@ function progAddBadge(img: HTMLImageElement, srcKey: string): void {
     'white-space: nowrap',
     'user-select: none',
   ].join(';');
-  badge.textContent = '[hime]'; // textContent only (T-13-06)
+  badge.textContent = `[hime ${himeNum}]`; // textContent only (T-13-06 / D-04)
   progPositionBadge(badge, img);
   document.body.appendChild(badge);
   progKeyToBadge.set(srcKey, badge);
@@ -1361,11 +1396,13 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
 
   if (message.type === 'progressiveBadge') {
     // Worker notifies content that a key was translated → add badge to matching img.
-    const p = message.payload as { dedupKey: string };
+    // himeNum (D-04): worker-assigned stable number; badge shows '[hime N]' matching the panel.
+    const p = message.payload as { dedupKey: string; himeNum: number };
     const srcKey = p.dedupKey;
+    const himeNum = typeof p.himeNum === 'number' ? p.himeNum : 0;
     for (const [img, key] of progImgToKey) {
       if (key === srcKey && document.body.contains(img)) {
-        progAddBadge(img, srcKey);
+        progAddBadge(img, srcKey, himeNum);
         break;
       }
     }
@@ -1381,7 +1418,17 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
 
 chrome.storage.local.get(['himeSettings'], (result) => {
   const s = (result.himeSettings || {}) as Record<string, unknown>;
-  if (s.progressiveEnabled === true) startProgressive();
+  if (s.progressiveEnabled === true) {
+    // D-05: page-language gate — skip auto-translation when the page is already
+    // in the user's reading language, or when lang is missing/ambiguous.
+    // document.documentElement.lang is author-controlled but only used in a pure
+    // string comparison (T-14-04); fail-safe direction is gate-ON / spend nothing.
+    const pageLang   = document.documentElement.lang ?? '';
+    const targetLang = typeof s.targetLanguage === 'string' ? s.targetLanguage : '';
+    if (!progShouldGateByLanguage(pageLang, targetLang)) {
+      startProgressive();
+    }
+  }
 });
 
 // Live toggle via storage.onChanged (PROG-01 — no extension reload needed).
@@ -1391,6 +1438,16 @@ chrome.storage.onChanged.addListener((changes, area) => {
   const newVal = (changes.himeSettings.newValue || {}) as Record<string, unknown>;
   const wasOn  = !!progObserver;
   const isOn   = newVal.progressiveEnabled === true;
-  if (isOn && !wasOn) startProgressive();
-  else if (!isOn && wasOn) stopProgressive();
+  if (isOn && !wasOn) {
+    // D-05: page-language gate — same check as the boot path.
+    // Re-read the lang each time the toggle fires (the user may navigate or the
+    // page may update, though lang changes mid-session are rare).
+    const pageLang   = document.documentElement.lang ?? '';
+    const targetLang = typeof newVal.targetLanguage === 'string' ? newVal.targetLanguage : '';
+    if (!progShouldGateByLanguage(pageLang, targetLang)) {
+      startProgressive();
+    }
+  } else if (!isOn && wasOn) {
+    stopProgressive();
+  }
 });
