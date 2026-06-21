@@ -176,7 +176,16 @@ Plans:
   3. The detected source language and no-text / low-confidence outcomes are presented clearly enough that the user can tell a genuine "no text" from a failure, with no silent or misleading blanks.
   4. CJK and vertical-text results are rechecked for legibility, downscale limits are tuned so large images send reliably rather than erroring opaquely, and the panel sets honest expectations where vendor OCR quality is known to be weak.
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+
+- [ ] 14-01-PLAN.md — worker data contract: stable dedup-keyed [hime N] number, CJK/vertical flag, graceful "image too large" classification (D-02/D-03/D-03a/D-04)
+- [ ] 14-02-PLAN.md — page-language gate (progressive fires only when page lang ≠ target; default-off when ambiguous) + [hime N] on-image badge label (D-05/D-04)
+- [ ] 14-03-PLAN.md — panel render + styles: [hime N] chip, CJK note, distinct failure card, copy/show-original nodes (D-01/D-02/D-03/D-04)
+- [ ] 14-04-PLAN.md — sidepanel copy wiring: clipboard write + Copied feedback + show-original reveal (D-01 / IMG-06) + human-verify
+- [ ] 14-05-PLAN.md — VIS-02 connection-test verification + SC#1 Vision-only reconcile (verify-only, no key-UI rebuild) + human-verify
+
 **UI hint**: yes
 
 ## Progress
@@ -197,7 +206,7 @@ Plans:
 | 11. Page Wiring & Popup Entry | v1.2 | 3/3 | Complete    | 2026-06-20 |
 | 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 7/7 | Complete | 2026-06-21 |
 | 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 4/4 | Complete | 2026-06-21 |
-| 14. UX / Quality Hardening + Vision Settings | v1.3 | 0/0 | Not started | - |
+| 14. UX / Quality Hardening + Vision Settings | v1.3 | 0/5 | Planned | - |
 
 ## Backlog
 
