@@ -50,7 +50,7 @@ OCR + translate text inside web-page images via a cloud vision LLM (BYOK), surfa
 
 - [ ] **Phase 12: Image OCR Pipeline + Right-Click + Side Panel** - Manual vertical slice: VisionProvider + Google Cloud (Vision OCR + Translation v2), translateImage worker case, worker-side byte resolver + captureVisibleTab fallback, validate/downscale, context menu, side panel, per-image state contract (IMG-01..05, IMG-07, VIS-01, VIS-03)
 - [ ] **Phase 13: Progressive Viewport Mode + Cost Control + Privacy Opt-In** - Default-OFF toggle, IntersectionObserver, content-hash dedup + cache, concurrency/budget/debounce/min-size guards, first-enable privacy warning + activity indicator, badge-not-auto-open (PROG-01..06)
-- [ ] **Phase 14: UX / Quality Hardening + Vision Settings** - Google Cloud API key field + connection test, copy original+translation, source-language + no-text/low-confidence polish, CJK legibility recheck, downscale tuning (VIS-02, IMG-06)
+- [x] **Phase 14: UX / Quality Hardening + Vision Settings** - Google Cloud API key field + connection test, copy original+translation, source-language + no-text/low-confidence polish, CJK legibility recheck, downscale tuning (VIS-02, IMG-06) (completed 2026-06-21)
 
 </details>
 
@@ -183,8 +183,16 @@ Plans:
 - [x] 14-01-PLAN.md — worker data contract: stable dedup-keyed [hime N] number, CJK/vertical flag, graceful "image too large" classification (D-02/D-03/D-03a/D-04)
 - [x] 14-02-PLAN.md — page-language gate (progressive fires only when page lang ≠ target; default-off when ambiguous) + [hime N] on-image badge label (D-05/D-04)
 - [x] 14-03-PLAN.md — panel render + styles: [hime N] chip, CJK note, distinct failure card, copy/show-original nodes (D-01/D-02/D-03/D-04)
-- [ ] 14-04-PLAN.md — sidepanel copy wiring: clipboard write + Copied feedback + show-original reveal (D-01 / IMG-06) + human-verify
+- [x] 14-04-PLAN.md — sidepanel copy wiring: clipboard write + Copied feedback + show-original reveal (D-01 / IMG-06) + human-verify
 - [x] 14-05-PLAN.md — VIS-02 connection-test verification + SC#1 Vision-only reconcile (verify-only, no key-UI rebuild) + human-verify
+
+**Completed (2026-06-21, human-verify):** All 5 plans done; 182 tests pass, build green. SC#1
+reconciled to Vision-only (translation runs through the LLM pipeline, not Translation v2 — phase-12
+deviation). Live UAT surfaced + fixed 4 adjacent bugs: sidePanel.open gesture rejection, Chrome
+auto-nested right-click menu (flattened), Ctrl+Shift+S swap triggering progressive translate-all,
+and the toolbar icon toggling the panel instead of showing the popup (openPanelOnActionClick is
+persistent state — force-reset false). Added an in-panel top-nav (Search/Swap/Settings). New ask
+"basic page-text auto-translate" parked as backlog 999.5.
 
 **UI hint**: yes
 
@@ -206,7 +214,7 @@ Plans:
 | 11. Page Wiring & Popup Entry | v1.2 | 3/3 | Complete    | 2026-06-20 |
 | 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 7/7 | Complete | 2026-06-21 |
 | 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 4/4 | Complete | 2026-06-21 |
-| 14. UX / Quality Hardening + Vision Settings | v1.3 | 4/5 | In Progress|  |
+| 14. UX / Quality Hardening + Vision Settings | v1.3 | 5/5 | Complete   | 2026-06-21 |
 
 ## Backlog
 
@@ -214,7 +222,7 @@ Plans:
 
 **Goal:** [Captured for future planning] Translate all search-result headings in a first pass, then descriptions in a second pass, so the user gets the most useful information (titles) fastest — progressive SERP rendering instead of waiting for the full batch.
 **Requirements:** TBD
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 
