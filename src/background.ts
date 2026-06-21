@@ -32,6 +32,8 @@ import {
   needsReencode,
   stripBase64Prefix,
   deriveImageEntry,
+  isCjkLang,
+  isOversizedForVision,
 } from './image-resolve.js';
 import { classifyError } from './errors.js';
 
@@ -116,6 +118,20 @@ const IMAGE_JOB_TIMEOUT_MS = 25000;
 // map is { [dedupKey]: ImageEntry } — survives MV3 worker termination so the
 // panel can rebuild from it on open and a re-entry never re-bills a finished job.
 const IMAGE_JOBS_KEY = 'himeImageJobs';
+
+// Phase 14 D-04: monotonic per-image number counter, stored in storage.session
+// alongside the job map. Session-scoped (ephemeral, cleared when the session ends
+// / extension reloads) — bounded by the per-page budget and right-click frequency.
+// Allocated ONCE on first-create; replays reuse the persisted number from the entry.
+const HIME_IMAGE_NEXT_NUM_KEY = 'himeImageNextNum';
+
+/** Allocate and persist the next himeNum. Increments atomically in session storage. */
+async function allocateHimeNum(): Promise<number> {
+  const result = await chrome.storage.session.get([HIME_IMAGE_NEXT_NUM_KEY]);
+  const next = ((result[HIME_IMAGE_NEXT_NUM_KEY] as number | undefined) ?? 0) + 1;
+  await chrome.storage.session.set({ [HIME_IMAGE_NEXT_NUM_KEY]: next });
+  return next;
+}
 
 // Stable content-key for an image source URL. Used as the dedup id AND the panel
 // entry id (D-01 prepend). djb2 over the srcUrl — collision-resistant enough for
@@ -263,6 +279,17 @@ async function downscaleAndGuard(
   const outMime = reencode ? 'image/png' : mime;
   const outBlob = await canvas.convertToBlob({ type: outMime });
   const outBase64 = arrayBufferToBase64(await outBlob.arrayBuffer());
+
+  // Phase 14 D-03a: guard post-downscale output against Vision's published caps
+  // (75M px pixel cap, 10 MiB JSON request cap). If the re-encoded image STILL
+  // exceeds either cap, raise a named error so the catch path produces the D-02
+  // failure card with a reason-bearing message rather than an opaque throw.
+  if (isOversizedForVision(target.width, target.height, outBase64.length)) {
+    const e = new Error('image too large — exceeds Vision pixel or request-size cap');
+    (e as Error & { kind?: string }).kind = 'unknown';
+    throw e;
+  }
+
   return { base64: outBase64, mime: outBlob.type || outMime };
 }
 
@@ -366,11 +393,15 @@ async function runImagePipeline(
   const existing = await getJob(dedupKey);
   if (existing) {
     if (existing.kind === 'loading') return; // in-flight — don't start a second.
-    pushEntry(existing); // populated / no-text / error — replay, don't re-bill.
+    pushEntry(existing); // populated / no-text / error — replay, don't re-bill (reuses persisted himeNum).
     return;
   }
 
-  const loading: ImageEntry = { kind: 'loading', id: dedupKey, thumbnailUrl: srcUrl };
+  // Phase 14 D-04: allocate a stable monotonic number ONCE, on first-create.
+  // Replays (the branch above) reuse the persisted entry's himeNum and never renumber.
+  const himeNum = await allocateHimeNum();
+
+  const loading: ImageEntry = { kind: 'loading', id: dedupKey, thumbnailUrl: srcUrl, himeNum };
   await setJob(dedupKey, loading);
   pushEntry(loading);
 
@@ -381,6 +412,7 @@ async function runImagePipeline(
     const entry = deriveImageEntry({
       id: dedupKey,
       thumbnailUrl: srcUrl,
+      himeNum,
       error: { kind: 'auth', message: 'Google Cloud API key not configured — add it in options' },
     });
     await setJob(dedupKey, entry);
@@ -408,9 +440,19 @@ async function runImagePipeline(
     let entry: ImageEntry;
     if (outcome === null) {
       // No-text sentinel (Pitfall 4) — explicit no-text entry, off the error channel.
-      entry = deriveImageEntry({ id: dedupKey, thumbnailUrl: srcUrl, ocr: { noText: true } });
+      entry = deriveImageEntry({ id: dedupKey, thumbnailUrl: srcUrl, ocr: { noText: true }, himeNum });
     } else {
-      entry = deriveImageEntry({ id: dedupKey, thumbnailUrl: srcUrl, ocr: outcome.result });
+      // Phase 14 D-03: set verticalOrCjk from the OCR-detected language code.
+      // isCjkLang is a free, always-present signal from the Vision response and
+      // needs no extra API call (Claude's Discretion — language-code signal chosen).
+      const verticalOrCjk = isCjkLang(outcome.result.detectedLang);
+      entry = deriveImageEntry({
+        id: dedupKey,
+        thumbnailUrl: srcUrl,
+        ocr: outcome.result,
+        himeNum,
+        verticalOrCjk,
+      });
       // D-02 / IMG-03 direction line: surface the resolved target display name so
       // the panel can render "Detected: X → Y" (entry.target on a populated entry).
       if (entry.kind === 'populated') entry.target = outcome.target;
@@ -427,6 +469,7 @@ async function runImagePipeline(
       id: dedupKey,
       thumbnailUrl: srcUrl,
       error: { kind, message },
+      himeNum,
     });
     await setJob(dedupKey, entry);
     pushEntry(entry);
@@ -850,12 +893,14 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             // srcUrl key (pSrcKey / imgs_…) back to the page — that's what
             // content.ts matches against its <img>→key map, NOT the worker's
             // content-hash key. Only badge when a usable (populated) result landed.
+            // Phase 14 D-04: include himeNum from the finished entry so content.ts
+            // can render `[hime N]` on the on-image badge identically to the panel.
             void getJob(contentKey)
               .then((entry) => {
                 if (entry && entry.kind === 'populated') {
                   void chrome.tabs.sendMessage(pTabId, {
                     type: 'progressiveBadge',
-                    payload: { dedupKey: pSrcKey },
+                    payload: { dedupKey: pSrcKey, himeNum: entry.himeNum ?? 0 },
                   }).catch(() => {});
                 }
               })
