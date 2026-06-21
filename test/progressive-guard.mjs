@@ -13,6 +13,7 @@
  *   D-02             createConcurrencyGate — 2-slot in-flight cap
  *   PROG-03          contentDedupKey    — content-hash, not URL identity
  *   D-01             createDwellScheduler — dwell-debounce (injected small ms)
+ *   D-05             shouldGateByLanguage — page-language gate (conservative-by-default)
  */
 
 import assert from 'node:assert/strict';
@@ -191,4 +192,86 @@ test('createDwellScheduler: fires after window; cancel suppresses; re-schedule d
   // After the second window completes, exactly one fire.
   await new Promise((resolve) => setTimeout(resolve, SMALL_MS + 30));
   assert.equal(debounceCount, 1, 'debounce: must fire exactly once after the final window');
+});
+
+// ---------------------------------------------------------------------------
+// D-05: shouldGateByLanguage — page-language gate (conservative-by-default).
+//
+// Return polarity: true = GATE (do NOT auto-translate); false = allow.
+// Conservative rule: missing/ambiguous page lang → gate ON (spend nothing).
+// ---------------------------------------------------------------------------
+test('shouldGateByLanguage: same lang → gate ON (true)', async () => {
+  const { shouldGateByLanguage } = await loadGuard();
+
+  // Exact match: page is English, target is 'English' (stored display name).
+  assert.equal(
+    shouldGateByLanguage('en', 'English'),
+    true,
+    'en / English → gate ON (page already in reading language)',
+  );
+});
+
+test('shouldGateByLanguage: different lang → gate OFF (false, allow progressive)', async () => {
+  const { shouldGateByLanguage } = await loadGuard();
+
+  // Page is Japanese, target is English → allow progressive.
+  assert.equal(
+    shouldGateByLanguage('ja', 'English'),
+    false,
+    'ja / English → gate OFF (page differs from target)',
+  );
+});
+
+test('shouldGateByLanguage: empty / whitespace page lang → gate ON (conservative)', async () => {
+  const { shouldGateByLanguage } = await loadGuard();
+
+  // Missing lang → gate ON (fail-safe, spend nothing).
+  assert.equal(
+    shouldGateByLanguage('', 'English'),
+    true,
+    'empty string → gate ON (conservative default)',
+  );
+
+  // Whitespace-only lang → gate ON.
+  assert.equal(
+    shouldGateByLanguage('  ', 'English'),
+    true,
+    'whitespace-only → gate ON (conservative default)',
+  );
+});
+
+test('shouldGateByLanguage: BCP-47 region subtag normalised (en-US vs English)', async () => {
+  const { shouldGateByLanguage } = await loadGuard();
+
+  // Page has 'en-US'; target is English → base subtag 'en' matches → gate ON.
+  assert.equal(
+    shouldGateByLanguage('en-US', 'English'),
+    true,
+    'en-US / English → gate ON (base subtag en matches)',
+  );
+
+  // Page has 'en-GB'; target is Japanese → different → gate OFF.
+  assert.equal(
+    shouldGateByLanguage('en-GB', 'Japanese'),
+    false,
+    'en-GB / Japanese → gate OFF (en != ja)',
+  );
+});
+
+test('shouldGateByLanguage: display-name target normalised to ISO (Japanese → ja)', async () => {
+  const { shouldGateByLanguage } = await loadGuard();
+
+  // Page is 'ja', target stored as 'Japanese' display name → match → gate ON.
+  assert.equal(
+    shouldGateByLanguage('ja', 'Japanese'),
+    true,
+    'ja / Japanese → gate ON (ja matches)',
+  );
+
+  // Page is 'ko', target is 'Japanese' → different → gate OFF.
+  assert.equal(
+    shouldGateByLanguage('ko', 'Japanese'),
+    false,
+    'ko / Japanese → gate OFF (ko != ja)',
+  );
 });
