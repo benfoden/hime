@@ -263,8 +263,65 @@ async function downscaleAndGuard(
   return { base64: outBase64, mime: outBlob.type || outMime };
 }
 
+// OCR an image via the Vision provider, then translate the extracted text
+// through the MAIN LLM TranslationProvider pipeline (settings.provider/model/
+// apiKeys) — the same path the input box / SERP use, NOT Google Translate. So
+// image translations match the model + quality the user configured, and the
+// Google key needs only the Cloud Vision API enabled. Returns the assembled
+// ImageResult + the resolved target language (for the "Detected: X → Y" line),
+// or null for the no-text sentinel. Records OCR + translation usage as it goes.
+async function ocrAndTranslateImage(
+  base64: string,
+  mime: string,
+  googleKey: string,
+  settings: Settings,
+): Promise<{ result: ImageResult; target: string } | null> {
+  const ocrResult = await visionProvider.ocr(base64, mime, googleKey);
+  if (ocrResult === null) return null; // no-text sentinel — no translation call.
+  if (ocrResult.usage) await recordUsage('google-vision', ocrResult.usage);
+
+  const originalText = ocrResult.originalText;
+
+  // Translate via the main LLM pipeline. Mirror translateText's direction logic:
+  // Japanese OCR text flips to the user's source (native) language; otherwise to
+  // the configured target. The prompt only consumes targetLanguage (source is
+  // model-auto-detected), so this just picks the right target.
+  const llmKey = settings.apiKeys[settings.provider] || '';
+  if (!llmKey) {
+    throw Object.assign(
+      new Error(`No ${settings.provider} API key — add it in options to translate image text`),
+      { kind: 'auth' as const },
+    );
+  }
+  const provider = providers[settings.provider];
+  if (!provider) throw new Error(`Unknown provider: ${settings.provider}`);
+
+  const jpPattern = /[぀-ゟ゠-ヿ一-鿿]/;
+  const inputIsJP = jpPattern.test(originalText);
+  const target = inputIsJP ? settings.sourceLanguage : settings.targetLanguage;
+  const config: TranslationConfig = {
+    sourceLanguage: inputIsJP ? settings.targetLanguage : settings.sourceLanguage,
+    targetLanguage: target,
+    formality: settings.formality,
+    customPrompt: settings.customPrompt,
+  };
+
+  const translation = await provider.translate(originalText, config, llmKey, settings.model);
+  if (translation.usage) await recordUsage(settings.model, translation.usage);
+
+  return {
+    result: {
+      originalText,
+      translatedText: translation.text,
+      detectedLang: ocrResult.detectedLang,
+      confidence: ocrResult.confidence,
+    },
+    target,
+  };
+}
+
 // The async pipeline kicked off from the onClicked gesture. Writes a 'loading'
-// entry, resolves bytes → guards/downscales → races ocrTranslate against the
+// entry, resolves bytes → guards/downscales → races OCR+LLM-translate against the
 // 25s ceiling → persists + pushes the final populated/no-text/error entry. Never
 // leaves the entry on 'loading' (IMG-05) and never re-bills a finished dedupKey.
 async function runImageJob(srcUrl: string, tabId: number, dedupKey: string): Promise<void> {
@@ -298,8 +355,10 @@ async function runImageJob(srcUrl: string, tabId: number, dedupKey: string): Pro
     const resolved = await resolveImageBytes(srcUrl, tabId);
     const guarded = await downscaleAndGuard(resolved.base64, resolved.mime);
 
-    const result = await Promise.race([
-      visionProvider.ocrTranslate(guarded.base64, guarded.mime, settings.targetLanguage, apiKey),
+    // Race the whole OCR→LLM-translate sequence against the 25s ceiling so a slow
+    // Vision OR translation call still resolves to an explicit error (IMG-05).
+    const outcome = await Promise.race([
+      ocrAndTranslateImage(guarded.base64, guarded.mime, apiKey, settings),
       new Promise<never>((_, reject) =>
         setTimeout(
           () => reject(Object.assign(new Error('Image translation timed out'), { name: 'AbortError' })),
@@ -309,22 +368,20 @@ async function runImageJob(srcUrl: string, tabId: number, dedupKey: string): Pro
     ]);
 
     let entry: ImageEntry;
-    if (result === null) {
+    if (outcome === null) {
       // No-text sentinel (Pitfall 4) — explicit no-text entry, off the error channel.
       entry = deriveImageEntry({ id: dedupKey, thumbnailUrl: srcUrl, ocr: { noText: true } });
     } else {
-      const ocr: ImageResult = result;
-      if (ocr.usage) await recordUsage('google-vision', ocr.usage);
-      entry = deriveImageEntry({ id: dedupKey, thumbnailUrl: srcUrl, ocr });
+      entry = deriveImageEntry({ id: dedupKey, thumbnailUrl: srcUrl, ocr: outcome.result });
       // D-02 / IMG-03 direction line: surface the resolved target display name so
       // the panel can render "Detected: X → Y" (entry.target on a populated entry).
-      if (entry.kind === 'populated') entry.target = settings.targetLanguage;
+      if (entry.kind === 'populated') entry.target = outcome.target;
     }
     await setJob(dedupKey, entry);
     pushEntry(entry);
   } catch (err) {
-    // Provider errors already carry .kind; the synthetic timeout AbortError does
-    // not, so fall back to classifyError (AbortError → 'network').
+    // Provider errors (Vision or LLM) already carry .kind; the synthetic timeout
+    // AbortError does not, so fall back to classifyError (AbortError → 'network').
     const kind = (err as { kind?: import('./errors.js').ErrorKind })?.kind
       ?? classifyError('google', err).kind;
     const message = err instanceof Error ? err.message : 'Image translation failed';

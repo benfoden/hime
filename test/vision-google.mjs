@@ -22,7 +22,7 @@ import path from 'node:path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const { VISION_POPULATED, VISION_EMPTY, VISION_LOW_CONFIDENCE, TRANSLATE_V2_SAMPLE } =
+const { VISION_POPULATED, VISION_EMPTY, VISION_LOW_CONFIDENCE } =
   await import(path.join(__dirname, '../dist/panel-mock.js'));
 
 // Subject is not built until Plan 02 — import lazily so this file still runs
@@ -75,23 +75,24 @@ function stubFetchError(status, body) {
 }
 
 // ---------------------------------------------------------------------------
-// VIS-01a: ocrTranslate POSTs to VISION_ENDPOINT (?key=) with a
-//          DOCUMENT_TEXT_DETECTION body (image.content === base64, NO data:
-//          prefix), then to TRANSLATE_V2_ENDPOINT with q / target / format:'text'
-//          and NO source, and maps both responses → ImageResult (breaks kept).
+// VIS-01a: ocr() POSTs to VISION_ENDPOINT (?key=) with a DOCUMENT_TEXT_DETECTION
+//          body (image.content === base64, NO data: prefix) and maps the response
+//          → OcrResult (originalText verbatim w/ breaks, Vision-detected lang,
+//          confidence). It does NOT translate — only ONE network call (the LLM
+//          pipeline owns translation now).
 // ---------------------------------------------------------------------------
-test('VIS-01a: ocrTranslate hits Vision then Translation v2 and maps to ImageResult', async () => {
-  const { GoogleVisionProvider, VISION_ENDPOINT, TRANSLATE_V2_ENDPOINT } = await loadProvider();
-  const stub = stubFetch([VISION_POPULATED, TRANSLATE_V2_SAMPLE]);
+test('VIS-01a: ocr hits Vision only and maps to OcrResult', async () => {
+  const { GoogleVisionProvider, VISION_ENDPOINT } = await loadProvider();
+  const stub = stubFetch([VISION_POPULATED]);
   try {
     const provider = new GoogleVisionProvider();
     assert.equal(provider.name, 'google');
-    const result = await provider.ocrTranslate('YmFzZTY0', 'image/png', 'English', 'SECRET_KEY');
+    const result = await provider.ocr('YmFzZTY0', 'image/png', 'SECRET_KEY');
 
-    assert.equal(stub.calls.length, 2, 'expected exactly two network calls');
+    assert.equal(stub.calls.length, 1, 'ocr must make exactly ONE network call (no translation)');
 
-    // Call 1 → Vision images:annotate, ?key=, DOCUMENT_TEXT_DETECTION
-    assert.ok(stub.calls[0].url.startsWith(VISION_ENDPOINT), 'first call must target VISION_ENDPOINT');
+    // Vision images:annotate, ?key=, DOCUMENT_TEXT_DETECTION
+    assert.ok(stub.calls[0].url.startsWith(VISION_ENDPOINT), 'call must target VISION_ENDPOINT');
     assert.ok(stub.calls[0].url.includes('key='), 'Vision call must carry ?key=');
     const visionBody = JSON.parse(stub.calls[0].init.body);
     assert.equal(visionBody.requests[0].features[0].type, 'DOCUMENT_TEXT_DETECTION');
@@ -99,61 +100,46 @@ test('VIS-01a: ocrTranslate hits Vision then Translation v2 and maps to ImageRes
     assert.equal(visionBody.requests[0].image.content, 'YmFzZTY0');
     assert.ok(!String(visionBody.requests[0].image.content).startsWith('data:'), 'no data: prefix');
 
-    // Call 2 → Translation v2, q/target/format:'text', source omitted
-    assert.ok(stub.calls[1].url.startsWith(TRANSLATE_V2_ENDPOINT), 'second call must target TRANSLATE_V2_ENDPOINT');
-    assert.ok(stub.calls[1].url.includes('key='), 'Translation call must carry ?key=');
-    const transBody = JSON.parse(stub.calls[1].init.body);
-    assert.ok('q' in transBody, 'translation body must carry q');
-    // q is the verbatim OCR text — newline preserved (D-02).
-    assert.equal(transBody.q, 'こんにちは世界\n二行目のテキスト');
-    assert.equal(transBody.target, 'en', "display name 'English' resolves to ISO 'en'");
-    assert.equal(transBody.format, 'text');
-    assert.ok(!('source' in transBody), 'source must be omitted (auto-detect)');
-
-    // Mapped ImageResult
+    // Mapped OcrResult — no translatedText (translation is the LLM's job).
     assert.equal(typeof result.originalText, 'string');
     assert.equal(result.originalText, 'こんにちは世界\n二行目のテキスト', 'originalText is fullTextAnnotation.text verbatim');
     assert.ok(result.originalText.includes('\n'), 'OCR newline preserved into originalText');
-    assert.equal(result.translatedText, 'Hello world\nSecond line of text');
-    assert.equal(result.detectedLang, 'ja', 'detectedSourceLanguage from Translation v2');
+    assert.equal(result.translatedText, undefined, 'ocr() must NOT translate');
+    assert.equal(result.detectedLang, 'ja', 'detectedLang from Vision pages[0].property.detectedLanguages');
     assert.ok(result.confidence >= 0.6, 'populated fixture should be high-confidence');
-    assert.ok(result.usage, 'usage present for recordUsage');
+    assert.ok(result.usage, 'OCR usage present for recordUsage');
   } finally {
     stub.restore();
   }
 });
 
 // ---------------------------------------------------------------------------
-// VIS-01b: VISION_EMPTY → no-text path: NO second (translation) call, and a
-//          no-text sentinel is returned rather than an error being thrown.
+// VIS-01b: VISION_EMPTY → no-text sentinel (null) rather than a throw.
 // ---------------------------------------------------------------------------
-test('VIS-01b: empty Vision response yields the no-text path with no translation call', async () => {
+test('VIS-01b: empty Vision response yields the no-text sentinel', async () => {
   const { GoogleVisionProvider } = await loadProvider();
   const stub = stubFetch([VISION_EMPTY]);
   try {
     const provider = new GoogleVisionProvider();
-    const result = await provider.ocrTranslate('YmFzZTY0', 'image/png', 'English', 'SECRET_KEY');
-    assert.equal(stub.calls.length, 1, 'no-text path must NOT call Translation v2');
-    // Subject signals no-text (exact sentinel shape defined by Plan 02). Either a
-    // falsy result or an explicit noText marker is acceptable; it must NOT throw.
-    assert.ok(result == null || result.noText === true || result.originalText === '', 'expected a no-text sentinel');
+    const result = await provider.ocr('YmFzZTY0', 'image/png', 'SECRET_KEY');
+    assert.equal(stub.calls.length, 1, 'one Vision call');
+    assert.equal(result, null, 'expected the no-text sentinel (null), must NOT throw');
   } finally {
     stub.restore();
   }
 });
 
 // ---------------------------------------------------------------------------
-// VIS-01d (D-04): low-confidence OCR still translates; the provider reports a
-//          confidence number < 0.60. The amber badge is applied downstream — the
-//          provider just reports the number.
+// VIS-01d (D-04): low-confidence OCR reports a confidence number < 0.60. The
+//          amber badge is applied downstream — the provider just reports it.
 // ---------------------------------------------------------------------------
 test('VIS-01d: low-confidence OCR reports confidence < 0.60', async () => {
   const { GoogleVisionProvider } = await loadProvider();
-  const stub = stubFetch([VISION_LOW_CONFIDENCE, TRANSLATE_V2_SAMPLE]);
+  const stub = stubFetch([VISION_LOW_CONFIDENCE]);
   try {
     const provider = new GoogleVisionProvider();
-    const result = await provider.ocrTranslate('YmFzZTY0', 'image/png', 'English', 'SECRET_KEY');
-    assert.equal(stub.calls.length, 2, 'low-confidence still translates');
+    const result = await provider.ocr('YmFzZTY0', 'image/png', 'SECRET_KEY');
+    assert.equal(stub.calls.length, 1, 'one Vision call');
     assert.ok(result.originalText.length > 0, 'low-confidence has text');
     assert.ok(result.confidence < 0.6, `expected confidence < 0.60, got ${result.confidence}`);
   } finally {
@@ -171,8 +157,8 @@ test('VIS-01e: a 403 Vision response rejects with a classified auth error', asyn
   try {
     const provider = new GoogleVisionProvider();
     await provider
-      .ocrTranslate('YmFzZTY0', 'image/png', 'English', 'SECRET_KEY')
-      .then(() => assert.fail('expected ocrTranslate to reject on 403'))
+      .ocr('YmFzZTY0', 'image/png', 'SECRET_KEY')
+      .then(() => assert.fail('expected ocr to reject on 403'))
       .catch((err) => {
         assert.equal(err.kind, 'auth', 'classifyError maps 403 → auth');
       });
@@ -194,8 +180,8 @@ test('VIS-01c: the API key never leaks into a thrown error message', async () =>
     const provider = new GoogleVisionProvider();
     const SECRET = 'super-secret-google-key';
     await provider
-      .ocrTranslate('YmFzZTY0', 'image/png', 'English', SECRET)
-      .then(() => assert.fail('expected ocrTranslate to reject'))
+      .ocr('YmFzZTY0', 'image/png', SECRET)
+      .then(() => assert.fail('expected ocr to reject'))
       .catch((err) => {
         const text = `${err?.message ?? ''} ${err?.stack ?? ''}`;
         assert.ok(!text.includes(SECRET), 'API key must never appear in a thrown error');
@@ -206,31 +192,26 @@ test('VIS-01c: the API key never leaks into a thrown error message', async () =>
 });
 
 // ---------------------------------------------------------------------------
-// VIS-02a (VIS-02): testConnection probes BOTH endpoints — Vision images:annotate
-//          (?key=) then Translation v2 (?key=) — and resolves when both return ok.
-//          This is the settings "Test Vision Key" path; it must exercise the same
-//          two-call sequence image translation uses so a half-enabled key fails.
+// VIS-02a (VIS-02): testConnection probes the Vision endpoint ONLY (?key=) and
+//          resolves on 200. Translation no longer runs through this key, so the
+//          key needs only the Cloud Vision API enabled.
 // ---------------------------------------------------------------------------
-test('VIS-02a: testConnection hits Vision then Translation v2 and resolves on success', async () => {
-  const { GoogleVisionProvider, VISION_ENDPOINT, TRANSLATE_V2_ENDPOINT } = await loadProvider();
-  // Empty Vision annotation + a translation sample — both 200 → connection ok.
-  const stub = stubFetch([VISION_EMPTY, TRANSLATE_V2_SAMPLE]);
+test('VIS-02a: testConnection probes Vision only and resolves on success', async () => {
+  const { GoogleVisionProvider, VISION_ENDPOINT } = await loadProvider();
+  const stub = stubFetch([VISION_EMPTY]);
   try {
     const provider = new GoogleVisionProvider();
     await provider.testConnection('SECRET_KEY');
-    assert.equal(stub.calls.length, 2, 'testConnection must call both endpoints');
-    assert.ok(stub.calls[0].url.startsWith(VISION_ENDPOINT), 'first call must target VISION_ENDPOINT');
+    assert.equal(stub.calls.length, 1, 'testConnection must call ONLY the Vision endpoint');
+    assert.ok(stub.calls[0].url.startsWith(VISION_ENDPOINT), 'call must target VISION_ENDPOINT');
     assert.ok(stub.calls[0].url.includes('key=SECRET_KEY'), 'Vision probe must carry ?key=');
-    assert.ok(stub.calls[1].url.startsWith(TRANSLATE_V2_ENDPOINT), 'second call must target TRANSLATE_V2_ENDPOINT');
-    assert.ok(stub.calls[1].url.includes('key=SECRET_KEY'), 'Translation probe must carry ?key=');
   } finally {
     stub.restore();
   }
 });
 
 // ---------------------------------------------------------------------------
-// VIS-02b (VIS-02): an invalid key (403 on the Vision probe) rejects with a
-//          classified auth error and never calls Translation v2.
+// VIS-02b (VIS-02): an invalid key (403) rejects with a classified auth error.
 // ---------------------------------------------------------------------------
 test('VIS-02b: testConnection rejects with a classified auth error on a 403', async () => {
   const { GoogleVisionProvider } = await loadProvider();
@@ -243,7 +224,7 @@ test('VIS-02b: testConnection rejects with a classified auth error on a 403', as
       .catch((err) => {
         assert.equal(err.kind, 'auth', 'classifyError maps 403 → auth');
       });
-    assert.equal(stub.calls.length, 1, 'a failed Vision probe must short-circuit before Translation v2');
+    assert.equal(stub.calls.length, 1, 'one Vision probe');
   } finally {
     stub.restore();
   }

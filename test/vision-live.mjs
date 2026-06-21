@@ -1,10 +1,11 @@
 /**
- * OPT-IN live provider smoke test for the Google Vision + Translation v2 path.
+ * OPT-IN live provider smoke test for the Google Vision OCR path.
  *
- * Drives the REAL GoogleVisionProvider against the REAL Google Cloud endpoints
- * with a real BYOK key, OCR'ing + translating a bundled text-bearing image
- * end-to-end. This is the one verification that genuinely cannot be node-mocked:
- * it proves VIS-01 (a real two-call OCR+translate) against the shipped bundle.
+ * Drives the REAL GoogleVisionProvider against the REAL Cloud Vision endpoint
+ * with a real BYOK key, OCR'ing a bundled text-bearing image. This is the one
+ * verification that genuinely cannot be node-mocked: it proves a real Vision OCR
+ * call against the shipped bundle. Translation is NOT exercised here — that runs
+ * through the main LLM pipeline (covered by the openai/gemini provider tests).
  *
  * Project law (MEMORY: no-service-worker-console-tests): verify hime via a node
  * harness against dist/ with an env-supplied key — NEVER the service-worker
@@ -17,9 +18,8 @@
  * Run live (single line — copy/paste):
  *   GOOGLE_API_KEY=YOUR_KEY node --test test/vision-live.mjs
  *
- * The key's Google Cloud project must have BOTH the Cloud Vision API and the
- * Cloud Translation API enabled (Open Question 2) — otherwise one of the two
- * calls 403s and the test fails with an explicit auth-kind error.
+ * The key's Google Cloud project needs ONLY the Cloud Vision API enabled — a 403
+ * here means Vision is disabled/blocked on the key, surfaced as an auth-kind error.
  *
  * SECURITY (T-12-19): the key is read from process.env only, is never
  * interpolated into any console output or assertion message, and is never
@@ -46,7 +46,7 @@ const haveKey = typeof apiKey === 'string' && apiKey.length > 0;
 const fixturePath = path.join(__dirname, 'fixtures/ocr-sample.png');
 
 test(
-  'VIS-01 live: GoogleVisionProvider OCRs + translates a real image via dist/ (opt-in)',
+  'VIS-01 live: GoogleVisionProvider OCRs a real image via dist/ (opt-in)',
   // No GOOGLE_API_KEY → skip cleanly so the default suite stays green offline.
   { skip: haveKey ? false : 'set GOOGLE_API_KEY to run the live provider smoke' },
   async () => {
@@ -55,14 +55,15 @@ test(
 
     let result;
     try {
-      // Signature (Plan 02): ocrTranslate(imageBase64, mime, targetLang, apiKey).
-      // base64 only — NO data: URL prefix (the provider expects raw content).
-      result = await provider.ocrTranslate(imageBase64, 'image/png', 'English', apiKey);
+      // OCR-only contract: ocr(imageBase64, mime, apiKey) — translation is the
+      // LLM pipeline's job now, NOT the vision provider's. base64 only, NO data:
+      // URL prefix (the provider expects raw content).
+      result = await provider.ocr(imageBase64, 'image/png', apiKey);
     } catch (err) {
       // Surface ONLY the classified message — never the key. (A 403 here usually
-      // means one of the two APIs is not enabled on the key's project.)
+      // means the Cloud Vision API is not enabled on the key's project.)
       const message = err instanceof Error ? err.message : String(err);
-      assert.fail(`live ocrTranslate threw: ${message}`);
+      assert.fail(`live ocr threw: ${message}`);
     }
 
     // The fixture has text, so the provider must NOT return the no-text sentinel.
@@ -71,10 +72,6 @@ test(
     assert.ok(
       typeof result.originalText === 'string' && result.originalText.trim().length > 0,
       'expected non-empty originalText from OCR',
-    );
-    assert.ok(
-      typeof result.translatedText === 'string' && result.translatedText.trim().length > 0,
-      'expected non-empty translatedText from Translation v2',
     );
     // detectedLang should be a plausible BCP-47/ISO-ish code (e.g. "ja", "en").
     assert.ok(

@@ -51,18 +51,35 @@ export interface TranslationProvider {
   predict(text: string, apiKey: string, model: string): Promise<TranslationResult>;
 }
 
-// Phase 12 (v1.3 Image Translation) — provider-agnostic OCR+translate contract.
-// Sibling of TranslationProvider. The single VisionProvider.ocrTranslate call
-// performs OCR then translation (provider may issue 1+ network calls internally)
-// and returns a normalized ImageResult. The apiKey is read from storage in the
-// worker and passed in here; it is NEVER serialized into a message (T-12-01).
+// Phase 12 (v1.3 Image Translation) — provider-agnostic OCR contract.
+// Sibling of TranslationProvider. VisionProvider does OCR ONLY: it extracts the
+// source text from an image and returns an OcrResult. Translation is NOT the
+// vision provider's job — the worker routes the OCR'd text through the main LLM
+// TranslationProvider pipeline (settings.provider/model/apiKeys), so image
+// translations use the same model + key the user already configured. The vision
+// apiKey is read from storage in the worker and passed in here; it is NEVER
+// serialized into a message (T-12-01).
 //
 // A text-free image short-circuits to the distinct no-text sentinel `null`
-// WITHOUT calling translation and WITHOUT throwing (Pitfall 4 / IMG-05): the
-// worker maps a null return to TranslateImageResponse `{ noText: true }`.
+// WITHOUT throwing (Pitfall 4 / IMG-05): the worker maps a null return to
+// TranslateImageResponse `{ noText: true }`.
 export interface VisionProvider {
   name: string;
-  ocrTranslate(imageBase64: string, mime: string, targetLang: string, apiKey: string): Promise<ImageResult | null>;
+  ocr(imageBase64: string, mime: string, apiKey: string): Promise<OcrResult | null>;
+}
+
+// OCR-only output of a VisionProvider — the source text plus detection metadata.
+// The worker translates `originalText` via the LLM pipeline and assembles the
+// final ImageResult (which adds translatedText).
+export interface OcrResult {
+  // The OCR'd source text (verbatim).
+  originalText: string;
+  // Detected source language — ISO code, for the "Detected: X → Y" line.
+  detectedLang: string;
+  // Mean word confidence in 0..1. <0.60 drives the D-04 low-confidence amber badge.
+  confidence: number;
+  // Optional OCR usage for recordUsage('<provider>-vision', ...) in the worker.
+  usage?: { inputTokens: number; outputTokens: number };
 }
 
 // Normalized OCR+translation result rendered by the side panel.

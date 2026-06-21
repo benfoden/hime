@@ -67,7 +67,7 @@
       <div class="form-group">
         <label for="googleApiKey">Vision / OCR API Key</label>
         <input type="password" id="googleApiKey" placeholder="Enter your Google Cloud API key">
-        <p class="help-text">Bring your own Google Cloud key with BOTH the Cloud Vision and Cloud Translation APIs enabled. Used for right-click image translation. Metered per call — testing and translating count against your Google Cloud quota. The key is stored locally and read only in the background worker; it never reaches the page.</p>
+        <p class="help-text">Bring your own Google Cloud key with the <strong>Cloud Vision API</strong> enabled — used to OCR text out of images. (The detected text is then translated by your configured translation model above, so no Cloud Translation API is needed.) Metered per call — testing and OCR count against your Google Cloud quota. The key is stored locally and read only in the background worker; it never reaches the page.</p>
       </div>
 
       <button id="testVisionKey" class="btn-secondary">Test Vision Key</button>

@@ -18,15 +18,13 @@
 // the two-call sequence stays under the MV3 30s fetch ceiling and neither call
 // can silently hang the worker — a timeout maps to a network-kind error.
 
-import type { VisionProvider, ImageResult } from '../types.js';
-import { languageToIso } from '../types.js';
+import type { VisionProvider, OcrResult } from '../types.js';
 import { classifyError } from '../errors.js';
 
-// Exported so the test asserts the exact URLs (and the worker can reference them).
+// Exported so the test asserts the exact URL (and the worker can reference it).
 export const VISION_ENDPOINT = 'https://vision.googleapis.com/v1/images:annotate';
-export const TRANSLATE_V2_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
 
-// Per-call timeout. Two sequential ~12s calls stay under the MV3 30s ceiling (A5).
+// Per-call timeout — keeps a single Vision call well under the MV3 30s ceiling (A5).
 const CALL_TIMEOUT_MS = 12000;
 
 // A 1×1 transparent PNG (base64, no data: prefix) used only by testConnection as
@@ -36,9 +34,8 @@ const PROBE_PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
 // Distinct no-text sentinel: a text-free image short-circuits here WITHOUT
-// calling Translation v2 and WITHOUT throwing (Pitfall 4). The worker maps a
-// null return to the panel's no-text state.
-type OcrTranslateResult = ImageResult | null;
+// throwing (Pitfall 4). The worker maps a null return to the panel's no-text state.
+type OcrOnlyResult = OcrResult | null;
 
 // --- Raw Google response shapes (subset we consume; not exported) -----------
 
@@ -64,22 +61,18 @@ interface VisionFullTextAnnotation {
 interface VisionAnnotateResponse {
   responses?: { fullTextAnnotation?: VisionFullTextAnnotation }[];
 }
-interface TranslateV2Response {
-  data?: {
-    translations?: { translatedText?: string; detectedSourceLanguage?: string }[];
-  };
-}
 
 export class GoogleVisionProvider implements VisionProvider {
   name = 'google';
 
-  async ocrTranslate(
-    imageBase64: string,
-    _mime: string,
-    targetLang: string,
-    apiKey: string,
-  ): Promise<OcrTranslateResult> {
-    // --- Call 1: Vision OCR (DOCUMENT_TEXT_DETECTION) ----------------------
+  /**
+   * OCR an image with Vision DOCUMENT_TEXT_DETECTION and return the extracted
+   * source text + detection metadata. Does NOT translate — the worker routes
+   * originalText through the main LLM TranslationProvider. A text-free image
+   * returns the no-text sentinel `null` (no throw, Pitfall 4). The key needs
+   * only the Cloud Vision API enabled.
+   */
+  async ocr(imageBase64: string, _mime: string, apiKey: string): Promise<OcrOnlyResult> {
     const visionUrl = new URL(VISION_ENDPOINT);
     visionUrl.searchParams.set('key', apiKey); // encoded; never interpolated/logged.
 
@@ -100,55 +93,31 @@ export class GoogleVisionProvider implements VisionProvider {
     const annotation = visionData.responses?.[0]?.fullTextAnnotation;
     const originalText = annotation?.text ?? '';
 
-    // No-text short-circuit: do NOT call Translation v2, do NOT throw (Pitfall 4).
+    // No-text short-circuit: do NOT throw (Pitfall 4).
     if (!annotation || originalText.length === 0) {
       return null;
     }
 
     const confidence = meanWordConfidence(annotation);
-    const visionDetectedLang = annotation.pages?.[0]?.property?.detectedLanguages?.[0]?.languageCode;
-
-    // --- Call 2: Translation v2 -------------------------------------------
-    const translateUrl = new URL(TRANSLATE_V2_ENDPOINT);
-    translateUrl.searchParams.set('key', apiKey);
-
-    const translateData = await this.postJson<TranslateV2Response>(
-      translateUrl,
-      {
-        q: originalText, // verbatim — newlines preserved (D-02).
-        target: languageToIso(targetLang),
-        format: 'text', // not 'html' — breaks/punct not HTML-escaped.
-        // source OMITTED → auto-detect → response carries detectedSourceLanguage.
-      },
-    );
-
-    const translation = translateData.data?.translations?.[0];
-    const translatedText = translation?.translatedText ?? '';
-    // Prefer Translation v2's detectedSourceLanguage (reflects what was actually
-    // translated); fall back to Vision's per-page detected language (Open Q1).
-    const detectedLang = translation?.detectedSourceLanguage ?? visionDetectedLang ?? '';
+    const detectedLang = annotation.pages?.[0]?.property?.detectedLanguages?.[0]?.languageCode ?? '';
 
     return {
       originalText,
-      translatedText,
       detectedLang,
       confidence,
-      // Char-count usage so the worker's recordUsage('google-vision', ...) has data.
-      usage: { inputTokens: originalText.length, outputTokens: translatedText.length },
+      // Char-count OCR usage so the worker's recordUsage('google-vision', ...) has data.
+      usage: { inputTokens: originalText.length, outputTokens: 0 },
     };
   }
 
   /**
-   * Connection test for the BYOK key (Phase 14 / VIS-02). Exercises BOTH the
-   * Vision and the Translation v2 endpoints — the same two-call path image
-   * translation uses — so an enabled-Vision-but-not-Translation key (or vice
-   * versa) still fails. Resolves on success; rejects with a classified Error
-   * (.kind / .status, key never in the message) on any failure, mirroring
-   * postJson's throw shape so the worker handler treats it like ocrTranslate.
-   *
-   * Probes are minimal: a 1×1 transparent PNG for Vision (a valid key returns 200
-   * with an empty annotation — no readable text needed) and a one-word translate
-   * for Translation v2. Both are tiny but DO bill against the key.
+   * Connection test for the BYOK vision key (VIS-02). Probes the Vision endpoint
+   * only — translation no longer runs through this key (the LLM pipeline owns it),
+   * so the key needs ONLY the Cloud Vision API enabled. Resolves on success;
+   * rejects with a classified Error (.kind / .status, key never in the message)
+   * on any failure, mirroring postJson's throw shape so the worker treats it like
+   * ocr(). The probe is a 1×1 transparent PNG — a valid key returns 200 with an
+   * empty annotation (no readable text needed) but DOES bill against the key.
    */
   async testConnection(apiKey: string): Promise<void> {
     const visionUrl = new URL(VISION_ENDPOINT);
@@ -160,14 +129,6 @@ export class GoogleVisionProvider implements VisionProvider {
           features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
         },
       ],
-    });
-
-    const translateUrl = new URL(TRANSLATE_V2_ENDPOINT);
-    translateUrl.searchParams.set('key', apiKey);
-    await this.postJson<unknown>(translateUrl, {
-      q: 'test',
-      target: 'es',
-      format: 'text',
     });
   }
 
