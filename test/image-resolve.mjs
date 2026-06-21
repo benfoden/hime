@@ -149,3 +149,72 @@ test('IMG-05: deriveImageEntry yields no-text / populated / low-confidence / err
   assert.equal(err.message, 'offline');
   assert.equal(err.id, 'd');
 });
+
+// ---------------------------------------------------------------------------
+// D-03 / Phase 14: isCjkLang — BCP-47 base-subtag CJK detection
+// ---------------------------------------------------------------------------
+test('D-03: isCjkLang returns true for CJK language codes, false for others', async () => {
+  const { isCjkLang } = await loadResolve();
+  // Base CJK codes
+  assert.equal(isCjkLang('ja'), true);
+  assert.equal(isCjkLang('zh'), true);
+  assert.equal(isCjkLang('ko'), true);
+  // BCP-47 with region subtags
+  assert.equal(isCjkLang('zh-CN'), true);
+  assert.equal(isCjkLang('zh-TW'), true);
+  // Case-insensitive
+  assert.equal(isCjkLang('JA'), true);
+  assert.equal(isCjkLang('ZH-CN'), true);
+  // Non-CJK
+  assert.equal(isCjkLang('en'), false);
+  assert.equal(isCjkLang('fr'), false);
+  assert.equal(isCjkLang(''), false);
+});
+
+// ---------------------------------------------------------------------------
+// D-03a / Phase 14: isOversizedForVision — pixel cap + JSON-request-size cap
+// ---------------------------------------------------------------------------
+test('D-03a: isOversizedForVision returns false for normal images, true for oversized', async () => {
+  const { isOversizedForVision, VISION_MAX_PIXELS, VISION_MAX_REQUEST_BYTES } = await loadResolve();
+  // Constants must be defined
+  assert.ok(typeof VISION_MAX_PIXELS === 'number' && VISION_MAX_PIXELS > 0, 'VISION_MAX_PIXELS defined');
+  assert.ok(typeof VISION_MAX_REQUEST_BYTES === 'number' && VISION_MAX_REQUEST_BYTES > 0, 'VISION_MAX_REQUEST_BYTES defined');
+  // Normal 2048-long-edge JPEG — well under caps
+  // 2048x1365 ~ 2.8M px, base64 of ~1MB → ~1.4M chars
+  assert.equal(isOversizedForVision(2048, 1365, 1_400_000), false);
+  // Pixel count over cap (~75M px)
+  assert.equal(isOversizedForVision(10000, 8000, 100_000), true);
+  // JSON request size over cap (12MB base64 string → exceeds VISION_MAX_REQUEST_BYTES)
+  assert.equal(isOversizedForVision(100, 100, 12_000_000), true);
+  // Exactly at the pixel cap boundary — borderline case (≥ cap = oversized)
+  assert.equal(isOversizedForVision(VISION_MAX_PIXELS, 1, 100), true);
+});
+
+// ---------------------------------------------------------------------------
+// D-04 / Phase 14: deriveImageEntry threads himeNum + verticalOrCjk
+// ---------------------------------------------------------------------------
+test('D-04: deriveImageEntry passes through himeNum on all entry kinds and verticalOrCjk on populated', async () => {
+  const { deriveImageEntry } = await loadResolve();
+  // himeNum on a populated entry
+  const pop = deriveImageEntry({
+    id: 'a', himeNum: 3,
+    ocr: { originalText: 'x', translatedText: 'y', detectedLang: 'ja', confidence: 0.9 },
+  });
+  assert.equal(pop.kind, 'populated');
+  assert.equal(pop.himeNum, 3);
+  // verticalOrCjk threaded onto populated
+  const cjk = deriveImageEntry({
+    id: 'b', himeNum: 1, verticalOrCjk: true,
+    ocr: { originalText: 'x', translatedText: 'y', detectedLang: 'ja', confidence: 0.9 },
+  });
+  assert.equal(cjk.kind, 'populated');
+  assert.equal(cjk.verticalOrCjk, true);
+  // himeNum on a no-text entry
+  const noTxt = deriveImageEntry({ id: 'c', himeNum: 7, ocr: { noText: true } });
+  assert.equal(noTxt.kind, 'no-text');
+  assert.equal(noTxt.himeNum, 7);
+  // himeNum on an error entry
+  const errEntry = deriveImageEntry({ id: 'd', himeNum: 2, error: { kind: 'network', message: 'offline' } });
+  assert.equal(errEntry.kind, 'error');
+  assert.equal(errEntry.himeNum, 2);
+});

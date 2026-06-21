@@ -106,13 +106,18 @@ export interface ImageResult {
 // D-04: low-confidence is a *populated* entry carrying `lowConfidence: true`
 // (amber badge), NOT a distinct kind.
 export type ImageEntry =
-  | { kind: 'loading'; id: string; thumbnailUrl?: string }
+  // Phase 14 D-04: himeNum is optional on all variants so legacy/persisted
+  // storage.session entries from a prior session still render (mirror the `target?`
+  // precedent on the populated variant — adding optional fields never breaks old data).
+  | { kind: 'loading'; id: string; thumbnailUrl?: string; himeNum?: number }
   // `target` is the resolved target-language display name/code for the
   // "Detected: X → Y" direction line (D-02/IMG-03); supplied by the panel/worker
   // and rendered verbatim via textContent. Optional so legacy entries never break.
-  | { kind: 'populated'; id: string; thumbnailUrl?: string; result: ImageResult; lowConfidence: boolean; target?: string }
-  | { kind: 'no-text'; id: string; thumbnailUrl?: string }
-  | { kind: 'error'; id: string; thumbnailUrl?: string; errorKind: import('./errors.js').ErrorKind; message: string };
+  // Phase 14 D-03: verticalOrCjk is optional (populated only) — set by the worker
+  // from the OCR detected language via isCjkLang; absent on legacy entries.
+  | { kind: 'populated'; id: string; thumbnailUrl?: string; result: ImageResult; lowConfidence: boolean; target?: string; himeNum?: number; verticalOrCjk?: boolean }
+  | { kind: 'no-text'; id: string; thumbnailUrl?: string; himeNum?: number }
+  | { kind: 'error'; id: string; thumbnailUrl?: string; errorKind: import('./errors.js').ErrorKind; message: string; himeNum?: number };
 
 // Panel-level render input. `empty` is the first-open zero-state; `list` carries
 // the accumulated entries (newest-first prepend is the renderer's job, D-01).
@@ -302,10 +307,13 @@ export interface ProgressiveActivityMessage extends Message {
 // script adds the on-image badge for the matching image (D-04). The dedupKey is
 // the content-side srcUrl key (imgs_…) the content originally sent — NOT the
 // worker's content-hash key — so content.ts can match it to the right <img>.
+// Phase 14 D-04: himeNum is included so content.ts can render `[hime N]` on the
+// on-image badge identically to the panel.
 export interface ProgressiveBadgeMessage extends Message {
   type: 'progressiveBadge';
   payload: {
     dedupKey: string;
+    himeNum: number;
   };
 }
 

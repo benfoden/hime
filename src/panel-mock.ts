@@ -127,3 +127,17 @@ export const IMAGE_RESULT_POPULATED: ImageResult = {
   confidence: 0.9125,
   usage: { inputTokens: 0, outputTokens: 0 },
 };
+
+// ----------------------------------------------------------------------------
+// Phase 14 D-03: CJK-detected populated ImageResult fixture.
+// `detectedLang: 'ja'` triggers isCjkLang → true so renderer tests (14-03) can
+// assert the CJK note path on a populated entry with verticalOrCjk: true.
+// ----------------------------------------------------------------------------
+
+export const IMAGE_RESULT_POPULATED_CJK: ImageResult = {
+  originalText: 'こんにちは世界\n二行目のテキスト',
+  translatedText: 'Hello world\nSecond line of text',
+  detectedLang: 'ja',
+  confidence: 0.9125,
+  usage: { inputTokens: 0, outputTokens: 0 },
+};

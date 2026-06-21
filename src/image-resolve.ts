@@ -11,9 +11,26 @@ import type { ErrorKind } from './errors.js';
 // low-confidence (amber badge) — never a blank. Revisited in Phase 14.
 export const LOW_CONFIDENCE_THRESHOLD = 0.6;
 
-// A2: long-edge cap in px. Downscaling so the longest edge is <= this keeps the
-// re-encoded base64 JSON payload comfortably under Vision's 10 MB / 75M-px
-// limits (VIS-03 / Pitfall 3).
+// Phase 14 D-03a: Google Cloud Vision published hard limits.
+//
+// Pixel cap: Vision DOCUMENT_TEXT_DETECTION / TEXT_DETECTION fails on images
+// exceeding ~75 000 000 pixels (Google docs: "Maximum image size: 75 MB
+// unencoded; maximum pixels: 75 million").
+// Source: https://cloud.google.com/vision/docs/supported-files
+export const VISION_MAX_PIXELS = 75_000_000;
+
+// JSON request cap: the Vision images:annotate endpoint rejects requests whose
+// total body exceeds 10 485 760 bytes (10 MiB). The image travels as a base64
+// string inside the JSON body, so the base64 CHARACTER count is the transmitted
+// size that hits this ceiling. (Base64 expands raw bytes by ~4/3; using the
+// character count directly is the conservative measure.)
+// Source: https://cloud.google.com/vision/docs/reference/rest/v1/images/annotate
+export const VISION_MAX_REQUEST_BYTES = 10_485_760;
+
+// A2: long-edge cap in px. At 2048px the longest edge, a typical photo lands at
+// ~2048×1365 (2.8M px) — well under VISION_MAX_PIXELS (75M) and the re-encoded
+// JPEG is typically ≤1 MB base64 — well under VISION_MAX_REQUEST_BYTES (10 MiB).
+// Even a 2048×2048 square (4.2M px) is far below both caps. 2048 is kept.
 export const VISION_LONG_EDGE = 2048;
 
 // Vision-supported still-image MIME types (per the Cloud Vision supported-files
@@ -61,6 +78,46 @@ export function downscaleTarget(width: number, height: number): TargetDimensions
 /** Membership in SUPPORTED_IMAGE_MIME, case-insensitive. */
 export function isSupportedMime(mime: string): boolean {
   return SUPPORTED_IMAGE_MIME.has(mime.toLowerCase());
+}
+
+// ---------------------------------------------------------------------------
+// Phase 14 D-03: CJK language detection
+// ---------------------------------------------------------------------------
+
+/** CJK base language subtags (ISO 639-1). Script subtags hans/hant are treated
+ * as CJK as well (zh-Hant / zh-Hans regional variants). */
+const CJK_SUBTAGS = new Set(['ja', 'zh', 'ko', 'hant', 'hans']);
+
+/**
+ * Returns true when `langCode` is a CJK language (Japanese, Chinese, Korean).
+ * Strips BCP-47 region/script subtags: 'zh-CN', 'zh-TW', 'ZH-CN' all → true.
+ * Case-insensitive. An empty string → false.
+ */
+export function isCjkLang(langCode: string): boolean {
+  if (!langCode) return false;
+  const subtags = langCode.toLowerCase().split('-');
+  // Base subtag (e.g. 'ja', 'zh', 'ko')
+  if (CJK_SUBTAGS.has(subtags[0])) return true;
+  // Script subtag (e.g. 'Hant' in 'zh-Hant') in case the base is unexpected
+  for (let i = 1; i < subtags.length; i++) {
+    if (CJK_SUBTAGS.has(subtags[i])) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 14 D-03a: oversized-for-Vision classification
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when the image would still exceed Google Cloud Vision's published
+ * hard limits AFTER downscale. Two conditions:
+ *   (a) pixel count (width × height) ≥ VISION_MAX_PIXELS (75M px cap), OR
+ *   (b) base64 character count of the encoded image ≥ VISION_MAX_REQUEST_BYTES
+ *       (10 MiB JSON body cap — base64 chars are the transmitted unit).
+ */
+export function isOversizedForVision(width: number, height: number, base64Length: number): boolean {
+  return width * height >= VISION_MAX_PIXELS || base64Length >= VISION_MAX_REQUEST_BYTES;
 }
 
 /** True for any unsupported MIME — the SW re-encodes those to PNG (T-12-08). */
@@ -191,6 +248,13 @@ export interface DeriveImageEntryInput {
   ocr?: ImageResult | { noText: true };
   // Present iff the job failed.
   error?: { kind: ErrorKind; message: string };
+  // Phase 14 D-04: stable dedup-keyed per-image number. Optional so callers that
+  // have not yet allocated a number (legacy code paths) still work.
+  himeNum?: number;
+  // Phase 14 D-03: CJK/vertical orientation flag — set on populated entries only
+  // when the OCR detected language is CJK (isCjkLang). Optional so legacy
+  // populated entries from a prior session still render without the flag.
+  verticalOrCjk?: boolean;
 }
 
 function isNoText(ocr: DeriveImageEntryInput['ocr']): ocr is { noText: true } {
@@ -204,16 +268,19 @@ function isNoText(ocr: DeriveImageEntryInput['ocr']): ocr is { noText: true } {
  *     missing ocr         → { kind: 'no-text' }
  *   - populated ImageResult → { kind: 'populated', result, lowConfidence }
  * Low confidence is a *populated* entry flagged, never a blank entry.
+ *
+ * Phase 14: himeNum is threaded onto every kind; verticalOrCjk is set on the
+ * populated kind only. Both are optional so legacy entries never break.
  */
 export function deriveImageEntry(input: DeriveImageEntryInput): ImageEntry {
-  const { id, thumbnailUrl, ocr, error } = input;
+  const { id, thumbnailUrl, ocr, error, himeNum, verticalOrCjk } = input;
 
   if (error) {
-    return { kind: 'error', id, thumbnailUrl, errorKind: error.kind, message: error.message };
+    return { kind: 'error', id, thumbnailUrl, errorKind: error.kind, message: error.message, himeNum };
   }
 
   if (!ocr || isNoText(ocr)) {
-    return { kind: 'no-text', id, thumbnailUrl };
+    return { kind: 'no-text', id, thumbnailUrl, himeNum };
   }
 
   return {
@@ -222,5 +289,7 @@ export function deriveImageEntry(input: DeriveImageEntryInput): ImageEntry {
     thumbnailUrl,
     result: ocr,
     lowConfidence: ocr.confidence < LOW_CONFIDENCE_THRESHOLD,
+    himeNum,
+    ...(verticalOrCjk !== undefined ? { verticalOrCjk } : {}),
   };
 }
