@@ -1436,18 +1436,24 @@ chrome.storage.local.get(['himeSettings'], (result) => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes.himeSettings) return;
   const newVal = (changes.himeSettings.newValue || {}) as Record<string, unknown>;
-  const wasOn  = !!progObserver;
-  const isOn   = newVal.progressiveEnabled === true;
-  if (isOn && !wasOn) {
-    // D-05: page-language gate — same check as the boot path.
-    // Re-read the lang each time the toggle fires (the user may navigate or the
-    // page may update, though lang changes mid-session are rare).
+  const oldVal = (changes.himeSettings.oldValue || {}) as Record<string, unknown>;
+  // BUGFIX: act ONLY on a genuine progressiveEnabled flag transition — NOT on any
+  // himeSettings write. A direction swap (Ctrl+Shift+S) mutates targetLanguage while
+  // progressiveEnabled stays true; the old `isOn && !wasOn` test then re-opened the
+  // D-05 page-language gate and kicked off a full translate-all. Comparing the flag's
+  // old vs new value makes the swap a no-op for progressive mode.
+  const wasEnabled = oldVal.progressiveEnabled === true;
+  const isEnabled  = newVal.progressiveEnabled === true;
+  if (isEnabled && !wasEnabled && !progObserver) {
+    // Genuine enable. D-05 page-language gate — same check as the boot path.
+    // Re-read the lang each time (the user may navigate, though lang changes
+    // mid-session are rare).
     const pageLang   = document.documentElement.lang ?? '';
     const targetLang = typeof newVal.targetLanguage === 'string' ? newVal.targetLanguage : '';
     if (!progShouldGateByLanguage(pageLang, targetLang)) {
       startProgressive();
     }
-  } else if (!isOn && wasOn) {
+  } else if (!isEnabled && wasEnabled && progObserver) {
     stopProgressive();
   }
 });
