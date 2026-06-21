@@ -229,6 +229,10 @@ async function saveSettings(): Promise<void> {
     swapHotkey: currentSettings.swapHotkey,
     // D-03: top-level field (NOT inside apiKeys). Persisted from the Translated Search input.
     braveApiKey: braveApiKeyInput.value,
+    // Phase 12: top-level Google Vision/Translation key (braveApiKey precedent).
+    // No options-page input yet (lands in a later Phase 12 plan); carry the
+    // persisted value through so saving settings never clears it.
+    googleApiKey: currentSettings.googleApiKey,
   };
 
   await chrome.storage.local.set({ himeSettings: newSettings });

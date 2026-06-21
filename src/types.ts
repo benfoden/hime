@@ -23,6 +23,10 @@ export interface Settings extends TranslationConfig, ProviderConfig {
   // Brave Search API key — top-level, NOT inside apiKeys (apiKeys is keyed by LLM
   // provider only, D-03). Read from storage in the worker; never passed in a message.
   braveApiKey: string;
+  // Google Cloud Vision + Translation API key (Phase 12 / v1.3). Top-level, same
+  // rationale as braveApiKey. Read from storage in the worker ONLY; never passed
+  // in a message, never logged (T-12-01).
+  googleApiKey: string;
 }
 
 export interface TranslationRequest {
@@ -47,6 +51,47 @@ export interface TranslationProvider {
   predict(text: string, apiKey: string, model: string): Promise<TranslationResult>;
 }
 
+// Phase 12 (v1.3 Image Translation) — provider-agnostic OCR+translate contract.
+// Sibling of TranslationProvider. The single VisionProvider.ocrTranslate call
+// performs OCR then translation (provider may issue 1+ network calls internally)
+// and returns a normalized ImageResult. The apiKey is read from storage in the
+// worker and passed in here; it is NEVER serialized into a message (T-12-01).
+export interface VisionProvider {
+  name: string;
+  ocrTranslate(imageBase64: string, mime: string, targetLang: string, apiKey: string): Promise<ImageResult>;
+}
+
+// Normalized OCR+translation result rendered by the side panel.
+// Modeled on SearchResult + the Phase 12 RESEARCH Code Examples shape.
+export interface ImageResult {
+  // The OCR'd source text (verbatim; rendered textContent-only by panel-render).
+  originalText: string;
+  // The translated text (target→user language). Rendered textContent-only.
+  translatedText: string;
+  // Detected source language — ISO code or display name, for the "Detected: X → Y" line.
+  detectedLang: string;
+  // Mean word confidence in 0..1. <0.60 drives the D-04 low-confidence amber badge.
+  confidence: number;
+  // Optional usage for recordUsage in the worker (units are provider-specific).
+  usage?: { inputTokens: number; outputTokens: number };
+}
+
+// One side-panel session-list entry — a discriminated union over per-entry
+// states (IMG-05 / D-04). `id` is the dedupKey; `thumbnailUrl` is optional.
+// D-04: low-confidence is a *populated* entry carrying `lowConfidence: true`
+// (amber badge), NOT a distinct kind.
+export type ImageEntry =
+  | { kind: 'loading'; id: string; thumbnailUrl?: string }
+  | { kind: 'populated'; id: string; thumbnailUrl?: string; result: ImageResult; lowConfidence: boolean }
+  | { kind: 'no-text'; id: string; thumbnailUrl?: string }
+  | { kind: 'error'; id: string; thumbnailUrl?: string; errorKind: import('./errors.js').ErrorKind; message: string };
+
+// Panel-level render input. `empty` is the first-open zero-state; `list` carries
+// the accumulated entries (newest-first prepend is the renderer's job, D-01).
+export type ImageState =
+  | { kind: 'empty' }
+  | { kind: 'list'; entries: ImageEntry[] };
+
 export interface UsageRecord {
   inputTokens: number;
   outputTokens: number;
@@ -69,7 +114,8 @@ export type MessageType =
   | 'predict'
   | 'searchTranslated'
   | 'testBraveKey'
-  | 'translateBatch';
+  | 'translateBatch'
+  | 'translateImage';
 
 export interface Message {
   type: MessageType;
@@ -134,6 +180,32 @@ export interface TestBraveKeyMessage extends Message {
   type: 'testBraveKey';
 }
 
+// Page/worker request to OCR+translate one image (right-click or progressive).
+// Clones SearchTranslatedMessage's shape. The googleApiKey is read from storage
+// in the worker — NEVER carried in this payload (T-12-01).
+export interface TranslateImageMessage extends Message {
+  type: 'translateImage';
+  payload: {
+    // The image source URL (may be cross-origin; resolved to bytes in the worker).
+    srcUrl: string;
+    // The originating tab — needed for captureVisibleTab crop fallback (IMG-04).
+    tabId: number;
+    // Content-hash / identity key used for in-flight + result dedup and as the
+    // panel entry id (D-01 prepend, Pitfall 5 durable state).
+    dedupKey: string;
+  };
+}
+
+// Worker → panel reply for a translateImage request.
+// Success → { result } (optionally noText:false); no-text → { noText: true };
+// failure → { error, kind } (the established D-02 reply contract).
+export interface TranslateImageResponse {
+  result?: ImageResult;
+  noText?: boolean;
+  error?: string;
+  kind?: import('./errors.js').ErrorKind;
+}
+
 export interface TranslateBatchMessage extends Message {
   type: 'translateBatch';
   payload: {
@@ -185,6 +257,43 @@ export const SUPPORTED_LANGUAGES: readonly string[] = [
   'Indonesian',
 ];
 
+// Display-name → ISO-639-1 code map (Phase 12, A3). hime stores languages as
+// display names ("English"); Google Translation v2 needs an ISO `target` code,
+// and the panel's "Detected: X → Y" line prefers codes. Covers every entry in
+// SUPPORTED_LANGUAGES. Chinese uses region-qualified codes (zh-CN / zh-TW) since
+// Translation v2 distinguishes Simplified vs Traditional.
+const LANGUAGE_ISO: Readonly<Record<string, string>> = {
+  English: 'en',
+  Japanese: 'ja',
+  Korean: 'ko',
+  'Chinese (Simplified)': 'zh-CN',
+  'Chinese (Traditional)': 'zh-TW',
+  Spanish: 'es',
+  French: 'fr',
+  German: 'de',
+  Italian: 'it',
+  Portuguese: 'pt',
+  Dutch: 'nl',
+  Russian: 'ru',
+  Polish: 'pl',
+  Turkish: 'tr',
+  Arabic: 'ar',
+  Hindi: 'hi',
+  Vietnamese: 'vi',
+  Thai: 'th',
+  Indonesian: 'id',
+};
+
+// Resolve a SUPPORTED_LANGUAGES display name to its ISO-639-1 code. Unknown or
+// free-text values fall back to the trimmed/lowercased input (or 'en' if blank)
+// rather than throwing — legacy/custom persisted settings never break (A3).
+export function languageToIso(displayName: string): string {
+  const code = LANGUAGE_ISO[displayName];
+  if (code) return code;
+  const fallback = displayName.trim().toLowerCase();
+  return fallback || 'en';
+}
+
 // Default settings
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'openai',
@@ -200,6 +309,7 @@ export const DEFAULT_SETTINGS: Settings = {
   yoloHotkey: 'Ctrl+Shift+Y',
   swapHotkey: 'Ctrl+Shift+S',
   braveApiKey: '',
+  googleApiKey: '',
 };
 
 // Migrate legacy single apiKey to per-provider apiKeys
