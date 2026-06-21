@@ -148,6 +148,85 @@ export function contentDedupKey(bytes: Uint8Array): string {
 }
 
 // ----------------------------------------------------------------------------
+// D-05: shouldGateByLanguage — page-language gate (conservative-by-default).
+// ----------------------------------------------------------------------------
+
+// Minimal display-name → ISO base-subtag map mirroring LANGUAGE_ISO in types.ts.
+// progressive-guard.ts must stay free of chrome.*/document/browser globals so it
+// remains node-testable.  Only the base subtag is needed here (zh-CN → zh).
+// MUST stay in sync with types.ts LANGUAGE_ISO.
+const GUARD_LANGUAGE_ISO: Readonly<Record<string, string>> = {
+  English: 'en',
+  Japanese: 'ja',
+  Korean: 'ko',
+  'Chinese (Simplified)': 'zh',
+  'Chinese (Traditional)': 'zh',
+  Spanish: 'es',
+  French: 'fr',
+  German: 'de',
+  Italian: 'it',
+  Portuguese: 'pt',
+  Dutch: 'nl',
+  Russian: 'ru',
+  Polish: 'pl',
+  Turkish: 'tr',
+  Arabic: 'ar',
+  Hindi: 'hi',
+  Vietnamese: 'vi',
+  Thai: 'th',
+  Indonesian: 'id',
+};
+
+/**
+ * Normalize a BCP-47 language tag or display name to its ISO-639-1 base subtag.
+ *
+ * Handles:
+ * - Display names ('Japanese' → 'ja', 'Chinese (Simplified)' → 'zh').
+ * - Raw BCP-47 tags ('en-US' → 'en', 'zh-TW' → 'zh').
+ * - Unknown values: trimmed/lowercased input (fallback, same as languageToIso).
+ */
+function normalizeToBase(lang: string): string {
+  const trimmed = lang.trim();
+  if (!trimmed) return '';
+  // Check display-name map first (covers 'Japanese', 'Chinese (Simplified)', etc.).
+  const mapped = GUARD_LANGUAGE_ISO[trimmed];
+  if (mapped) return mapped;
+  // Treat as BCP-47 tag: take the first subtag, lowercase.
+  return trimmed.split('-')[0].toLowerCase();
+}
+
+/**
+ * D-05 page-language gate predicate.
+ *
+ * Returns `true`  → GATE ON: do NOT start progressive auto-translation.
+ *                   Reason: the page language already matches the user's reading
+ *                   language, OR the language is missing/ambiguous (conservative
+ *                   default — spend nothing when we cannot be certain).
+ *
+ * Returns `false` → GATE OFF: allow progressive auto-translation.
+ *                   Reason: the page is confidently detected as a different
+ *                   language from the user's translation target.
+ *
+ * Call site pattern (content.ts):
+ *   const gate = progShouldGateByLanguage(document.documentElement.lang, s.targetLanguage);
+ *   if (progressiveEnabled && !gate) startProgressive();
+ *
+ * @param pageLang    Raw `<html lang>` value (DOM-read by the caller, not here).
+ *                    May be empty string when the attribute is absent.
+ * @param targetLang  Stored target language — either a display name ('Japanese')
+ *                    or an ISO code; both are normalised to a base subtag before
+ *                    comparison.
+ */
+export function shouldGateByLanguage(pageLang: string, targetLang: string): boolean {
+  const base = normalizeToBase(pageLang);
+  // Empty/whitespace page lang → conservative gate ON (missing or ambiguous).
+  if (!base) return true;
+  const target = normalizeToBase(targetLang);
+  // Gate ON when the page is already in the user's reading language.
+  return base === target;
+}
+
+// ----------------------------------------------------------------------------
 // D-01: createDwellScheduler — dwell-debounce (fire on pause, not on flyby).
 // ----------------------------------------------------------------------------
 
