@@ -236,6 +236,8 @@ async function saveSettings(): Promise<void> {
     // Top-level Google Vision/Translation key (braveApiKey precedent). Persisted
     // from the Image Translation input (VIS-02).
     googleApiKey: googleApiKeyInput.value,
+    // PROG-01: persisted from the progressive toggle (wired in Task 2 / Plan 13-02).
+    progressiveEnabled: currentSettings.progressiveEnabled,
   };
 
   await chrome.storage.local.set({ himeSettings: newSettings });

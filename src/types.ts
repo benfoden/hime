@@ -27,6 +27,10 @@ export interface Settings extends TranslationConfig, ProviderConfig {
   // rationale as braveApiKey. Read from storage in the worker ONLY; never passed
   // in a message, never logged (T-12-01).
   googleApiKey: string;
+  // Phase 13 / PROG-01 master opt-in toggle for progressive viewport mode.
+  // Default OFF (D-01) — silent auto-upload must be explicitly consented to by the user.
+  // Takes effect immediately via storage.onChanged without an extension reload (PROG-01).
+  progressiveEnabled: boolean;
 }
 
 export interface TranslationRequest {
@@ -140,7 +144,11 @@ export type MessageType =
   | 'testBraveKey'
   | 'testVisionKey'
   | 'translateBatch'
-  | 'translateImage';
+  | 'translateImage'
+  // Phase 13 progressive viewport mode messages:
+  | 'progressiveTranslate'  // content → worker: enqueue a progressive image job (gated, content-hash dedupKey)
+  | 'openImagePanel'        // content → worker: badge-click gesture asks worker to sidePanel.open + scroll to entry (D-04, PROG-06)
+  | 'progressiveActivity';  // worker → content (and toolbar): activity count update (pending+done, D-04a)
 
 export interface Message {
   type: MessageType;
@@ -239,6 +247,60 @@ export interface TranslateImageResponse {
   error?: string;
   kind?: import('./errors.js').ErrorKind;
 }
+
+// --- Phase 13: Progressive Viewport Mode message interfaces ---
+//
+// Security law (T-12-01): BYOK API keys are NEVER carried in ANY message payload.
+// The worker reads apiKeys and googleApiKey from storage.local exclusively.
+// Progressive payloads carry only geometry/identity data: {srcUrl, dedupKey, tabId?}.
+
+// content → worker: enqueue a progressive image job, gated by the IntersectionObserver
+// dwell debounce + per-page budget + concurrency cap (D-01, D-02).
+// No API keys in payload (T-12-01). `tabId` is optional; the worker falls back to
+// chrome.tabs.query if omitted (captureVisibleTab crop fallback, IMG-04 precedent).
+export interface ProgressiveTranslateMessage extends Message {
+  type: 'progressiveTranslate';
+  payload: {
+    // The image source URL (may be cross-origin; resolved to bytes in the worker).
+    srcUrl: string;
+    // Content-hash / identity key for in-flight + result dedup and as the panel entry id
+    // (PROG-03 / D-01 prepend). Same dedup map as translateImage (storage.session).
+    dedupKey: string;
+    // Originating tab — needed for captureVisibleTab crop fallback (IMG-04 precedent).
+    tabId?: number;
+  };
+}
+
+// content → worker: a user badge-click gesture asks the worker to call sidePanel.open()
+// and scroll the panel to the image's entry (D-04, PROG-06). PROG-06 forbids
+// auto-opening (IntersectionObserver is not a gesture); a human click is sanctioned.
+export interface OpenImagePanelMessage extends Message {
+  type: 'openImagePanel';
+  payload: {
+    // The originating tab — needed for sidePanel.open({ tabId }).
+    tabId: number;
+    // The panel entry to scroll to (matches the progressiveTranslate dedupKey).
+    dedupKey: string;
+  };
+}
+
+// worker → content (and toolbar): activity count update so the user can see work
+// happening without the panel being auto-opened (D-04a). Displayed on the toolbar
+// action badge or near the persistent "progressive ON" indicator (D-03a).
+export interface ProgressiveActivityMessage extends Message {
+  type: 'progressiveActivity';
+  payload: {
+    // Jobs currently in-flight (concurrency-capped at D-02 default of 2).
+    pending: number;
+    // Jobs completed (successes + no-text + errors) this page session (D-02a).
+    done: number;
+  };
+}
+
+// storage.local key for the one-time progressive consent acknowledgement (D-03).
+// Ack lives in storage.local (persisted across sessions — re-prompt would be hostile UX).
+// Per-page budget counter lives in storage.session (ephemeral, per 13-CONTEXT).
+export const STORAGE_PROGRESSIVE_ACK = 'progressiveAck' as const;
 
 export interface TranslateBatchMessage extends Message {
   type: 'translateBatch';
@@ -344,6 +406,9 @@ export const DEFAULT_SETTINGS: Settings = {
   swapHotkey: 'Ctrl+Shift+S',
   braveApiKey: '',
   googleApiKey: '',
+  // PROG-01: progressive mode is OFF by default — auto-upload is privacy-sensitive
+  // and requires an explicit first-enable consent (D-03 / PROG-05).
+  progressiveEnabled: false,
 };
 
 // Migrate legacy single apiKey to per-provider apiKeys
