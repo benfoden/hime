@@ -351,3 +351,73 @@ test('T-14-07: XSS_PROBE as message in error entry renders as inert text', () =>
   assert.equal(mount.querySelector('img[src="x"]'), null, 'XSS_PROBE must not inject <img src="x">');
   assert.ok((mount.textContent ?? '').includes('onerror=alert(1)'), 'XSS_PROBE must appear as inert text in error message');
 });
+
+// ---------------------------------------------------------------------------
+// 12. D-01 (IMG-06): Copy button renders with translation data-copy; original
+//     block is collapsed by default; original copy node carries the original text.
+// ---------------------------------------------------------------------------
+test('D-01 (IMG-06): Copy button carries translation data-copy; original block collapsed', () => {
+  const mount = freshMount();
+  renderPanel(
+    {
+      kind: 'list',
+      entries: [{ kind: 'populated', id: 'cp1', result: IMAGE_RESULT_POPULATED, lowConfidence: false }],
+    },
+    document,
+    mount,
+  );
+
+  // Copy button present with the translation text on data-copy.
+  const copyBtn = mount.querySelector('.panel-copy[data-copy-kind="translation"]');
+  assert.ok(copyBtn !== null, 'populated entry must render a Copy button (.panel-copy) with data-copy-kind=translation');
+  assert.equal(copyBtn.getAttribute('data-copy'), IMAGE_RESULT_POPULATED.translatedText, 'Copy button data-copy must equal the translated text');
+  assert.equal(copyBtn.textContent?.trim(), 'Copy', 'Copy button text must be "Copy"');
+
+  // show-original toggle present.
+  const showToggle = mount.querySelector('.panel-show-original');
+  assert.ok(showToggle !== null, 'populated entry must render a show-original toggle (.panel-show-original)');
+
+  // Original block is collapsed by default.
+  const originalBlock = mount.querySelector('.panel-original');
+  assert.ok(originalBlock !== null, 'populated entry must render a .panel-original block');
+  assert.ok(
+    originalBlock.classList.contains('is-collapsed'),
+    'original block must be collapsed by default (has .is-collapsed class)',
+  );
+
+  // Original block carries its own copy node with the original text.
+  const origCopyBtn = mount.querySelector('.panel-copy[data-copy-kind="original"]');
+  assert.ok(origCopyBtn !== null, 'original block must contain a copy node with data-copy-kind=original');
+  assert.equal(origCopyBtn.getAttribute('data-copy'), IMAGE_RESULT_POPULATED.originalText, 'original copy node data-copy must equal the original text');
+});
+
+test('D-01: No navigator reference in panel-render (stays node-testable)', () => {
+  // Verify the module was loaded and exercised without navigator errors (no throw = pass).
+  const mount = freshMount();
+  renderPanel(
+    { kind: 'list', entries: [{ kind: 'populated', id: 'nav-check', result: IMAGE_RESULT_POPULATED, lowConfidence: false }] },
+    document,
+    mount,
+  );
+  // If navigator had been called in panel-render.ts, it would throw in node (no navigator global).
+  assert.ok(mount.querySelector('.panel-copy') !== null, 'Copy button renders without requiring navigator');
+});
+
+// ---------------------------------------------------------------------------
+// 13. T-14-07 (XSS): XSS_PROBE in data-copy is inert — setAttribute does not parse HTML.
+// ---------------------------------------------------------------------------
+test('T-14-07: XSS_PROBE as translatedText — data-copy attribute inert, no element injected', () => {
+  const mount = freshMount();
+  const probeResult = { ...IMAGE_RESULT_POPULATED, translatedText: XSS_PROBE, originalText: XSS_PROBE };
+  renderPanel(
+    { kind: 'list', entries: [{ kind: 'populated', id: 'xss3', result: probeResult, lowConfidence: false }] },
+    document,
+    mount,
+  );
+  // The data-copy attribute holds the raw string verbatim (no HTML parsing).
+  const copyBtn = mount.querySelector('.panel-copy[data-copy-kind="translation"]');
+  assert.ok(copyBtn !== null, 'copy button must render even with XSS payload');
+  assert.equal(copyBtn.getAttribute('data-copy'), XSS_PROBE, 'data-copy carries the probe as raw string');
+  // No injected script/img from setAttribute.
+  assert.equal(mount.querySelectorAll('script').length, 0, 'no <script> injected via data-copy');
+});

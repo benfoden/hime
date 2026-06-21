@@ -132,9 +132,28 @@ function entryEl(doc: Document, entry: ImageEntry): HTMLElement {
       row.appendChild(
         el(doc, 'div', { text: entry.result.translatedText, className: 'panel-translation panel-text pre-wrap' }),
       );
-      row.appendChild(
-        el(doc, 'div', { text: entry.result.originalText, className: 'panel-original panel-text pre-wrap is-collapsed' }),
-      );
+
+      // D-01 (IMG-06): Copy button — carries the translated text on data-copy so the
+      // browser-only click handler (sidepanel.ts) can read it without navigator here.
+      // No click listener attached; panel-render.ts must stay node-testable.
+      const copyBtn = el(doc, 'button', { text: 'Copy', className: 'panel-copy' });
+      copyBtn.setAttribute('data-copy', entry.result.translatedText);
+      copyBtn.setAttribute('data-copy-kind', 'translation');
+      row.appendChild(copyBtn);
+
+      // D-01: "show original" toggle — reveals the collapsed original block on click
+      // (wired in sidepanel.ts). No click listener here.
+      row.appendChild(el(doc, 'button', { text: 'show original', className: 'panel-show-original' }));
+
+      // D-01: Original block — collapsed by default; revealed by the toggle.
+      // Carries its own copy node so the user can copy the source text separately.
+      const originalBlock = el(doc, 'div', { className: 'panel-original panel-text pre-wrap is-collapsed' });
+      originalBlock.textContent = entry.result.originalText;
+      const originalCopyBtn = el(doc, 'button', { text: 'Copy original', className: 'panel-copy panel-copy-original' });
+      originalCopyBtn.setAttribute('data-copy', entry.result.originalText);
+      originalCopyBtn.setAttribute('data-copy-kind', 'original');
+      originalBlock.appendChild(originalCopyBtn);
+      row.appendChild(originalBlock);
 
       // Low-confidence amber badge (D-04) — a populated entry carrying a badge.
       if (entry.lowConfidence) {
