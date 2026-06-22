@@ -1608,6 +1608,7 @@ async function pageTranslate(nodes?: Text[]): Promise<void> {
   const gate = progCreateConcurrencyGate(PAGE_CONCURRENCY_CAP);
 
   let cursor = 0;
+  let lastKind: string | undefined; // remembered from the most recent whole-chunk failure
   const inFlight = new Set<Promise<void>>();
 
   return await new Promise<void>((resolveAll, rejectAll) => {
@@ -1630,12 +1631,15 @@ async function pageTranslate(nodes?: Text[]): Promise<void> {
           })
           .catch((err) => {
             // Whole-chunk failure: every node in this chunk is a failed node (D-04).
-            // The toast/badge population path is Plan 04; here we only surface the set.
+            // pageRecordChunkFailure adds the chunk's nodes to the shared pageFailedNodes
+            // Set; the toast/badge fire after all chunks settle (below).
+            const chunkNodes: Text[] = [];
             for (const idx of chunk) {
               const node = snapshot[idx];
-              if (node) pageFailedNodes.add(node);
+              if (node) chunkNodes.push(node);
             }
-            void err;
+            pageRecordChunkFailure(chunkNodes);
+            lastKind = (err as { kind?: string })?.kind ?? lastKind;
           })
           .finally(() => {
             gate.release();
@@ -1660,6 +1664,9 @@ async function pageTranslate(nodes?: Text[]): Promise<void> {
     pageCreatePill();
     pageUpdatePill();
     pageWriteStateMirror('translated');
+    // D-04: successes are already applied (page stays usable). If any nodes failed
+    // (whole-chunk path here + Plan 03's per-key missing-key path), surface ONE toast.
+    if (pageFailedNodes.size > 0) pageShowErrorToast(lastKind);
   });
 }
 
@@ -1836,6 +1843,124 @@ async function pageDismissBanner(origin: string): Promise<void> {
   await chrome.storage.session.set({
     [STORAGE_BANNER_DISMISSED]: [...current, origin],
   });
+}
+
+// --- Partial-failure resilience (Phase 15: PAGE-04, D-04) ---
+
+const HIME_PAGE_TOAST_ID = 'hime-page-toast';
+
+/**
+ * Whole-chunk failure path: add every node in a failed chunk to the SHARED
+ * pageFailedNodes Set (declared + per-key populated by Plan 03). This task only
+ * ADDS the whole-chunk path — it never re-declares the Set nor reaches into Plan
+ * 03's apply internals.
+ */
+function pageRecordChunkFailure(nodes: Text[]): void {
+  for (const node of nodes) pageFailedNodes.add(node);
+}
+
+/**
+ * SINGLETON dismissible error toast (re-fire updates text + count, never stacks —
+ * idempotent-by-id like progCreateIndicator). Shows pageFailedNodes.size as the
+ * failed-region count, a "Retry failed sections" action (→ pageRetryFailed) and a
+ * dismiss ✕. Also sets the red error badge via badgeForKind/setBadge (D-04).
+ * textContent-only — never innerHTML.
+ */
+function pageShowErrorToast(kind?: string): void {
+  if (!document.body) return;
+  const badge = badgeForKind(kind);
+  void setBadge(badge.text, badge.color); // red error badge (content.ts:515-535)
+
+  const count = pageFailedNodes.size;
+  const message = `Translation failed for ${count} section${count === 1 ? '' : 's'}.`;
+
+  let el = document.getElementById(HIME_PAGE_TOAST_ID);
+  if (el) {
+    // Re-fire: update the existing toast's label only — do NOT append a second toast.
+    const existingLabel = el.querySelector('[data-hime-toast-label]');
+    if (existingLabel) existingLabel.textContent = message; // textContent only
+    return;
+  }
+
+  el = document.createElement('div');
+  el.id = HIME_PAGE_TOAST_ID;
+  el.style.cssText = [
+    'position: fixed',
+    'bottom: 8px',
+    'right: 8px',
+    'display: flex',
+    'align-items: center',
+    'gap: 10px',
+    'font-family: sans-serif',
+    'font-size: 13px',
+    'color: #fff',
+    'background: rgba(176,0,32,0.96)',
+    'padding: 8px 12px',
+    'border-radius: 4px',
+    'z-index: 2147483646',
+    'pointer-events: auto',
+    'max-width: 360px',
+  ].join(';');
+
+  const label = document.createElement('span');
+  label.setAttribute('data-hime-toast-label', '');
+  label.textContent = message; // textContent only — never innerHTML
+
+  const retryBtn = document.createElement('button');
+  retryBtn.textContent = 'Retry failed sections'; // textContent only
+  retryBtn.style.cssText = [
+    'font-family: sans-serif',
+    'font-size: 13px',
+    'color: #B00020',
+    'background: #fff',
+    'border: none',
+    'border-radius: 4px',
+    'padding: 4px 10px',
+    'cursor: pointer',
+    'white-space: nowrap',
+  ].join(';');
+  retryBtn.addEventListener('click', () => {
+    document.getElementById(HIME_PAGE_TOAST_ID)?.remove();
+    void pageRetryFailed();
+  });
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.textContent = '✕'; // textContent only
+  dismissBtn.setAttribute('aria-label', 'Dismiss');
+  dismissBtn.style.cssText = [
+    'font-family: sans-serif',
+    'font-size: 15px',
+    'line-height: 1',
+    'color: #fff',
+    'background: transparent',
+    'border: none',
+    'cursor: pointer',
+    'padding: 2px 6px',
+  ].join(';');
+  dismissBtn.addEventListener('click', () => {
+    document.getElementById(HIME_PAGE_TOAST_ID)?.remove();
+  });
+
+  el.appendChild(label);
+  el.appendChild(retryBtn);
+  el.appendChild(dismissBtn);
+  document.body.appendChild(el);
+}
+
+/**
+ * Re-batch ONLY the tracked failed nodes (T-15-14: never the whole page). Snapshots
+ * [...pageFailedNodes], CLEARS the shared Set, and calls pageTranslate(nodes) (Plan
+ * 03) scoped to just those nodes — pageTranslate re-keys by snapshot index over the
+ * array it receives, so fresh re-keying from 0 is correct. Nodes that succeed are
+ * applied and simply not re-added to the cleared Set; nodes that fail again
+ * repopulate pageFailedNodes (Plan 03's per-key path + this task's whole-chunk path)
+ * and re-fire the singleton toast.
+ */
+async function pageRetryFailed(): Promise<void> {
+  const nodes = [...pageFailedNodes];
+  pageFailedNodes.clear();
+  if (nodes.length === 0) return;
+  await pageTranslate(nodes);
 }
 
 // Extend the existing chrome.runtime.onMessage handler to deal with progressive
