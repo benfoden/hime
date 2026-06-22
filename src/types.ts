@@ -31,6 +31,12 @@ export interface Settings extends TranslationConfig, ProviderConfig {
   // Default OFF (D-01) — silent auto-upload must be explicitly consented to by the user.
   // Takes effect immediately via storage.onChanged without an extension reload (PROG-01).
   progressiveEnabled: boolean;
+  // Phase 16 / D-01: opt-in toggle for in-place image overlay translation.
+  // Default OFF (D-01 cost philosophy: paid Vision call is silent auto-spend).
+  // When ON, the "Translate page" action OCRs + overlays in-view images.
+  // Safe to omit in persisted settings: migrateSettings spreads DEFAULT_SETTINGS
+  // first, so a missing field defaults to false without a migration step.
+  includeImages?: boolean;
 }
 
 export interface TranslationRequest {
@@ -84,6 +90,11 @@ export interface OcrResult {
   confidence: number;
   // Optional OCR usage for recordUsage('<provider>-vision', ...) in the worker.
   usage?: { inputTokens: number; outputTokens: number };
+  // Phase 16 OVL-01: per-paragraph overlay blocks (text + 4-vertex bounding box
+  // in submitted-image pixel space). Present when collectParagraphBoxes ran.
+  // Absent for the v1.3 side-panel path (which only uses originalText).
+  // Type mirrors OverlayBlock from image-resolve.ts (avoid circular import).
+  blocks?: { text: string; box: { x: number; y: number }[] }[];
 }
 
 // Normalized OCR+translation result rendered by the side panel.
@@ -154,7 +165,9 @@ export type MessageType =
   | 'progressiveTranslate'  // content → worker: enqueue a progressive image job (gated, content-hash dedupKey)
   | 'openImagePanel'        // content → worker: badge-click gesture asks worker to sidePanel.open + scroll to entry (D-04, PROG-06)
   | 'progressiveActivity'   // worker → content (and toolbar): activity count update (pending+done, D-04a)
-  | 'progressiveBadge';     // worker → content: a progressive job landed → add the on-image badge (D-04)
+  | 'progressiveBadge'      // worker → content: a progressive job landed → add the on-image badge (D-04)
+  // Phase 16 in-place image overlay translation messages:
+  | 'translateImageBlocks';  // content → worker: OCR + translate one image, return per-paragraph blocks + submitted dims (OVL-01)
 
 export interface Message {
   type: MessageType;
@@ -322,6 +335,53 @@ export interface ProgressiveBadgeMessage extends Message {
 // Per-page budget counter lives in storage.session (ephemeral, per 13-CONTEXT).
 export const STORAGE_PROGRESSIVE_ACK = 'progressiveAck' as const;
 
+// --- Phase 16: In-place image overlay translation message interfaces ---
+//
+// Security law (T-12-01 / T-16-02): BYOK API keys are NEVER carried in ANY message
+// payload. The worker reads apiKeys and googleApiKey from storage.local exclusively.
+// translateImageBlocks payload carries only geometry/identity data: {srcUrl, dedupKey,
+// tabId?, config}. NO key field.
+
+// content → worker: OCR + translate one image and return per-paragraph overlay blocks.
+// The worker resolves image bytes, calls Vision, extracts paragraph boxes via
+// collectParagraphBoxes, batch-translates the block text, and replies with blocks +
+// the submitted image dimensions (required for mapBox coordinate mapping, OVL-04).
+// Security: apiKey is read from storage in the worker ONLY (T-12-01, T-16-02).
+export interface TranslateImageBlocksMessage extends Message {
+  type: 'translateImageBlocks';
+  payload: {
+    // The image source URL (may be cross-origin; resolved to bytes in the worker).
+    srcUrl: string;
+    // Originating tab — needed for captureVisibleTab fallback (IMG-04 precedent).
+    tabId?: number;
+    // Content-hash dedup key (djb2 of srcUrl). Prevents re-processing a seen image.
+    dedupKey: string;
+    // Translation config (source/target language, formality, model). Keys are NOT here.
+    config: TranslationConfig;
+  };
+}
+
+// Worker → content reply for a translateImageBlocks request.
+// Success → { blocks, submitted }; capture fallback → { captureFallback: true } (Pitfall 2);
+// failure → { error, kind } (T-12-01 / D-02 error contract).
+export interface TranslateImageBlocksResponse {
+  // Per-paragraph overlay blocks: position (box in submitted-px), original text,
+  // translated text. Empty array when Vision found no paragraphs.
+  blocks?: {
+    box: { x: number; y: number }[];
+    original: string;
+    translated: string;
+  }[];
+  // Submitted image dimensions (post-downscale) — mandatory for mapBox step (a).
+  // Absent when captureFallback is true (screenshot geometry can't be mapped, Pitfall 2).
+  submitted?: { w: number; h: number };
+  // True when image bytes came from captureVisibleTab (screenshot space, NOT image space).
+  // Content must skip overlay for this image — boxes can't be positioned (Pitfall 2).
+  captureFallback?: boolean;
+  error?: string;
+  kind?: import('./errors.js').ErrorKind;
+}
+
 export interface TranslateBatchMessage extends Message {
   type: 'translateBatch';
   payload: {
@@ -429,6 +489,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // PROG-01: progressive mode is OFF by default — auto-upload is privacy-sensitive
   // and requires an explicit first-enable consent (D-03 / PROG-05).
   progressiveEnabled: false,
+  // Phase 16 D-01: image overlay is OFF by default — paid Vision call requires
+  // explicit opt-in. migrateSettings spreads DEFAULT_SETTINGS, so this defaults
+  // safely to false for users upgrading from earlier versions.
+  includeImages: false,
 };
 
 // Migrate legacy single apiKey to per-provider apiKeys
