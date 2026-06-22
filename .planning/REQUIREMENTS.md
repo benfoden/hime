@@ -18,7 +18,7 @@ Promoted from backlog: 999.5 (page-text auto-translate) → PAGE+TRIG; 999.3 (in
 
 ### OVL — In-place image overlay translation
 
-- [ ] **OVL-01**: User can overlay translated text directly on images in the current page, each translated block positioned over its source-text region using Vision `DOCUMENT_TEXT_DETECTION` `boundingPoly` geometry.
+- [x] **OVL-01**: User can overlay translated text directly on images in the current page, each translated block positioned over its source-text region using Vision `DOCUMENT_TEXT_DETECTION` `boundingPoly` geometry.
 - [ ] **OVL-02**: Each overlay renders translated text on a simple semi-transparent background box meeting legibility contrast (WCAG AA 4.5:1); no inpainting of the underlying image.
 - [ ] **OVL-03**: User can swap any image overlay between the translation and the original text, in place.
 - [ ] **OVL-04**: Overlays stay correctly positioned on scroll and window resize (natural-pixel box mapped to the rendered image rect).
@@ -56,7 +56,7 @@ Promoted from backlog: 999.5 (page-text auto-translate) → PAGE+TRIG; 999.3 (in
 | TRIG-01 | Phase 15 | Complete |
 | TRIG-02 | Phase 15 | Complete |
 | TRIG-03 | Phase 15 | Complete |
-| OVL-01 | Phase 16 | pending |
+| OVL-01 | Phase 16 | Complete |
 | OVL-02 | Phase 16 | pending |
 | OVL-03 | Phase 16 | pending |
 | OVL-04 | Phase 16 | pending |

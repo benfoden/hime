@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: In-Place Page Translation — Phases 15-16 (in progress; started 2026-06-22)
 status: verifying
-last_updated: "2026-06-22T18:18:44.577Z"
+last_updated: "2026-06-22T20:47:46.711Z"
 last_activity: "2026-06-22 -- Closed out 15-02 (background translatePageBatch worker case + manual triggers): wrote 15-02-SUMMARY, marked plan complete in ROADMAP after human-verify approval"
 progress:
   total_phases: 10
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 9
+  completed_plans: 6
   percent: 10
 ---
 
@@ -79,3 +79,4 @@ None yet.
 | Phase 15 P03 | ~20min | 2 code tasks (Task 3 checkpoint deferred) | 1 file (src/content.ts) |
 | Phase 15 P04 | ~2min | 2 code tasks (Task 3 checkpoint deferred) | 1 file (src/content.ts) |
 | Phase 15 P02 | ~15min | 3 code + 1 checkpoint tasks | 3 files |
+| Phase 16-in-place-image-overlay-translation P02 | 35 min | 3 tasks | 3 files |
