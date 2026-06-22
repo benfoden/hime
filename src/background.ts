@@ -236,7 +236,7 @@ async function resolveImageBytes(
 async function downscaleAndGuard(
   base64: string,
   mime: string,
-): Promise<{ base64: string; mime: string }> {
+): Promise<{ base64: string; mime: string; width: number; height: number }> {
   const reencode = needsReencode(mime);
 
   // Decode to measure real dimensions. createImageBitmap from a Blob handles
@@ -261,8 +261,11 @@ async function downscaleAndGuard(
 
   // Fast path: already a supported MIME at an in-bounds size → pass through.
   if (!reencode && !target.scaled) {
+    // Phase 16 OVL-01: capture dims BEFORE bitmap.close() invalidates the handle.
+    const w = bitmap.width;
+    const h = bitmap.height;
     bitmap.close();
-    return { base64, mime };
+    return { base64, mime, width: w, height: h };
   }
 
   const canvas = new OffscreenCanvas(target.width, target.height);
@@ -292,7 +295,9 @@ async function downscaleAndGuard(
     throw e;
   }
 
-  return { base64: outBase64, mime: outBlob.type || outMime };
+  // Phase 16 OVL-01: return submitted (post-downscale) dims so the content
+  // script can undo the downscale ratio in mapBox() step (a) (RESEARCH Pitfall 1).
+  return { base64: outBase64, mime: outBlob.type || outMime, width: target.width, height: target.height };
 }
 
 // OCR an image via the Vision provider, then translate the extracted text
