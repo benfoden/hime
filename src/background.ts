@@ -1050,15 +1050,31 @@ function ensureContextMenus(): void {
     // Site-independent way to open the image panel from any right-click (the
     // panel can't auto-open without a gesture; this menu click is a gesture).
     //
-    // FLATTEN: contexts deliberately EXCLUDE 'image' so the two hime items never
-    // appear in the same menu at once. Chrome auto-nests an extension's items
-    // under a single parent submenu whenever 2+ are simultaneously visible; by
-    // making translate-image (image only) and open-panel (everything-but-image)
-    // mutually exclusive, each shows at the TOP LEVEL of the right-click menu.
+    // FLATTEN (3-item invariant, A6): Chrome auto-nests an extension's items
+    // under a single "hime" parent submenu whenever 2+ are simultaneously
+    // visible in the same menu. Previously the two items were made mutually
+    // exclusive (translate-image = image only; open-panel = everything-but-image)
+    // so each showed at the TOP LEVEL. Adding a THIRD item ('hime-translate-page',
+    // page-text contexts) that necessarily OVERLAPS open-panel's page contexts
+    // makes a clean top-level partition impossible — any non-image right-click now
+    // shows BOTH open-panel and translate-page. We therefore ACCEPT Chrome's
+    // submenu nesting: on a non-image right-click, "Open hime image panel" and
+    // "Translate page" appear nested under a single auto-generated "hime" submenu.
+    // translate-image (image only) still shows alone, so it stays top-level on
+    // images. This is the documented, future-proof choice (A6 option a).
     chrome.contextMenus.create({
       id: 'hime-open-panel',
       title: 'Open hime image panel',
       contexts: ['page', 'selection', 'link', 'editable', 'video', 'audio', 'frame'],
+    });
+    // PAGE/TRIG-01: right-click manual trigger for in-place page translation.
+    // Shares the non-image page contexts with open-panel (hence the submenu
+    // nesting documented in the FLATTEN comment above). Dispatch is handled in
+    // the contextMenus.onClicked listener, guarded against restricted tabs.
+    chrome.contextMenus.create({
+      id: 'hime-translate-page',
+      title: 'Translate page',
+      contexts: ['page', 'selection', 'link', 'editable', 'frame'],
     });
   });
 }
@@ -1114,5 +1130,15 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'hime-open-panel') {
     // Open the panel only (gesture-first); no image job.
     chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+    return;
+  }
+
+  if (info.menuItemId === 'hime-translate-page') {
+    // TRIG-01: dispatch the in-place page-translation request to the active tab's
+    // content script. No sidePanel.open here (image-specific gesture-first rule does
+    // NOT apply). Pitfall 4 / T-15-06: restricted or content-script-less tabs reject
+    // sendMessage — the .catch swallows it so no uncaught lastError is thrown.
+    chrome.tabs.sendMessage(tab.id, { type: 'translatePage' }).catch(() => {});
+    return;
   }
 });
