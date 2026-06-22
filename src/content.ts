@@ -1741,6 +1741,103 @@ function pageRemovePill(): void {
   document.getElementById(HIME_PAGE_PILL_ID)?.remove();
 }
 
+// --- Auto-offer banner (Phase 15: TRIG-02, TRIG-03) ---
+
+// MUST stay in sync with types.ts STORAGE_BANNER_DISMISSED. content.ts is a classic
+// script and cannot import — the per-origin dismissed-set key is mirrored verbatim.
+const STORAGE_BANNER_DISMISSED = 'himeBannerDismissed';
+
+const HIME_PAGE_BANNER_ID = 'hime-page-banner';
+
+/**
+ * Slim dismissible top banner offering page translation (TRIG-03: unobtrusive +
+ * dismissible). Mirrors progCreateIndicator conventions (fixed position,
+ * textContent-only, idempotent-by-id, high z-index) but is CLICKABLE
+ * (pointer-events:auto). Only shown by the boot gate on foreign-language,
+ * non-dismissed origins (TRIG-02). The "Translate this page" button runs the SAME
+ * path as the translatePage message (pageTranslate, Plan 03).
+ */
+function pageShowOfferBanner(origin: string): void {
+  if (document.getElementById(HIME_PAGE_BANNER_ID)) return; // idempotent
+  if (!document.body) return;
+  const el = document.createElement('div');
+  el.id = HIME_PAGE_BANNER_ID;
+  el.style.cssText = [
+    'position: fixed',
+    'top: 0',
+    'left: 0',
+    'right: 0',
+    'display: flex',
+    'align-items: center',
+    'gap: 12px',
+    'font-family: sans-serif',
+    'font-size: 13px',
+    'color: #fff',
+    'background: rgba(74,144,217,0.96)',
+    'padding: 6px 12px',
+    'z-index: 2147483646',
+    'pointer-events: auto',
+    'box-sizing: border-box',
+  ].join(';');
+
+  const label = document.createElement('span');
+  label.textContent = 'This page is in another language.'; // textContent only — never innerHTML
+  label.style.cssText = 'flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+
+  const translateBtn = document.createElement('button');
+  translateBtn.textContent = 'Translate this page'; // textContent only
+  translateBtn.style.cssText = [
+    'font-family: sans-serif',
+    'font-size: 13px',
+    'color: #4A90D9',
+    'background: #fff',
+    'border: none',
+    'border-radius: 4px',
+    'padding: 4px 12px',
+    'cursor: pointer',
+  ].join(';');
+  translateBtn.addEventListener('click', () => {
+    void pageTranslate(); // same path as the translatePage message (Plan 03)
+    pageDismissBanner(origin);
+  });
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.textContent = '✕'; // ✕ textContent only
+  dismissBtn.setAttribute('aria-label', 'Dismiss');
+  dismissBtn.style.cssText = [
+    'font-family: sans-serif',
+    'font-size: 15px',
+    'line-height: 1',
+    'color: #fff',
+    'background: transparent',
+    'border: none',
+    'cursor: pointer',
+    'padding: 2px 6px',
+  ].join(';');
+  dismissBtn.addEventListener('click', () => pageDismissBanner(origin));
+
+  el.appendChild(label);
+  el.appendChild(translateBtn);
+  el.appendChild(dismissBtn);
+  document.body.appendChild(el);
+}
+
+/**
+ * Remove the banner element and append the origin to the chrome.storage.session
+ * dismissed-set so the banner stays gone for this origin for the rest of the
+ * browser session (D-02 stickiness, A7 origin granularity). The manual trigger
+ * (popup / right-click / pill) stays available after dismissal.
+ */
+async function pageDismissBanner(origin: string): Promise<void> {
+  document.getElementById(HIME_PAGE_BANNER_ID)?.remove();
+  const stored = await chrome.storage.session.get(STORAGE_BANNER_DISMISSED);
+  const current = (stored[STORAGE_BANNER_DISMISSED] as string[] | undefined) ?? [];
+  if (current.includes(origin)) return; // dedup
+  await chrome.storage.session.set({
+    [STORAGE_BANNER_DISMISSED]: [...current, origin],
+  });
+}
+
 // Extend the existing chrome.runtime.onMessage handler to deal with progressive
 // messages sent FROM the worker to this content script.
 // (Worker-to-content messages for badge placement and activity counts.)
@@ -1799,6 +1896,24 @@ chrome.storage.local.get(['himeSettings'], (result) => {
       startProgressive();
     }
   }
+});
+
+// --- Boot: auto-offer page-translation banner (Phase 15: TRIG-02, TRIG-03) ---
+// Mirrors the progressive boot gate above: read himeSettings + document.documentElement.lang,
+// reuse the ALREADY-MIRRORED progShouldGateByLanguage so same-language/unknown pages show
+// NO banner and incur NO spend (TRIG-02 cost guarantee). Then check the per-origin
+// chrome.storage.session dismissed-set (D-02 stickiness) before offering the banner.
+chrome.storage.local.get(['himeSettings'], async (result) => {
+  const s = (result.himeSettings || {}) as Record<string, unknown>;
+  const pageLang = document.documentElement.lang ?? '';
+  const target = typeof s.targetLanguage === 'string' ? s.targetLanguage : '';
+  // Gate BEFORE any banner creation: same-language/unknown → no banner, no spend.
+  if (progShouldGateByLanguage(pageLang, target)) return;
+  const origin = location.origin;
+  const stored = await chrome.storage.session.get(STORAGE_BANNER_DISMISSED);
+  const dismissed = stored[STORAGE_BANNER_DISMISSED] as string[] | undefined;
+  if (dismissed?.includes(origin)) return; // dismissed this session (A7 origin granularity)
+  pageShowOfferBanner(origin);
 });
 
 // Live toggle via storage.onChanged (PROG-01 — no extension reload needed).
