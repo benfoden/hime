@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: In-Place Page Translation — Phases 15-16 (in progress; started 2026-06-22)
 status: verifying
-last_updated: "2026-06-22T20:47:46.711Z"
+last_updated: "2026-06-22T20:50:56.673Z"
 last_activity: "2026-06-22 -- Closed out 15-02 (background translatePageBatch worker case + manual triggers): wrote 15-02-SUMMARY, marked plan complete in ROADMAP after human-verify approval"
 progress:
   total_phases: 10
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
   percent: 10
 ---
 
@@ -55,6 +55,7 @@ Carried forward (project invariants):
 - 15-04: auto-offer banner is a SEPARATE document_end boot block reusing progShouldGateByLanguage — gates BEFORE any banner creation so same-language/unknown pages incur no spend (TRIG-02); independent of progressiveEnabled (manual page-text offer regardless of progressive-image mode)
 - 15-04: per-origin banner dismissal stored in chrome.storage.session (sticky for the session, A7 origin granularity); STORAGE_BANNER_DISMISSED mirrored as a local const (classic-script no-imports law)
 - 15-04: partial-failure shows ONE singleton-by-id toast + red badge AFTER the batch barrier settles (not per-chunk); retry re-batches ONLY [...pageFailedNodes] (consumed from Plan 03's shared Set, cleared on retry) — never the whole page (T-15-14)
+- [Phase ?]: merge-write-preserving-other-fields: popup change handler reads-then-spreads himeSettings (T-16-07)
 
 ### Pending Todos
 
@@ -80,3 +81,4 @@ None yet.
 | Phase 15 P04 | ~2min | 2 code tasks (Task 3 checkpoint deferred) | 1 file (src/content.ts) |
 | Phase 15 P02 | ~15min | 3 code + 1 checkpoint tasks | 3 files |
 | Phase 16-in-place-image-overlay-translation P02 | 35 min | 3 tasks | 3 files |
+| Phase 16 P03 | 8min | 1 tasks | 2 files |
