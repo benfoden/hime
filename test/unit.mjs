@@ -33,6 +33,20 @@ test('classifyError: 403 → auth kind (gemini)', () => {
   assert.equal(result.message, 'Invalid or unauthorized API key — check it in options');
 });
 
+test('classifyError: 403 with bodyMessage → auth kind appends the provider reason', () => {
+  const result = classifyError('google', null, {
+    status: 403,
+    bodyMessage: 'Cloud Vision API has not been used in project 123 before or it is disabled',
+  });
+  assert.equal(result.kind, 'auth');
+  assert.ok(result.message.startsWith('Invalid or unauthorized API key — check it in options'));
+  assert.ok(
+    result.message.includes('Cloud Vision API has not been used'),
+    `expected the Google reason to be appended; got: ${result.message}`,
+  );
+  assert.equal(result.status, 403);
+});
+
 test('classifyError: 402 → credits kind', () => {
   const result = classifyError('openrouter', null, { status: 402 });
   assert.equal(result.kind, 'credits');

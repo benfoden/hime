@@ -23,6 +23,14 @@ export interface Settings extends TranslationConfig, ProviderConfig {
   // Brave Search API key — top-level, NOT inside apiKeys (apiKeys is keyed by LLM
   // provider only, D-03). Read from storage in the worker; never passed in a message.
   braveApiKey: string;
+  // Google Cloud Vision + Translation API key (Phase 12 / v1.3). Top-level, same
+  // rationale as braveApiKey. Read from storage in the worker ONLY; never passed
+  // in a message, never logged (T-12-01).
+  googleApiKey: string;
+  // Phase 13 / PROG-01 master opt-in toggle for progressive viewport mode.
+  // Default OFF (D-01) — silent auto-upload must be explicitly consented to by the user.
+  // Takes effect immediately via storage.onChanged without an extension reload (PROG-01).
+  progressiveEnabled: boolean;
 }
 
 export interface TranslationRequest {
@@ -47,6 +55,76 @@ export interface TranslationProvider {
   predict(text: string, apiKey: string, model: string): Promise<TranslationResult>;
 }
 
+// Phase 12 (v1.3 Image Translation) — provider-agnostic OCR contract.
+// Sibling of TranslationProvider. VisionProvider does OCR ONLY: it extracts the
+// source text from an image and returns an OcrResult. Translation is NOT the
+// vision provider's job — the worker routes the OCR'd text through the main LLM
+// TranslationProvider pipeline (settings.provider/model/apiKeys), so image
+// translations use the same model + key the user already configured. The vision
+// apiKey is read from storage in the worker and passed in here; it is NEVER
+// serialized into a message (T-12-01).
+//
+// A text-free image short-circuits to the distinct no-text sentinel `null`
+// WITHOUT throwing (Pitfall 4 / IMG-05): the worker maps a null return to
+// TranslateImageResponse `{ noText: true }`.
+export interface VisionProvider {
+  name: string;
+  ocr(imageBase64: string, mime: string, apiKey: string): Promise<OcrResult | null>;
+}
+
+// OCR-only output of a VisionProvider — the source text plus detection metadata.
+// The worker translates `originalText` via the LLM pipeline and assembles the
+// final ImageResult (which adds translatedText).
+export interface OcrResult {
+  // The OCR'd source text (verbatim).
+  originalText: string;
+  // Detected source language — ISO code, for the "Detected: X → Y" line.
+  detectedLang: string;
+  // Mean word confidence in 0..1. <0.60 drives the D-04 low-confidence amber badge.
+  confidence: number;
+  // Optional OCR usage for recordUsage('<provider>-vision', ...) in the worker.
+  usage?: { inputTokens: number; outputTokens: number };
+}
+
+// Normalized OCR+translation result rendered by the side panel.
+// Modeled on SearchResult + the Phase 12 RESEARCH Code Examples shape.
+export interface ImageResult {
+  // The OCR'd source text (verbatim; rendered textContent-only by panel-render).
+  originalText: string;
+  // The translated text (target→user language). Rendered textContent-only.
+  translatedText: string;
+  // Detected source language — ISO code or display name, for the "Detected: X → Y" line.
+  detectedLang: string;
+  // Mean word confidence in 0..1. <0.60 drives the D-04 low-confidence amber badge.
+  confidence: number;
+  // Optional usage for recordUsage in the worker (units are provider-specific).
+  usage?: { inputTokens: number; outputTokens: number };
+}
+
+// One side-panel session-list entry — a discriminated union over per-entry
+// states (IMG-05 / D-04). `id` is the dedupKey; `thumbnailUrl` is optional.
+// D-04: low-confidence is a *populated* entry carrying `lowConfidence: true`
+// (amber badge), NOT a distinct kind.
+export type ImageEntry =
+  // Phase 14 D-04: himeNum is optional on all variants so legacy/persisted
+  // storage.session entries from a prior session still render (mirror the `target?`
+  // precedent on the populated variant — adding optional fields never breaks old data).
+  | { kind: 'loading'; id: string; thumbnailUrl?: string; himeNum?: number }
+  // `target` is the resolved target-language display name/code for the
+  // "Detected: X → Y" direction line (D-02/IMG-03); supplied by the panel/worker
+  // and rendered verbatim via textContent. Optional so legacy entries never break.
+  // Phase 14 D-03: verticalOrCjk is optional (populated only) — set by the worker
+  // from the OCR detected language via isCjkLang; absent on legacy entries.
+  | { kind: 'populated'; id: string; thumbnailUrl?: string; result: ImageResult; lowConfidence: boolean; target?: string; himeNum?: number; verticalOrCjk?: boolean }
+  | { kind: 'no-text'; id: string; thumbnailUrl?: string; himeNum?: number }
+  | { kind: 'error'; id: string; thumbnailUrl?: string; errorKind: import('./errors.js').ErrorKind; message: string; himeNum?: number };
+
+// Panel-level render input. `empty` is the first-open zero-state; `list` carries
+// the accumulated entries (newest-first prepend is the renderer's job, D-01).
+export type ImageState =
+  | { kind: 'empty' }
+  | { kind: 'list'; entries: ImageEntry[] };
+
 export interface UsageRecord {
   inputTokens: number;
   outputTokens: number;
@@ -69,7 +147,14 @@ export type MessageType =
   | 'predict'
   | 'searchTranslated'
   | 'testBraveKey'
-  | 'translateBatch';
+  | 'testVisionKey'
+  | 'translateBatch'
+  | 'translateImage'
+  // Phase 13 progressive viewport mode messages:
+  | 'progressiveTranslate'  // content → worker: enqueue a progressive image job (gated, content-hash dedupKey)
+  | 'openImagePanel'        // content → worker: badge-click gesture asks worker to sidePanel.open + scroll to entry (D-04, PROG-06)
+  | 'progressiveActivity'   // worker → content (and toolbar): activity count update (pending+done, D-04a)
+  | 'progressiveBadge';     // worker → content: a progressive job landed → add the on-image badge (D-04)
 
 export interface Message {
   type: MessageType;
@@ -134,6 +219,109 @@ export interface TestBraveKeyMessage extends Message {
   type: 'testBraveKey';
 }
 
+// Probe the stored Google Cloud Vision/Translation key. NO payload — the key is
+// read from storage in the worker (T-12-01 precedent: testBraveKey), never passed
+// in the message, never logged. The worker exercises BOTH the Vision and the
+// Translation v2 endpoints so the test validates the same two-call path image
+// translation uses.
+export interface TestVisionKeyMessage extends Message {
+  type: 'testVisionKey';
+}
+
+// Page/worker request to OCR+translate one image (right-click or progressive).
+// Clones SearchTranslatedMessage's shape. The googleApiKey is read from storage
+// in the worker — NEVER carried in this payload (T-12-01).
+export interface TranslateImageMessage extends Message {
+  type: 'translateImage';
+  payload: {
+    // The image source URL (may be cross-origin; resolved to bytes in the worker).
+    srcUrl: string;
+    // The originating tab — needed for captureVisibleTab crop fallback (IMG-04).
+    tabId: number;
+    // Content-hash / identity key used for in-flight + result dedup and as the
+    // panel entry id (D-01 prepend, Pitfall 5 durable state).
+    dedupKey: string;
+  };
+}
+
+// Worker → panel reply for a translateImage request.
+// Success → { result } (optionally noText:false); no-text → { noText: true };
+// failure → { error, kind } (the established D-02 reply contract).
+export interface TranslateImageResponse {
+  result?: ImageResult;
+  noText?: boolean;
+  error?: string;
+  kind?: import('./errors.js').ErrorKind;
+}
+
+// --- Phase 13: Progressive Viewport Mode message interfaces ---
+//
+// Security law (T-12-01): BYOK API keys are NEVER carried in ANY message payload.
+// The worker reads apiKeys and googleApiKey from storage.local exclusively.
+// Progressive payloads carry only geometry/identity data: {srcUrl, dedupKey, tabId?}.
+
+// content → worker: enqueue a progressive image job, gated by the IntersectionObserver
+// dwell debounce + per-page budget + concurrency cap (D-01, D-02).
+// No API keys in payload (T-12-01). `tabId` is optional; the worker falls back to
+// chrome.tabs.query if omitted (captureVisibleTab crop fallback, IMG-04 precedent).
+export interface ProgressiveTranslateMessage extends Message {
+  type: 'progressiveTranslate';
+  payload: {
+    // The image source URL (may be cross-origin; resolved to bytes in the worker).
+    srcUrl: string;
+    // Content-hash / identity key for in-flight + result dedup and as the panel entry id
+    // (PROG-03 / D-01 prepend). Same dedup map as translateImage (storage.session).
+    dedupKey: string;
+    // Originating tab — needed for captureVisibleTab crop fallback (IMG-04 precedent).
+    tabId?: number;
+  };
+}
+
+// content → worker: a user badge-click gesture asks the worker to call sidePanel.open()
+// and scroll the panel to the image's entry (D-04, PROG-06). PROG-06 forbids
+// auto-opening (IntersectionObserver is not a gesture); a human click is sanctioned.
+export interface OpenImagePanelMessage extends Message {
+  type: 'openImagePanel';
+  payload: {
+    // The originating tab — needed for sidePanel.open({ tabId }).
+    tabId: number;
+    // The panel entry to scroll to (matches the progressiveTranslate dedupKey).
+    dedupKey: string;
+  };
+}
+
+// worker → content (and toolbar): activity count update so the user can see work
+// happening without the panel being auto-opened (D-04a). Displayed on the toolbar
+// action badge or near the persistent "progressive ON" indicator (D-03a).
+export interface ProgressiveActivityMessage extends Message {
+  type: 'progressiveActivity';
+  payload: {
+    // Jobs currently in-flight (concurrency-capped at D-02 default of 2).
+    pending: number;
+    // Jobs completed (successes + no-text + errors) this page session (D-02a).
+    done: number;
+  };
+}
+
+// worker → content: a progressive job produced a usable result → the content
+// script adds the on-image badge for the matching image (D-04). The dedupKey is
+// the content-side srcUrl key (imgs_…) the content originally sent — NOT the
+// worker's content-hash key — so content.ts can match it to the right <img>.
+// Phase 14 D-04: himeNum is included so content.ts can render `[hime N]` on the
+// on-image badge identically to the panel.
+export interface ProgressiveBadgeMessage extends Message {
+  type: 'progressiveBadge';
+  payload: {
+    dedupKey: string;
+    himeNum: number;
+  };
+}
+
+// storage.local key for the one-time progressive consent acknowledgement (D-03).
+// Ack lives in storage.local (persisted across sessions — re-prompt would be hostile UX).
+// Per-page budget counter lives in storage.session (ephemeral, per 13-CONTEXT).
+export const STORAGE_PROGRESSIVE_ACK = 'progressiveAck' as const;
+
 export interface TranslateBatchMessage extends Message {
   type: 'translateBatch';
   payload: {
@@ -185,6 +373,43 @@ export const SUPPORTED_LANGUAGES: readonly string[] = [
   'Indonesian',
 ];
 
+// Display-name → ISO-639-1 code map (Phase 12, A3). hime stores languages as
+// display names ("English"); Google Translation v2 needs an ISO `target` code,
+// and the panel's "Detected: X → Y" line prefers codes. Covers every entry in
+// SUPPORTED_LANGUAGES. Chinese uses region-qualified codes (zh-CN / zh-TW) since
+// Translation v2 distinguishes Simplified vs Traditional.
+const LANGUAGE_ISO: Readonly<Record<string, string>> = {
+  English: 'en',
+  Japanese: 'ja',
+  Korean: 'ko',
+  'Chinese (Simplified)': 'zh-CN',
+  'Chinese (Traditional)': 'zh-TW',
+  Spanish: 'es',
+  French: 'fr',
+  German: 'de',
+  Italian: 'it',
+  Portuguese: 'pt',
+  Dutch: 'nl',
+  Russian: 'ru',
+  Polish: 'pl',
+  Turkish: 'tr',
+  Arabic: 'ar',
+  Hindi: 'hi',
+  Vietnamese: 'vi',
+  Thai: 'th',
+  Indonesian: 'id',
+};
+
+// Resolve a SUPPORTED_LANGUAGES display name to its ISO-639-1 code. Unknown or
+// free-text values fall back to the trimmed/lowercased input (or 'en' if blank)
+// rather than throwing — legacy/custom persisted settings never break (A3).
+export function languageToIso(displayName: string): string {
+  const code = LANGUAGE_ISO[displayName];
+  if (code) return code;
+  const fallback = displayName.trim().toLowerCase();
+  return fallback || 'en';
+}
+
 // Default settings
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'openai',
@@ -200,6 +425,10 @@ export const DEFAULT_SETTINGS: Settings = {
   yoloHotkey: 'Ctrl+Shift+Y',
   swapHotkey: 'Ctrl+Shift+S',
   braveApiKey: '',
+  googleApiKey: '',
+  // PROG-01: progressive mode is OFF by default — auto-upload is privacy-sensitive
+  // and requires an explicit first-enable consent (D-03 / PROG-05).
+  progressiveEnabled: false,
 };
 
 // Migrate legacy single apiKey to per-provider apiKeys

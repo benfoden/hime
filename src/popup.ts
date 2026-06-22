@@ -6,6 +6,7 @@ let targetLangSpan: HTMLSpanElement;
 let swapBtn: HTMLButtonElement;
 let openOptionsBtn: HTMLButtonElement;
 let openSearchBtn: HTMLButtonElement;
+let openImagePanelBtn: HTMLButtonElement;
 
 // Load settings and update UI
 async function loadSettings(): Promise<void> {
@@ -40,6 +41,21 @@ function openSearch(): void {
   chrome.tabs.create({ url: chrome.runtime.getURL('search.html') });
 }
 
+// Open the image side panel for the active tab. The popup button click is a user
+// gesture, so chrome.sidePanel.open is allowed here — a site-independent way to
+// open the panel even when a page suppresses its own right-click menu.
+async function openImagePanel(): Promise<void> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id != null) {
+      await chrome.sidePanel.open({ tabId: tab.id });
+      window.close();
+    }
+  } catch (error) {
+    console.error('Failed to open image panel:', error);
+  }
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   sourceLangSpan = document.getElementById('sourceLang') as HTMLSpanElement;
@@ -47,10 +63,12 @@ document.addEventListener('DOMContentLoaded', () => {
   swapBtn = document.getElementById('swapBtn') as HTMLButtonElement;
   openOptionsBtn = document.getElementById('openOptions') as HTMLButtonElement;
   openSearchBtn = document.getElementById('openSearch') as HTMLButtonElement;
+  openImagePanelBtn = document.getElementById('openImagePanel') as HTMLButtonElement;
 
   swapBtn.addEventListener('click', swapDirection);
   openOptionsBtn.addEventListener('click', openOptions);
   openSearchBtn.addEventListener('click', openSearch);
+  openImagePanelBtn.addEventListener('click', openImagePanel);
   
   loadSettings();
 });
