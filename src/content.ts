@@ -1657,7 +1657,88 @@ async function pageTranslate(nodes?: Text[]): Promise<void> {
     }
   }).then(() => {
     pageState = 'translated';
+    pageCreatePill();
+    pageUpdatePill();
+    pageWriteStateMirror('translated');
   });
+}
+
+// --- Floating toggle pill + state mirror (Phase 15: PAGE-03, D-01) ---
+
+const HIME_PAGE_PILL_ID = 'hime-page-pill';
+
+/**
+ * Flip every translated node between original and translation (PAGE-03 toggle, no
+ * reload). Iterates the STRONG pageTranslatedNodes array — the WeakMap is not
+ * enumerable (Pitfall 6) — and writes nodeValue only (never innerHTML). Updates the
+ * pill label and mirrors the new state into chrome.storage.session for the popup.
+ */
+function pageApplyState(state: 'original' | 'translated'): void {
+  for (const node of pageTranslatedNodes) {
+    const rec = pageStore.get(node);
+    if (!rec || !document.contains(node)) continue;
+    node.nodeValue = state === 'translated' ? rec.translated : rec.original; // nodeValue only
+  }
+  pageState = state;
+  pageUpdatePill();
+  pageWriteStateMirror(state);
+}
+
+/**
+ * Mirror the page state into chrome.storage.session so the popup can label its
+ * button (Plan 02 Task 3). The mirror is a single GLOBAL record carrying the origin
+ * so the popup can origin-check before relabeling.
+ */
+function pageWriteStateMirror(state: 'original' | 'translated'): void {
+  void chrome.storage.session.set({
+    [PAGE_STORAGE_PAGE_STATE]: {
+      origin: location.origin,
+      state: state === 'translated' ? 'translated' : 'original-shown',
+    },
+  });
+}
+
+/**
+ * Floating corner pill that flips original ↔ translation in one tap (D-01).
+ * Mirrors progCreateIndicator conventions (fixed position, textContent-only,
+ * idempotent-by-id, high z-index) but is CLICKABLE (cursor:pointer, pointer-events:auto).
+ */
+function pageCreatePill(): void {
+  if (document.getElementById(HIME_PAGE_PILL_ID)) return; // idempotent
+  const el = document.createElement('div');
+  el.id = HIME_PAGE_PILL_ID;
+  el.style.cssText = [
+    'position: fixed',
+    'bottom: 8px',
+    'left: 8px',
+    'font-family: sans-serif',
+    'font-size: 12px',
+    'color: #fff',
+    'background: rgba(74,144,217,0.92)',
+    'padding: 4px 10px',
+    'border-radius: 4px',
+    'z-index: 2147483646',
+    'cursor: pointer',
+    'pointer-events: auto',
+    'user-select: none',
+    'white-space: nowrap',
+  ].join(';');
+  el.textContent = 'Show original'; // textContent only — never innerHTML
+  el.addEventListener('click', () => {
+    pageApplyState(pageState === 'translated' ? 'original' : 'translated');
+  });
+  document.body.appendChild(el);
+}
+
+function pageUpdatePill(): void {
+  const el = document.getElementById(HIME_PAGE_PILL_ID);
+  if (el) {
+    el.textContent = pageState === 'translated' ? 'Show original' : 'Show translation'; // D-01 label
+  }
+}
+
+function pageRemovePill(): void {
+  document.getElementById(HIME_PAGE_PILL_ID)?.remove();
 }
 
 // Extend the existing chrome.runtime.onMessage handler to deal with progressive
@@ -1668,6 +1749,12 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
     void pageTranslate();
     sendResponse({ success: true });
     return false; // synchronous ack — translation runs async in the background
+  }
+
+  if (message.type === 'togglePage') {
+    pageApplyState(pageState === 'translated' ? 'original' : 'translated');
+    sendResponse({ success: true });
+    return false;
   }
 
   if (message.type === 'progressiveActivity') {
