@@ -155,7 +155,14 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
   4. Overlays stay correctly aligned to their source-text regions as the user scrolls and resizes the window, mapping each natural-pixel box to the image's current rendered rect.
   5. Overlay text auto-fits its box via shrink-to-fit using `CanvasRenderingContext2D.measureText`, and a translation too long for its region is handled gracefully (shrunk/clamped) rather than overflowing or breaking the layout.
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+- [ ] 16-01-PLAN.md — pure seams + contracts: overlay-geometry.ts (mapBox), overlay-fit.ts (fitText), collectParagraphBoxes + OverlayBlock/translateImageBlocks/includeImages types + RED node tests (OVL-01/04/05) [Wave 1]
+- [ ] 16-02-PLAN.md — worker + provider: ocr() surfaces paragraph blocks, downscaleAndGuard returns submitted dims, translateImageBlocks keyed-JSON batch case + capture-fallback flag (OVL-01) [Wave 2]
+- [ ] 16-03-PLAN.md — popup "Include images" opt-in checkbox (default OFF) persisted to himeSettings, folded into Translate page (OVL-01 / D-01) [Wave 2]
+- [ ] 16-04-PLAN.md — content.ts overlay layer: mirrored mapBox/fitText, gated collect+dispatch, render/anchor (ResizeObserver) black/white boxes, per-image + global toggle (OVL-01..05 / D-01/02/03) [Wave 3]
+- [ ] 16-05-PLAN.md — build + full suite green + batched live load-unpacked human-verify of all 5 OVL behaviors (OVL-01..05) [Wave 4]
+
 **UI hint**: yes
 
 ## Progress
@@ -178,7 +185,7 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 | 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 4/4 | Complete | 2026-06-21 |
 | 14. UX / Quality Hardening + Vision Settings | v1.3 | 5/5 | Complete   | 2026-06-21 |
 | 15. In-Place Page-Text Translation + Triggers | v1.4 | 4/4 | Complete   | 2026-06-22 |
-| 16. In-Place Image Overlay Translation | v1.4 | 0/0 | Not started | - |
+| 16. In-Place Image Overlay Translation | v1.4 | 0/5 | Planned | - |
 
 ## Backlog
 
