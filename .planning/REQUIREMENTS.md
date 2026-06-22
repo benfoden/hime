@@ -43,8 +43,20 @@ Promoted from backlog: 999.5 (page-text auto-translate) → PAGE+TRIG; 999.3 (in
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PAGE-01..05 | TBD (roadmap) | pending |
-| OVL-01..05 | TBD (roadmap) | pending |
-| TRIG-01..03 | TBD (roadmap) | pending |
+| PAGE-01 | Phase 15 | pending |
+| PAGE-02 | Phase 15 | pending |
+| PAGE-03 | Phase 15 | pending |
+| PAGE-04 | Phase 15 | pending |
+| PAGE-05 | Phase 15 | pending |
+| TRIG-01 | Phase 15 | pending |
+| TRIG-02 | Phase 15 | pending |
+| TRIG-03 | Phase 15 | pending |
+| OVL-01 | Phase 16 | pending |
+| OVL-02 | Phase 16 | pending |
+| OVL-03 | Phase 16 | pending |
+| OVL-04 | Phase 16 | pending |
+| OVL-05 | Phase 16 | pending |
 
-*Filled in by the roadmapper.*
+**Coverage:** 13/13 v1.4 requirements mapped — no orphans, no duplicates.
+- Phase 15 (8): PAGE-01..05, TRIG-01..03
+- Phase 16 (5): OVL-01..05

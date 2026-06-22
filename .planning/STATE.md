@@ -3,11 +3,11 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: In-Place Page Translation
 status: planning
-stopped_at: Defining requirements
-last_updated: "2026-06-21T00:00:00.000Z"
-last_activity: 2026-06-21 — Milestone v1.4 started
+stopped_at: Roadmap complete (phases 15-16)
+last_updated: "2026-06-22T00:00:00.000Z"
+last_activity: 2026-06-22 — Roadmap drafted (phases 15-16; 13/13 reqs mapped)
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -22,14 +22,14 @@ See: .planning/PROJECT.md (updated 2026-06-21)
 
 **Core value:** Type English, get natural Japanese inline — without breaking your keyboard flow.
 **Last shipped:** v1.3 Image Translation (phases 12-14, 2026-06-21)
-**Current focus:** v1.4 In-Place Page Translation (phases 15+) — defining requirements
+**Current focus:** v1.4 In-Place Page Translation (phases 15-16) — roadmap complete; ready to plan Phase 15
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 15 (In-Place Page-Text Translation + Triggers) — not started
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-21 — Milestone v1.4 started
+Status: Roadmap complete (2 phases, 13/13 reqs mapped); ready to plan Phase 15
+Last activity: 2026-06-22 — Roadmap drafted (phases 15-16)
 
 ## Accumulated Context
 
@@ -62,4 +62,5 @@ None yet.
 
 ## Operator Next Steps
 
-- Defining requirements → roadmap (in progress via /gsd-new-milestone).
+- Roadmap complete: Phase 15 (PAGE+TRIG, 8 reqs) → Phase 16 (OVL, 5 reqs).
+- Next: `/gsd-plan-phase 15` to decompose the in-place page-text + trigger slice.
