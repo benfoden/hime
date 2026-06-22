@@ -8,20 +8,25 @@ A Chrome extension that lets you type in English and get inline Japanese (or any
 
 Type English, get natural Japanese inline — without breaking your keyboard flow.
 
-## Current Milestone: v1.3 Image Translation
+## Current Milestone: v1.4 In-Place Page Translation
 
-**Goal:** Let the user read text inside images on any page — OCR'd and translated (target→user language) via a cloud vision API (BYOK) — surfaced as readable text in a side panel. Phases 12+.
+**Goal:** Translate the current page in place — swap the page's visible text with its translation (layout-preserving) and overlay translated text directly on images — so a foreign-language page becomes readable without leaving it. Phases 15+.
 
 **Target features:**
-- Right-click context menu on any `<img>`: "Translate image with hime" (manual, one-off; consumes no hotkey slot)
-- Opt-in **progressive** mode (default OFF): auto-translate images as they enter/approach the viewport (IntersectionObserver)
-- Translated output rendered in a **side panel / popup** — original + translation as text; no in-image overlay/inpaint this milestone
-- Cloud vision provider via BYOK; OCR+translate pipeline routed through the background service worker (no key on page)
+- **In-place page-text translation** (replace-in-place): walk the page's text nodes, translate via the existing BYOK LLM pipeline (batched), swap each in place preserving layout; skip script/style/code/editable nodes. A toggle restores the original. *(from backlog 999.5)*
+- **In-place image overlay translation**: reuse Vision `DOCUMENT_TEXT_DETECTION` per-block `boundingPoly` boxes (currently discarded) to render absolutely-positioned DOM overlays on top of each `<img>`, with a simple semi-transparent background box and a swap toggle (original ↔ translation). *(from backlog 999.3)*
+- **Trigger:** manual (toolbar/right-click "Translate page") + auto-offer when the page source language (`<html lang>`) differs from target — reusing the D-05 `shouldGateByLanguage` gate from v1.3 progressive mode (no spend on same-language pages).
 
 **Key context:**
-- Provider choice (Claude Vision single-call vs Google Vision + Translation v3) decided at roadmap review; side-panel output means bbox geometry is not strictly required, which favors single-call but is left open
-- Curated research sources at `.planning/research/SOURCES.md` (cloud-API path; built-in-AI / OpenAI-Azure / manga-overlay craft scoped out)
-- After v1.3: v1.4 contextual-hints. v1.1 inline-predictions stays PAUSED behind `PREDICT_ENABLED`.
+- **Scope guardrails (locked):** REPLACE-in-place (not bilingual); **STATIC snapshot** only (no MutationObserver / SPA live-translate); **simple overlay** — no inpainting, no manga-grade typesetting, **no new OSS dependency**. Translated text fits its box via shrink-to-fit on `CanvasRenderingContext2D.measureText` (own code).
+- Curated research at `.planning/research/SOURCES.md` (Firefox/Bergamot TreeWalker replace + tag-alignment, translate-tools/domtranslator reference impl, W3C contrast for the legibility box). Reuses v1.3 Vision bbox geometry + Translation pipeline.
+- Image-overlay is a per-block translation pipeline change from v1.3's single whole-image call.
+- After v1.4: contextual-hints (deferred). v1.1 inline-predictions stays PAUSED behind `PREDICT_ENABLED`.
+
+## Shipped Milestone: v1.3 Image Translation
+
+**Shipped 2026-06-21** (phases 12–14). Audit passed 16/16 — see `milestones/v1.3-MILESTONE-AUDIT.md`.
+Read text inside images on any page — OCR'd via Google Cloud Vision and translated through the main BYOK LLM pipeline — surfaced as text in a side panel. Right-click context menu + opt-in progressive (viewport) mode with a `<html lang>` page-language gate; vision-key settings UI + connection test. All vision/translate routed through the background service worker (no key on page).
 
 ## Shipped Milestone: v1.2 Translated Search
 
@@ -66,8 +71,8 @@ An in-extension search page: query translated user→target language, run agains
 
 ### Active
 
-- v1.3 Image Translation — CURRENT milestone (phases 12+); requirements scoped this cycle
-- v1.4 Contextual Hints — queued after v1.3
+- v1.4 In-Place Page Translation — CURRENT milestone (phases 15+); requirements scoped this cycle
+- v1.5 Contextual Hints — deferred (was v1.4; pushed back for in-place page translation)
 - v1.1 Inline Predictions — PAUSED (phase 5 shelved behind PREDICT_ENABLED flag; phases 6–7 unbuilt)
 
 ### Out of Scope (v1.0)
@@ -84,10 +89,10 @@ An in-extension search page: query translated user→target language, run agains
 
 ## Current State
 
-**Shipped:** v1.0 MVP (2026-05-25); v1.2 Translated Search (2026-06-20, phases 8–11)
+**Shipped:** v1.0 MVP (2026-05-25); v1.2 Translated Search (2026-06-20, phases 8–11); v1.3 Image Translation (2026-06-21, phases 12–14)
 **Paused:** v1.1 Inline Predictions (phase 5 shelved behind `PREDICT_ENABLED=false`; phases 6–7 unbuilt)
-**Codebase:** TypeScript + Chrome MV3; 137 tests passing / 1 skip
-**Providers:** OpenAI, Gemini, OpenRouter (LLM); Brave Search (search, BYOK)
+**Codebase:** TypeScript + Chrome MV3; ~159 tests passing / skips
+**Providers:** OpenAI, Gemini, OpenRouter (LLM); Brave Search (search, BYOK); Google Cloud Vision (image OCR, BYOK)
 **Compatibility:** Verified on Gmail, GitHub, Twitter/X, Notion, Slack, Discord; Google Docs graceful degradation
 
 ## Context
@@ -149,4 +154,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-20 — v1.3 Image Translation milestone started (phases 12+); v1.1 paused, v1.4 queued*
+*Last updated: 2026-06-21 — v1.4 In-Place Page Translation milestone started (phases 15+); v1.3 shipped; v1.1 paused; contextual-hints deferred*

@@ -150,6 +150,10 @@ export type MessageType =
   | 'testVisionKey'
   | 'translateBatch'
   | 'translateImage'
+  // Phase 15 in-place page-text translation messages:
+  | 'translatePage'        // worker/popup → content: snapshot-walk + translate the page in place (TRIG-01)
+  | 'togglePage'           // worker/popup → content: flip original ↔ translation on an already-translated page (PAGE-03)
+  | 'translatePageBatch'   // content → worker: translate one keyed chunk of page text (BYOK in worker, PAGE-04)
   // Phase 13 progressive viewport mode messages:
   | 'progressiveTranslate'  // content → worker: enqueue a progressive image job (gated, content-hash dedupKey)
   | 'openImagePanel'        // content → worker: badge-click gesture asks worker to sidePanel.open + scroll to entry (D-04, PROG-06)
@@ -337,6 +341,40 @@ export interface TranslateBatchResponse {
   error?: string;
   kind?: import('./errors.js').ErrorKind;
 }
+
+// content → worker: translate one keyed chunk of page text in place (PAGE-04).
+// Mirrors TranslateBatchMessage, but items are PLAIN STRINGS (key → source text),
+// not { t, d } — a page text node is a single string with no title/description split.
+// Security law (T-15-03 / T-12-01): the BYOK key is NEVER carried here — the worker
+// reads s.apiKeys[s.provider] from storage. The payload holds source text + config only.
+export interface TranslatePageBatchMessage extends Message {
+  type: 'translatePageBatch';
+  payload: {
+    items: Record<string, string>;
+    config: TranslationConfig;
+  };
+}
+
+// Worker → page reply for a translatePageBatch request.
+// Success → { translations } (key → translated text); failure → { error, kind } (D-02).
+export interface TranslatePageBatchResponse {
+  translations?: Record<string, string>;
+  error?: string;
+  kind?: import('./errors.js').ErrorKind;
+}
+
+// storage.session keys for Phase 15 in-place page translation (D-02).
+// Both live in chrome.storage.session — ephemeral by design: they reset when the
+// browser session ends so a fresh session re-offers the banner and starts each page
+// untranslated. (Contrast STORAGE_PROGRESSIVE_ACK above, which is persisted in
+// storage.local because re-prompting consent every session would be hostile UX.)
+//
+// STORAGE_BANNER_DISMISSED: a per-origin dismissed-set (string[] of origins) so a
+//   dismissed auto-offer banner stays gone for that origin for the rest of the session.
+export const STORAGE_BANNER_DISMISSED = 'himeBannerDismissed' as const;
+// STORAGE_PAGE_STATE: the page-state mirror the popup reads to label its button
+//   ("Translate page" / "Show original" / "Show translation").
+export const STORAGE_PAGE_STATE = 'himePage' as const;
 
 export interface SetBadgeMessage extends Message {
   type: 'setBadge';

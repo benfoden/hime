@@ -1,30 +1,26 @@
-# Curated Sources — image translation (cloud vision OCR + translate)  (via /pre-research, 2026-06-20)
+# Curated Sources — in-place page text translation (hime v1.4)  (via /pre-research, 2026-06-21)
 
-> Researchers: READ THESE FIRST. They are vetted primary/expert sources for hime v1.3
-> Image Translation. Use them as the spine of your research; only search beyond them to fill
-> genuine gaps. Class: tech (most-recent authoritative version wins).
+> Researchers: READ THESE FIRST. Vetted primary/expert sources — use as the spine of research;
+> search beyond only to fill genuine gaps. Class: tech.
 >
-> SCOPE LOCKED THIS ROUND: CLOUD VISION API path for the MV3 Chrome extension. Explicitly OUT
-> of scope for v1.3 research (do NOT default into these): on-device/Chrome built-in AI,
-> OpenAI/Azure alternate stacks, manga/overlay/inpainting craft. See "Deferred" in the dossier.
+> v1.4 scope: translate CURRENT PAGE visible text and REPLACE in place (layout-preserving) +
+> overlay translated text on page images (semi-transparent box). Trigger: manual + auto-offer
+> (<html lang>). Dynamic: STATIC snapshot only. BYOK LLM via the existing v1.3 pipeline.
+> CONSTRAINT: simple overlay, NO new OSS dependency, no inpainting/manga typesetting.
 
-## Cloud OCR + translate
-1. **Google Vision — DOCUMENT_TEXT_DETECTION fullText annotations** — https://docs.cloud.google.com/vision/docs/fulltext-annotations
-   docs · trust 5/5 · dated:2026-06 · Word-level boundingBox geometry (Pages→Blocks→Paragraphs→Words→Symbols) for positioning translated overlay text.
-2. **Google Vision — OCR: TEXT_DETECTION vs DOCUMENT_TEXT_DETECTION** — https://docs.cloud.google.com/vision/docs/ocr
-   docs · trust 5/5 · evergreen · Photo/screenshot vs dense-document decision, precedence rules, request/response shape.
-3. **Google Cloud Translation API v3** — https://docs.cloud.google.com/translate/docs/reference/rpc/google.cloud.translation.v3
-   api-reference · trust 4/5 · evergreen · TranslateText request/response shape (GA v3). Guide: https://docs.cloud.google.com/translate/docs/translate-text · Pricing: 500k chars/mo free.
-4. **Claude — Vision (image input)** — https://platform.claude.com/docs/en/build-with-claude/vision
-   docs · trust 5/5 · evergreen · Single-call OCR+translate; input formats/limits, multi-image, prompting. Tradeoff: no explicit bbox geometry vs Google Vision.
+## DOM page-text translation (replace-in-place)
+1. **Firefox Translations, how we did it** — https://andrenatal.com/2023/05/firefox-translations-how-we-did-it/
+   engineering-blog · trust 5/5 · dated:2023-05 · TreeWalker DOM traversal, segment batching, in-place replace with HTML-tag re-alignment (Bergamot lead's writeup).
+2. **translate-tools/domtranslator** — https://github.com/translate-tools/domtranslator
+   repo · trust 5/5 · dated:2025-07 · production TS impl: text-node walking, NodeFilter ignore (script/style/code/editable), structure-preserving replace. Study, do NOT add as dep.
+3. **The Bergamot Translator — Firefox Source Docs** — https://firefox-source-docs.mozilla.org/toolkit/components/translations/resources/03_bergamot.html
+   docs · trust 4/5 · evergreen · HTML alignment: translate inline-markup segments + reinsert without breaking tags. Overview: .../01_overview.html. (MDN createTreeWalker for SHOW_TEXT/FILTER_REJECT.)
 
-## MV3 extension wiring (pixels → cloud API)
-5. **Chrome — Cross-origin network requests (CORS, service worker)** — https://developer.chrome.com/docs/extensions/develop/concepts/network-requests
-   docs · trust 4/5 · evergreen · host_permissions + isolated-world content scripts; route image-byte fetches through the service worker.
-6. **Chrome — chrome.tabs.captureVisibleTab (screenshot fallback)** — https://developer.chrome.com/docs/extensions/reference/api/tabs
-   api-reference · trust 4/5 · evergreen · Capture path when raw image bytes aren't fetchable (cross-origin/tainted canvas); activeTab vs <all_urls>.
+## Image overlay legibility (simple, own code)
+4. **Captions/Subtitles — W3C WAI** — https://www.w3.org/WAI/media/av/captions/
+   docs(standards) · trust 4/5 · evergreen · WCAG AA 4.5:1 + semi-opaque dark box behind light text = the legibility model for text over arbitrary imagery.
 
-## Known gap
-- No vendor publishes manga/vertical-CJK-specific OCR guidance. If overlay quality or CJK accuracy
-  becomes the bottleneck, the deferred OSS stack (manga-image-translator, comic-translate, manga-ocr,
-  comic-text-detector, LaMa inpainting) in the global dossier is the only authority — out of scope for now.
+## Reused by reference (v1.3 dossier ~/.claude/research-sources/image-translation.md)
+- Google Vision DOCUMENT_TEXT_DETECTION fullTextAnnotation boundingBox geometry (overlay placement)
+- Google Cloud Translation API v3; chrome.tabs.captureVisibleTab; MV3 cross-origin image-byte fetch
+- Text-fit into box = binary-search on CanvasRenderingContext2D.measureText (own code, no lib)
