@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: In-Place Page Translation — Phases 15-16 (in progress; started 2026-06-22)
-status: executing
-last_updated: "2026-06-22T15:50:00.000Z"
-last_activity: 2026-06-22 -- Completed 15-04 (auto-offer banner + partial-failure UI); ALL phase-15 code done, live checkpoints batched to phase-end
+status: verifying
+last_updated: "2026-06-22T16:11:44.373Z"
+last_activity: 2026-06-22 -- Closed out 15-02 (background worker + triggers): 15-02-SUMMARY written, ROADMAP marks all 4 plans complete after human-verify approval
 progress:
   total_phases: 10
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
   completed_plans: 4
-  percent: 0
+  percent: 10
 ---
 
 # Project State
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-06-21)
 
 Phase: 15 (in-place-page-text-translation-triggers) — EXECUTING (all 4 plans' code committed)
 Plan: 4 of 4 (complete)
-Status: 15-01..15-04 code committed. ALL phase-15 live-verify checkpoints batched into one human gate at phase-end. Next: phase-end batched human verification, then phase verifier/close.
-Last activity: 2026-06-22 -- Completed 15-04-PLAN.md (auto-offer banner gated by language + per-origin session dismissal; partial-failure single-toast + red badge + retry-only-failed)
+Status: 15-01..15-04 code committed; 15-02 human-verify checkpoint APPROVED (live browser verify passed) and 15-02-SUMMARY written. All four plan summaries now on disk; ROADMAP marks all 4 plans Complete. Next: phase verifier/close.
+Last activity: 2026-06-22 -- Closed out 15-02 (background translatePageBatch worker case + manual triggers): wrote 15-02-SUMMARY, marked plan complete in ROADMAP after human-verify approval
 
 ## Accumulated Context
 
@@ -78,3 +78,4 @@ None yet.
 | Phase 15 P01 | 18 | 3 tasks | 3 files |
 | Phase 15 P03 | ~20min | 2 code tasks (Task 3 checkpoint deferred) | 1 file (src/content.ts) |
 | Phase 15 P04 | ~2min | 2 code tasks (Task 3 checkpoint deferred) | 1 file (src/content.ts) |
+| Phase 15 P02 | ~15min | 3 code + 1 checkpoint tasks | 3 files |

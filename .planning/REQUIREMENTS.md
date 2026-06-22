@@ -26,7 +26,7 @@ Promoted from backlog: 999.5 (page-text auto-translate) → PAGE+TRIG; 999.3 (in
 
 ### TRIG — Trigger & language gating
 
-- [ ] **TRIG-01**: User can manually trigger current-page translation via a toolbar action and a right-click "Translate page" menu item.
+- [x] **TRIG-01**: User can manually trigger current-page translation via a toolbar action and a right-click "Translate page" menu item.
 - [x] **TRIG-02**: hime auto-offers page translation when the page source language (`<html lang>`) differs from the user's target language, reusing the v1.3 `shouldGateByLanguage` gate; same-language pages incur no cost.
 - [x] **TRIG-03**: Auto-offer is unobtrusive and dismissible; the manual trigger is always available regardless of detected language.
 
@@ -53,7 +53,7 @@ Promoted from backlog: 999.5 (page-text auto-translate) → PAGE+TRIG; 999.3 (in
 | PAGE-03 | Phase 15 | Complete |
 | PAGE-04 | Phase 15 | Complete |
 | PAGE-05 | Phase 15 | Complete |
-| TRIG-01 | Phase 15 | pending |
+| TRIG-01 | Phase 15 | Complete |
 | TRIG-02 | Phase 15 | Complete |
 | TRIG-03 | Phase 15 | Complete |
 | OVL-01 | Phase 16 | pending |

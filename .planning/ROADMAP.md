@@ -136,7 +136,7 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 **Plans**: 4 plans
 
 - [x] 15-01-PLAN.md — pure page-walk.ts core (skip-set + recursive walk + chunkByBudget + buildPageBatchPrompt + key-injection-guarded parsePageBatchReply + once-only restore + failed-set) + types.ts message contracts + test/page-walk.mjs (PAGE-01..05) [Wave 1]
-- [ ] 15-02-PLAN.md — worker translatePageBatch case (BYOK batched) + right-click "Translate page" item + onClicked dispatch + popup button with state mirror (PAGE-04, TRIG-01) [Wave 2]
+- [x] 15-02-PLAN.md — worker translatePageBatch case (BYOK batched) + right-click "Translate page" item + onClicked dispatch + popup button with state mirror (PAGE-04, TRIG-01) [Wave 2]
 - [x] 15-03-PLAN.md — content.ts live createTreeWalker snapshot + chunked dispatch + in-place nodeValue replace + WeakMap toggle pill + translatePage/togglePage routing + session state mirror (PAGE-01/02/03/05) [Wave 3] (code complete; live checkpoint batched to phase-end gate)
 - [x] 15-04-PLAN.md — content.ts auto-offer banner gated by progShouldGateByLanguage + per-origin session dismissal + partial-failure toast/red-badge/retry-failed (TRIG-02/03, PAGE-04) [Wave 4] (code complete; live checkpoint batched to phase-end gate)
 
@@ -177,7 +177,7 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 | 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 7/7 | Complete | 2026-06-21 |
 | 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 4/4 | Complete | 2026-06-21 |
 | 14. UX / Quality Hardening + Vision Settings | v1.3 | 5/5 | Complete   | 2026-06-21 |
-| 15. In-Place Page-Text Translation + Triggers | v1.4 | 3/4 | In Progress|  |
+| 15. In-Place Page-Text Translation + Triggers | v1.4 | 4/4 | Complete   | 2026-06-22 |
 | 16. In-Place Image Overlay Translation | v1.4 | 0/0 | Not started | - |
 
 ## Backlog
@@ -186,7 +186,7 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 
 **Goal:** [Captured for future planning] Translate all search-result headings in a first pass, then descriptions in a second pass, so the user gets the most useful information (titles) fastest — progressive SERP rendering instead of waiting for the full batch.
 **Requirements:** TBD
-**Plans:** 1/4 plans executed
+**Plans:** 4/4 plans complete
 
 Plans:
 
