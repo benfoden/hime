@@ -133,7 +133,13 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
   4. Translation runs through the existing background BYOK LLM pipeline as batched requests (not one call per text node), and the API key never reaches the page.
   5. Translation captures a static snapshot of the page text at trigger time — content added to the DOM afterward is not auto-translated — and when `<html lang>` differs from the target language hime shows an unobtrusive, dismissible auto-offer, while same-language pages incur no API spend and the manual trigger stays available regardless of detected language.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+- [ ] 15-01-PLAN.md — pure page-walk.ts core (skip-set + recursive walk + chunkByBudget + buildPageBatchPrompt + key-injection-guarded parsePageBatchReply + once-only restore + failed-set) + types.ts message contracts + test/page-walk.mjs (PAGE-01..05) [Wave 1]
+- [ ] 15-02-PLAN.md — worker translatePageBatch case (BYOK batched) + right-click "Translate page" item + onClicked dispatch + popup button with state mirror (PAGE-04, TRIG-01) [Wave 2]
+- [ ] 15-03-PLAN.md — content.ts live createTreeWalker snapshot + chunked dispatch + in-place nodeValue replace + WeakMap toggle pill + translatePage/togglePage routing + session state mirror (PAGE-01/02/03/05) [Wave 3]
+- [ ] 15-04-PLAN.md — content.ts auto-offer banner gated by progShouldGateByLanguage + per-origin session dismissal + partial-failure toast/red-badge/retry-failed (TRIG-02/03, PAGE-04) [Wave 4]
+
 **UI hint**: yes
 
 ### Phase 16: In-Place Image Overlay Translation
@@ -171,7 +177,7 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 | 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 7/7 | Complete | 2026-06-21 |
 | 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 4/4 | Complete | 2026-06-21 |
 | 14. UX / Quality Hardening + Vision Settings | v1.3 | 5/5 | Complete   | 2026-06-21 |
-| 15. In-Place Page-Text Translation + Triggers | v1.4 | 0/0 | Not started | - |
+| 15. In-Place Page-Text Translation + Triggers | v1.4 | 0/4 | Planned | - |
 | 16. In-Place Image Overlay Translation | v1.4 | 0/0 | Not started | - |
 
 ## Backlog
