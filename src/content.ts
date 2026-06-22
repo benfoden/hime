@@ -1689,6 +1689,8 @@ function pageApplyState(state: 'original' | 'translated'): void {
   pageState = state;
   pageUpdatePill();
   pageWriteStateMirror(state);
+  // D-01: global page pill also drives overlay visibility in lockstep (OVL-03).
+  overlayApplyGlobal(state === 'translated');
 }
 
 /**
@@ -1963,12 +1965,530 @@ async function pageRetryFailed(): Promise<void> {
   await pageTranslate(nodes);
 }
 
+// =====================================================================
+// In-place image overlay layer (Phase 16: OVL-01..05, D-01..03).
+// =====================================================================
+//
+// Mirrored pure math from overlay-geometry.ts + overlay-fit.ts — classic-script
+// law, content.ts cannot import.  MUST stay in sync with those modules.
+// Keep mirrors tiny so drift is obvious (Pitfall 5 / RESEARCH §"Classic-script law").
+// =====================================================================
+
+// --- MIRRORED from src/overlay-geometry.ts — classic-script law (cannot import) ---
+// MUST stay in sync with src/overlay-geometry.ts — classic-script law (cannot import)
+type OverlayObjectFit = 'fill' | 'contain' | 'cover' | 'none' | 'scale-down';
+
+function overlayObjectFitTransform(
+  natural: { w: number; h: number },
+  rendered: { w: number; h: number },
+  objectFit: OverlayObjectFit,
+): { scaleX: number; scaleY: number; offX: number; offY: number } {
+  const nW = natural.w;
+  const nH = natural.h;
+  const rW = rendered.w;
+  const rH = rendered.h;
+  if (objectFit === 'fill') {
+    return { scaleX: rW / nW, scaleY: rH / nH, offX: 0, offY: 0 };
+  }
+  let scale: number;
+  if (objectFit === 'contain') {
+    scale = Math.min(rW / nW, rH / nH);
+  } else if (objectFit === 'cover') {
+    scale = Math.max(rW / nW, rH / nH);
+  } else if (objectFit === 'none') {
+    scale = 1;
+  } else {
+    // 'scale-down'
+    scale = Math.min(1, Math.min(rW / nW, rH / nH));
+  }
+  const offX = (rW - nW * scale) / 2;
+  const offY = (rH - nH * scale) / 2;
+  return { scaleX: scale, scaleY: scale, offX, offY };
+}
+
+// MUST stay in sync with src/overlay-geometry.ts — classic-script law (cannot import)
+function overlayMapBox(
+  box: { x: number; y: number }[],
+  submitted: { w: number; h: number },
+  natural: { w: number; h: number },
+  rendered: { w: number; h: number },
+  objectFit: OverlayObjectFit,
+): { left: number; top: number; width: number; height: number } {
+  if (submitted.w <= 0 || submitted.h <= 0) {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+  const upX = natural.w / submitted.w;
+  const upY = natural.h / submitted.h;
+  const xs = box.map((v) => v.x * upX);
+  const ys = box.map((v) => v.y * upY);
+  const nLeft = Math.min(...xs);
+  const nTop  = Math.min(...ys);
+  const nW    = Math.max(...xs) - nLeft;
+  const nH    = Math.max(...ys) - nTop;
+  const { scaleX, scaleY, offX, offY } = overlayObjectFitTransform(natural, rendered, objectFit);
+  return {
+    left:   nLeft * scaleX + offX,
+    top:    nTop  * scaleY + offY,
+    width:  nW    * scaleX,
+    height: nH    * scaleY,
+  };
+}
+
+// --- MIRRORED from src/overlay-fit.ts — classic-script law (cannot import) ---
+// MUST stay in sync with src/overlay-fit.ts — classic-script law (cannot import)
+function overlayWrapLines(
+  text: string,
+  fontPx: number,
+  maxWidth: number,
+  measure: (text: string, fontPx: number) => number,
+  cjk: boolean,
+): string[] {
+  const tokens: string[] = cjk
+    ? Array.from(text)
+    : text.split(/\s+/).filter((w) => w.length > 0);
+  const lines: string[] = [];
+  let current = '';
+  for (const token of tokens) {
+    const candidate = current.length === 0 ? token : (cjk ? current + token : current + ' ' + token);
+    if (measure(candidate, fontPx) <= maxWidth || current.length === 0) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = token;
+    }
+  }
+  if (current.length > 0) lines.push(current);
+  return lines;
+}
+
+// MUST stay in sync with src/overlay-fit.ts — classic-script law (cannot import)
+function overlayFitText(
+  text: string,
+  boxW: number,
+  boxH: number,
+  measure: (text: string, fontPx: number) => number,
+  opts?: { maxFont?: number; minFont?: number; lineHeight?: number; pad?: number; cjk?: boolean },
+): { fontPx: number; clamped: boolean; lines: string[] } {
+  const maxFont   = opts?.maxFont   ?? 28;
+  const minFont   = opts?.minFont   ?? 9;
+  const lineHeight = opts?.lineHeight ?? 1.2;
+  const pad       = opts?.pad       ?? 4;
+  const cjk       = opts?.cjk       ?? false;
+  const budgetW = boxW - 2 * pad;
+  const budgetH = boxH - 2 * pad;
+  const tryFont = (fontPx: number): { fits: boolean; lines: string[] } => {
+    const lines = overlayWrapLines(text, fontPx, budgetW, measure, cjk);
+    const totalH = lines.length * fontPx * lineHeight;
+    return { fits: totalH <= budgetH, lines };
+  };
+  let low = minFont;
+  let high = maxFont;
+  let best: { fontPx: number; lines: string[] } | null = null;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const { fits, lines } = tryFont(mid);
+    if (fits) {
+      best = { fontPx: mid, lines };
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  if (best !== null) return { fontPx: best.fontPx, clamped: false, lines: best.lines };
+  const { lines } = tryFont(minFont);
+  return { fontPx: minFont, clamped: true, lines };
+}
+
+// --- Overlay module-scope state ---
+
+// Per-image overlay record: the container + the source image + per-block originals for toggle.
+type OverlayRecord = {
+  container: HTMLElement;
+  img: HTMLImageElement;
+  // Per-block toggle state (for per-image toggle button label tracking).
+  shown: boolean;
+  // ResizeObserver so we can disconnect on teardown.
+  ro: ResizeObserver;
+};
+
+// All live overlay records (keyed by image element for O(1) lookup).
+const overlayRecords = new Map<HTMLImageElement, OverlayRecord>();
+
+// Throttle handle for scroll/resize overlay reposition (mirrors progRepositionHandle).
+let overlayRepositionHandle: ReturnType<typeof setTimeout> | null = null;
+// Flag: global scroll/resize listeners registered once (Pattern 2).
+let overlayListenersRegistered = false;
+
+// --- Overlay container positioning (mirrors progPositionBadge, no +4 offset) ---
+// Pattern 2: the container IS the rendered-rect frame; inner boxes are container-relative.
+function overlayPositionContainer(container: HTMLElement, img: HTMLImageElement): void {
+  const rect = img.getBoundingClientRect();
+  container.style.top    = `${rect.top    + window.scrollY}px`;
+  container.style.left   = `${rect.left   + window.scrollX}px`;
+  container.style.width  = `${rect.width}px`;
+  container.style.height = `${rect.height}px`;
+}
+
+// Throttled reposition of all overlay containers on scroll/resize (100ms, mirrors progRepositionAllBadges).
+function overlayRepositionAll(): void {
+  if (overlayRepositionHandle !== null) return; // already scheduled
+  overlayRepositionHandle = setTimeout(() => {
+    overlayRepositionHandle = null;
+    for (const rec of overlayRecords.values()) {
+      if (document.body.contains(rec.img)) {
+        overlayPositionContainer(rec.container, rec.img);
+      }
+    }
+  }, 100);
+}
+
+// --- Overlay global toggle (D-01: page pill drives all overlays) ---
+function overlayApplyGlobal(show: boolean): void {
+  for (const rec of overlayRecords.values()) {
+    rec.container.style.display = show ? 'block' : 'none';
+    if (show) rec.shown = true;
+  }
+}
+
+// --- Overlay teardown (mirrors progRemoveAllBadges) ---
+function overlayRemoveAll(): void {
+  for (const rec of overlayRecords.values()) {
+    rec.ro.disconnect();
+    rec.container.remove();
+  }
+  overlayRecords.clear();
+}
+
+// --- Task 2: Render per-image overlay container ---
+// OVL-01/02/04 — positioned by overlayMapBox, sized by overlayFitText,
+// anchored via getBoundingClientRect+scrollX/Y, re-anchored on scroll/resize/ResizeObserver.
+function overlayRenderImage(
+  img: HTMLImageElement,
+  reply: {
+    blocks?: { box: { x: number; y: number }[]; original: string; translated: string }[];
+    submitted?: { w: number; h: number };
+  },
+): void {
+  const blocks = reply.blocks;
+  const submitted = reply.submitted;
+  if (!blocks || blocks.length === 0 || !submitted) return;
+
+  // Throwaway canvas for measureText only — NO image drawn (T-16-10: no taint).
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const measure = (text: string, fontPx: number): number => {
+    ctx.font = `${fontPx}px sans-serif`;
+    return ctx.measureText(text).width;
+  };
+
+  const naturalW = img.naturalWidth;
+  const naturalH = img.naturalHeight;
+  // Guard: if natural dims not yet loaded, use rendered rect as a proxy.
+  const effectiveNW = naturalW > 0 ? naturalW : img.getBoundingClientRect().width;
+  const effectiveNH = naturalH > 0 ? naturalH : img.getBoundingClientRect().height;
+
+  const rect = img.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return; // invisible image — skip
+
+  const cs = getComputedStyle(img);
+  const rawFit = cs.objectFit;
+  const objectFit: OverlayObjectFit =
+    rawFit === 'contain' || rawFit === 'cover' || rawFit === 'none' || rawFit === 'scale-down'
+      ? rawFit
+      : 'fill'; // default for <img> with no object-fit set
+
+  // ONE body-appended container per image (NOT a wrapper around <img> — Anti-Pattern).
+  // The container IS the rendered-rect frame; inner boxes use container-relative coords.
+  const container = document.createElement('div');
+  container.style.cssText = [
+    'position:absolute',
+    'pointer-events:none',
+    'z-index:2147483644',
+    'overflow:hidden',
+    'box-sizing:border-box',
+  ].join(';');
+  overlayPositionContainer(container, img);
+
+  for (const blk of blocks) {
+    if (!blk.box || blk.box.length !== 4) continue;
+    const r = overlayMapBox(
+      blk.box,
+      submitted,
+      { w: effectiveNW, h: effectiveNH },
+      { w: rect.width,  h: rect.height  },
+      objectFit,
+    );
+    if (r.width <= 0 || r.height <= 0) continue;
+
+    const { fontPx, clamped } = overlayFitText(
+      blk.translated,
+      r.width,
+      r.height,
+      measure,
+    );
+
+    const box = document.createElement('div');
+    box.textContent = blk.translated; // textContent ONLY — never innerHTML (T-16-09 / XSS law)
+    box.style.cssText = [
+      'position:absolute',
+      `left:${r.left}px`,
+      `top:${r.top}px`,
+      `width:${r.width}px`,
+      `height:${r.height}px`,
+      'background:rgba(0,0,0,0.78)',  // D-03 fixed palette, WCAG-AA OVL-02
+      'color:#fff',
+      `font:${fontPx}px/1.2 sans-serif`,
+      'border-radius:3px',
+      'box-sizing:border-box',
+      'padding:2px 4px',
+      'overflow:hidden',
+      'display:flex',
+      'align-items:center',
+      'pointer-events:none',
+      ...(clamped ? ['text-overflow:ellipsis', 'white-space:nowrap'] : []),
+    ].join(';');
+    container.appendChild(box);
+  }
+
+  // --- Task 3: Per-image corner toggle button (D-02) ---
+  const toggleBtn = document.createElement('button');
+  toggleBtn.textContent = 'Show original'; // textContent only — never innerHTML (T-16-09)
+  toggleBtn.style.cssText = [
+    'position:absolute',
+    'top:4px',
+    'right:4px',
+    'font-family:sans-serif',
+    'font-size:11px',
+    'color:#fff',
+    'background:rgba(0,0,0,0.72)',
+    'border:none',
+    'border-radius:3px',
+    'padding:2px 6px',
+    'cursor:pointer',
+    'pointer-events:auto',
+    'user-select:none',
+    'z-index:1',
+    'white-space:nowrap',
+  ].join(';');
+
+  let perImageShown = true; // starts in "translation shown" state
+  toggleBtn.addEventListener('click', () => {
+    perImageShown = !perImageShown;
+    // Toggle visibility of all box divs (not the button itself).
+    Array.from(container.children).forEach((child) => {
+      if (child !== toggleBtn) {
+        (child as HTMLElement).style.display = perImageShown ? '' : 'none';
+      }
+    });
+    toggleBtn.textContent = perImageShown ? 'Show original' : 'Show translation'; // textContent only
+    const rec = overlayRecords.get(img);
+    if (rec) rec.shown = perImageShown;
+  });
+  container.appendChild(toggleBtn);
+
+  document.body.appendChild(container);
+
+  // OVL-04: re-anchor on scroll/resize/ResizeObserver (Pattern 2).
+  // Register window scroll/resize listeners once (shared across all overlays).
+  if (!overlayListenersRegistered) {
+    overlayListenersRegistered = true;
+    window.addEventListener('scroll', overlayRepositionAll, { passive: true });
+    window.addEventListener('resize', overlayRepositionAll, { passive: true });
+  }
+  const ro = new ResizeObserver(() => overlayRepositionAll());
+  ro.observe(img);
+
+  const rec: OverlayRecord = { container, img, shown: true, ro };
+  overlayRecords.set(img, rec);
+}
+
+// --- Task 1: Collect + dispatch translateImageBlocks per in-view image ---
+// Gate: reads includeImages from himeSettings before doing anything (D-01).
+// Bounds: reuses progCreateBudget + progCreateConcurrencyGate (D-01 cost gates, T-16-11).
+// Dedup: reuses progSrcDedupKey (cheap per-srcUrl first filter).
+// Capture-fallback: skip images flagged by the worker (T-16-06 / Pitfall 2).
+async function overlayTranslateImages(): Promise<void> {
+  // D-01 gate: only run when the user has opted in to image overlays.
+  const stored = await chrome.storage.local.get(['himeSettings']);
+  const settings = (stored.himeSettings || {}) as Record<string, unknown>;
+  if (settings.includeImages !== true) return;
+
+  // Read translation config (reuse pageReadConfig for the config shape).
+  const config = await pageReadConfig();
+
+  // Static snapshot of in-view images (PAGE-05 pattern: no MutationObserver).
+  const allImgs = Array.from(document.querySelectorAll('img')) as HTMLImageElement[];
+  const inViewport = allImgs.filter((img) => {
+    if (!img.src) return false;
+    if (!progIsEligible(img)) return false; // min-size gate (reuse D-02)
+    const rect = img.getBoundingClientRect();
+    // Viewport intersection: at least partially visible.
+    return (
+      rect.top  < window.innerHeight &&
+      rect.left < window.innerWidth  &&
+      rect.bottom > 0 &&
+      rect.right  > 0
+    );
+  });
+
+  if (inViewport.length === 0) return;
+
+  // Per-pass budget + concurrency (reuse phase-13 cost gates, T-16-11).
+  const budget = progCreateBudget(PROG_PER_PAGE_BUDGET);
+  const gate   = progCreateConcurrencyGate(PROG_CONCURRENCY_CAP);
+
+  // Per-pass dedup: skip already-seen srcUrl keys.
+  const seenThisPass = new Set<string>();
+
+  // Accumulate errors for a single partial-failure toast (mirrors pageTranslate).
+  let errorCount = 0;
+  let lastErrorKind: string | undefined;
+
+  const inFlight = new Set<Promise<void>>();
+  let cursor = 0;
+
+  await new Promise<void>((resolveAll) => {
+    const settle = (): void => {
+      if (cursor >= inViewport.length && inFlight.size === 0) resolveAll();
+    };
+
+    const launch = (): void => {
+      while (cursor < inViewport.length && gate.tryAcquire()) {
+        if (budget.isExhausted) {
+          // Nothing further to schedule — resolve when in-flight drains.
+          settle();
+          break;
+        }
+
+        const img = inViewport[cursor];
+        cursor++;
+
+        if (!img) { gate.release(); continue; }
+
+        const srcKey = progSrcDedupKey(img.src);
+        if (seenThisPass.has(srcKey)) { gate.release(); continue; }
+        if (!budget.tryConsume()) { gate.release(); settle(); break; }
+        seenThisPass.add(srcKey);
+
+        const p = new Promise<void>((resolveOne) => {
+          chrome.runtime.sendMessage(
+            {
+              type: 'translateImageBlocks',
+              payload: { srcUrl: img.src, dedupKey: srcKey, config },
+            } as Message,
+            (response: { blocks?: { box: { x: number; y: number }[]; original: string; translated: string }[]; submitted?: { w: number; h: number }; captureFallback?: boolean; error?: string; kind?: string } | undefined) => {
+              if (chrome.runtime.lastError || !response) {
+                resolveOne();
+                return;
+              }
+              // T-16-06 / Pitfall 2: skip capture-fallback images — boxes are in screenshot space.
+              if (response.captureFallback) {
+                resolveOne();
+                return;
+              }
+              if (response.error) {
+                errorCount++;
+                lastErrorKind = response.kind ?? lastErrorKind;
+                resolveOne();
+                return;
+              }
+              // Render the overlay for this image (Task 2).
+              overlayRenderImage(img, {
+                blocks: response.blocks,
+                submitted: response.submitted,
+              });
+              resolveOne();
+            },
+          );
+        }).finally(() => {
+          gate.release();
+          inFlight.delete(p);
+          launch();
+          settle();
+        });
+        inFlight.add(p);
+      }
+      settle();
+    };
+
+    launch();
+  });
+
+  // Surface a single partial-failure toast when any image pass failed (mirrors pageTranslate D-04).
+  if (errorCount > 0) {
+    // Reuse the existing page error toast infrastructure (single toast, idempotent).
+    // We inject the image error count into the shared pageFailedNodes size equivalent
+    // by showing a simplified toast directly (image errors don't have Text nodes).
+    // Use pageShowErrorToast's sibling: fire a one-off fixed notification.
+    overlayShowErrorToast(errorCount, lastErrorKind);
+  }
+}
+
+// Slim image-pass error toast (separate from the page-text toast to avoid clobbering it).
+const HIME_OVERLAY_TOAST_ID = 'hime-overlay-toast';
+function overlayShowErrorToast(count: number, kind?: string): void {
+  if (!document.body) return;
+  const existing = document.getElementById(HIME_OVERLAY_TOAST_ID);
+  if (existing) {
+    const label = existing.querySelector('[data-hime-overlay-label]');
+    if (label) label.textContent = `Image overlay failed for ${count} image${count === 1 ? '' : 's'}.`; // textContent only
+    return;
+  }
+  const el = document.createElement('div');
+  el.id = HIME_OVERLAY_TOAST_ID;
+  el.style.cssText = [
+    'position:fixed',
+    'bottom:40px',
+    'right:8px',
+    'display:flex',
+    'align-items:center',
+    'gap:10px',
+    'font-family:sans-serif',
+    'font-size:13px',
+    'color:#fff',
+    'background:rgba(176,0,32,0.96)',
+    'padding:8px 12px',
+    'border-radius:4px',
+    'z-index:2147483646',
+    'pointer-events:auto',
+    'max-width:360px',
+  ].join(';');
+  const label = document.createElement('span');
+  label.setAttribute('data-hime-overlay-label', '');
+  label.textContent = `Image overlay failed for ${count} image${count === 1 ? '' : 's'}.`; // textContent only
+  void kind; // logged via console by the worker; no additional action needed here
+  const dismissBtn = document.createElement('button');
+  dismissBtn.textContent = '✕'; // textContent only
+  dismissBtn.setAttribute('aria-label', 'Dismiss');
+  dismissBtn.style.cssText = [
+    'font-family:sans-serif',
+    'font-size:15px',
+    'line-height:1',
+    'color:#fff',
+    'background:transparent',
+    'border:none',
+    'cursor:pointer',
+    'padding:2px 6px',
+  ].join(';');
+  dismissBtn.addEventListener('click', () => {
+    document.getElementById(HIME_OVERLAY_TOAST_ID)?.remove();
+  });
+  el.appendChild(label);
+  el.appendChild(dismissBtn);
+  document.body.appendChild(el);
+}
+
 // Extend the existing chrome.runtime.onMessage handler to deal with progressive
 // messages sent FROM the worker to this content script.
 // (Worker-to-content messages for badge placement and activity counts.)
 chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
   if (message.type === 'translatePage') {
+    // Tear down any existing image overlays before a fresh translation run,
+    // so overlays don't outlive a reset (overlayRemoveAll mirrors progRemoveAllBadges).
+    overlayRemoveAll();
     void pageTranslate();
+    void overlayTranslateImages(); // Phase 16: image overlay pass (includeImages gate)
     sendResponse({ success: true });
     return false; // synchronous ack — translation runs async in the background
   }
