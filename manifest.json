@@ -6,17 +6,25 @@
   "permissions": [
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "contextMenus",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://api.openai.com/*",
     "https://generativelanguage.googleapis.com/*",
     "https://openrouter.ai/*",
-    "https://api.search.brave.com/*"
+    "https://api.search.brave.com/*",
+    "https://vision.googleapis.com/*",
+    "https://translation.googleapis.com/*",
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   },
   "content_scripts": [
     {

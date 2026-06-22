@@ -8,9 +8,20 @@ A Chrome extension that lets you type in English and get inline Japanese (or any
 
 Type English, get natural Japanese inline — without breaking your keyboard flow.
 
-## Next Milestone: v1.3 Image Translation
+## Current Milestone: v1.3 Image Translation
 
-**Status:** To be scoped via `/gsd-new-milestone` (phases 12+). After v1.3: v1.4 contextual-hints.
+**Goal:** Let the user read text inside images on any page — OCR'd and translated (target→user language) via a cloud vision API (BYOK) — surfaced as readable text in a side panel. Phases 12+.
+
+**Target features:**
+- Right-click context menu on any `<img>`: "Translate image with hime" (manual, one-off; consumes no hotkey slot)
+- Opt-in **progressive** mode (default OFF): auto-translate images as they enter/approach the viewport (IntersectionObserver)
+- Translated output rendered in a **side panel / popup** — original + translation as text; no in-image overlay/inpaint this milestone
+- Cloud vision provider via BYOK; OCR+translate pipeline routed through the background service worker (no key on page)
+
+**Key context:**
+- Provider choice (Claude Vision single-call vs Google Vision + Translation v3) decided at roadmap review; side-panel output means bbox geometry is not strictly required, which favors single-call but is left open
+- Curated research sources at `.planning/research/SOURCES.md` (cloud-API path; built-in-AI / OpenAI-Azure / manga-overlay craft scoped out)
+- After v1.3: v1.4 contextual-hints. v1.1 inline-predictions stays PAUSED behind `PREDICT_ENABLED`.
 
 ## Shipped Milestone: v1.2 Translated Search
 
@@ -55,7 +66,7 @@ An in-extension search page: query translated user→target language, run agains
 
 ### Active
 
-- v1.3 Image Translation — next milestone, to be scoped via `/gsd-new-milestone`
+- v1.3 Image Translation — CURRENT milestone (phases 12+); requirements scoped this cycle
 - v1.4 Contextual Hints — queued after v1.3
 - v1.1 Inline Predictions — PAUSED (phase 5 shelved behind PREDICT_ENABLED flag; phases 6–7 unbuilt)
 
@@ -138,4 +149,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-20 — v1.2 Translated Search shipped; next milestone v1.3 Image Translation (v1.1 paused)*
+*Last updated: 2026-06-20 — v1.3 Image Translation milestone started (phases 12+); v1.1 paused, v1.4 queued*

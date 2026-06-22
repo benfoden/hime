@@ -5,6 +5,7 @@
 - ✅ v1.0 MVP — Phases 1-4 (shipped 2026-05-25)
 - ⏸ v1.1 Inline Predictions — Phases 5-7 (PAUSED 2026-06-02; phase 5 shelved behind flag, phases 6-7 unbuilt)
 - ✅ v1.2 Translated Search — Phases 8-11 (shipped 2026-06-20)
+- ✅ v1.3 Image Translation — Phases 12-14 (shipped 2026-06-22)
 
 ## Phases
 
@@ -39,6 +40,17 @@ Full phase details archived to `milestones/v1.2-ROADMAP.md`. Audit passed (17/18
 - [x] **Phase 9: SERP Rendering** - SearchResult type, XSS-safe renderer, skeleton/empty/error states (completed 2026-06-03)
 - [x] **Phase 10: Translation Pipeline** - Keyed-JSON batch translation, count assertion, raw fallback, three-stage progressive render (completed 2026-06-10)
 - [x] **Phase 11: Page Wiring & Popup Entry** - Full search.ts wired end-to-end, query translation disclosure line, popup button (completed 2026-06-20)
+
+</details>
+
+<details>
+<summary>✅ v1.3 Image Translation (Phases 12-14) — SHIPPED 2026-06-22</summary>
+
+Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16 reqs; all 4 E2E flows wired) — see `milestones/v1.3-MILESTONE-AUDIT.md`. Deviation D-V01: OCR via Google Cloud Vision, translation via the user's existing LLM provider (not Cloud Translation v2).
+
+- [x] **Phase 12: Image OCR Pipeline + Right-Click + Side Panel** - VisionProvider (Google Cloud Vision OCR + LLM translate), worker byte resolver + captureVisibleTab fallback, validate/downscale, context menu, side panel, per-image state contract (completed 2026-06-21)
+- [x] **Phase 13: Progressive Viewport Mode + Cost Control + Privacy Opt-In** - Default-OFF toggle, IntersectionObserver, content-hash dedup + cache, concurrency/budget/debounce/min-size guards, first-enable privacy warning + activity indicator, badge-not-auto-open (completed 2026-06-21)
+- [x] **Phase 14: UX / Quality Hardening + Vision Settings** - Google Cloud key field + Vision connection test, copy original+translation, source-language + no-text/low-confidence polish, `[hime N]` badges, CJK note (completed 2026-06-21)
 
 </details>
 
@@ -97,6 +109,8 @@ Full phase details archived to `milestones/v1.2-ROADMAP.md`. Audit passed (17/18
 
 > v1.2 phase details (Phases 8–11) archived to `milestones/v1.2-ROADMAP.md`.
 
+> v1.3 phase details (Phases 12–14) archived to `milestones/v1.3-ROADMAP.md`.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -113,3 +127,58 @@ Full phase details archived to `milestones/v1.2-ROADMAP.md`. Audit passed (17/18
 | 9. SERP Rendering | v1.2 | 2/2 | Complete   | 2026-06-03 |
 | 10. Translation Pipeline | v1.2 | 2/2 | Complete    | 2026-06-10 |
 | 11. Page Wiring & Popup Entry | v1.2 | 3/3 | Complete    | 2026-06-20 |
+| 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 7/7 | Complete | 2026-06-21 |
+| 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 4/4 | Complete | 2026-06-21 |
+| 14. UX / Quality Hardening + Vision Settings | v1.3 | 5/5 | Complete   | 2026-06-21 |
+
+## Backlog
+
+### Phase 999.1: Two-pass SERP translation (headings first, then descriptions) (BACKLOG)
+
+**Goal:** [Captured for future planning] Translate all search-result headings in a first pass, then descriptions in a second pass, so the user gets the most useful information (titles) fastest — progressive SERP rendering instead of waiting for the full batch.
+**Requirements:** TBD
+**Plans:** 5/5 plans complete
+
+Plans:
+
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.2: Auto-translate destination page on search-result clickthrough (BACKLOG)
+
+**Goal:** [Captured for future planning] When the user clicks a hime SERP result, auto-translate the destination page after navigation — carry the translate intent through the clickthrough so the landing page is translated without a second manual action.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.3: In-place image overlay translation (text-on-image, swap) (BACKLOG)
+
+**Goal:** [Captured for future planning] Overlay the translated text directly ON the image, positioned over each source-text region, with a swap toggle (show original ↔ translation in place) — like Google Lens / manga-translation overlays. Architecture note: Vision DOCUMENT_TEXT_DETECTION already returns per-block `boundingPoly` boxes (currently discarded); render absolutely-positioned DOM overlays on top of the `<img>` (no canvas edits → no tainted-canvas issue), mapping natural-pixel boxes to the rendered rect (badge-positioning math) and repositioning on scroll/resize. Hard parts: masking the original text (sampled bg / blur box), fitting translated text to the box (auto font-shrink), translating PER block (pipeline change from the single whole-image call), and vertical/CJK reading order. Medium effort; likely its own v1.4 phase.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.5: Basic page-text auto-translate (default-on, page-language gated) (BACKLOG)
+
+**Goal:** [Captured for future planning] A basic whole-page TEXT translation feature (distinct from image OCR), ON by default, that auto-translates a page's visible text when the page is in a foreign source language relative to the user's reading/target language. Mirror the D-05 page-language gate already built for progressive image mode (`shouldGateByLanguage` in progressive-guard.ts: compare `<html lang>` vs target, gate-ON when same/missing) so it spends nothing on pages already in the target language. Open questions: in-place DOM text replacement vs side-panel output; per-block vs whole-page translation call (cost); handling dynamic/SPA content (MutationObserver); show-original toggle; opt-out per-site. User report (phase 14 verify): "we need a basic page text translate feature thats on by default when visiting a page in the target language." Likely its own v1.4+ phase. Medium-large effort.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.4: Per-image numbering in badge + sidebar (BACKLOG)
+
+**Goal:** [Captured for future planning] Give each progressively/right-click translated image a stable sequential number shown in BOTH the on-image badge (e.g. `[hime 3]`) and its side-panel entry, so the user can correlate a badge with its panel entry at a glance. Badge-click → open panel scrolled to that entry is ALREADY shipped (phase 13 `openImagePanel`); this adds the visible numbering tied to the dedup key/translation order. Small UX enhancement — natural candidate to fold into Phase 14 (UX hardening) rather than a standalone phase.
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (promote with /gsd-review-backlog when ready)

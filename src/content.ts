@@ -918,3 +918,542 @@ document.addEventListener('keydown', (event) => {
 }, true);
 
 console.log('hime: Content script loaded');
+
+// ---------------------------------------------------------------------------
+// Progressive viewport engine (Phase 13, Plan 03)
+// ---------------------------------------------------------------------------
+// Classic-script law: NO top-level import/export. The guard logic below mirrors
+// progressive-guard.ts verbatim (same algorithm, same values) — content.ts
+// cannot import it (it would make tsc emit `export {}` and crash the script).
+// Pattern precedent: sanitizeGhost above mirrors predict-util.ts the same way.
+// ---------------------------------------------------------------------------
+
+// --- Mirrored constants from progressive-guard.ts (D-01, D-02) ---
+// These MUST stay in sync with progressive-guard.ts.  Keep the comment so
+// code-reviewers know where the source of truth lives.
+const PROG_MIN_LONG_EDGE_PX = 150;    // progressive-guard.ts MIN_LONG_EDGE_PX
+const PROG_ROOT_MARGIN_PX   = 200;    // progressive-guard.ts ROOT_MARGIN_PX
+const PROG_DWELL_MS         = 400;    // progressive-guard.ts DWELL_MS
+const PROG_CONCURRENCY_CAP  = 2;      // progressive-guard.ts CONCURRENCY_CAP
+const PROG_PER_PAGE_BUDGET  = 10;     // progressive-guard.ts PER_PAGE_BUDGET
+
+// --- UI class/id constants ---
+const HIME_PROG_BADGE_CLASS    = 'hime-prog-badge';
+const HIME_PROG_INDICATOR_ID   = 'hime-prog-indicator';
+
+// --- Mirrored isEligibleSize from progressive-guard.ts (D-02) ---
+function progIsEligibleSize(width: number, height: number): boolean {
+  return Math.max(width, height) >= PROG_MIN_LONG_EDGE_PX;
+}
+
+// --- Mirrored shouldGateByLanguage from progressive-guard.ts (D-05) ---
+// Classic-script law: content.ts cannot import progressive-guard.ts, so the
+// logic is mirrored verbatim here.  Keep both in sync.
+// Display-name → ISO base subtag map (mirrors GUARD_LANGUAGE_ISO in progressive-guard.ts).
+// MUST stay in sync with progressive-guard.ts GUARD_LANGUAGE_ISO.
+const PROG_LANGUAGE_ISO: Record<string, string> = {
+  English: 'en', Japanese: 'ja', Korean: 'ko',
+  'Chinese (Simplified)': 'zh', 'Chinese (Traditional)': 'zh',
+  Spanish: 'es', French: 'fr', German: 'de', Italian: 'it',
+  Portuguese: 'pt', Dutch: 'nl', Russian: 'ru', Polish: 'pl',
+  Turkish: 'tr', Arabic: 'ar', Hindi: 'hi', Vietnamese: 'vi',
+  Thai: 'th', Indonesian: 'id',
+};
+function progNormalizeToBase(lang: string): string {
+  const trimmed = lang.trim();
+  if (!trimmed) return '';
+  const mapped = PROG_LANGUAGE_ISO[trimmed];
+  if (mapped) return mapped;
+  return trimmed.split('-')[0].toLowerCase();
+}
+/**
+ * D-05 page-language gate.
+ * Returns true  → GATE ON (do NOT start progressive auto-translation).
+ * Returns false → GATE OFF (allow progressive).
+ * Conservative: missing/whitespace pageLang → gate ON (spend nothing).
+ */
+function progShouldGateByLanguage(pageLang: string, targetLang: string): boolean {
+  const base = progNormalizeToBase(pageLang);
+  if (!base) return true; // missing or ambiguous → gate ON
+  const target = progNormalizeToBase(targetLang);
+  return base === target; // same language → gate ON
+}
+
+// --- Mirrored djb2 srcUrl dedup key (PROG-03 cheap first filter) ---
+// The worker owns the authoritative content-hash dedup via storage.session
+// (PROG-03 / getJob/setJob in background.ts).  This is a cheap per-srcUrl
+// first filter that prevents obvious re-sends on re-scroll without fetching
+// image bytes.  Collision semantics are identical to imageDedupKey in
+// background.ts (non-security, per-session identity only, T-13-01).
+// Prefix "imgs_" (src) to never collide with "imgc_" (content) namespace.
+function progSrcDedupKey(srcUrl: string): string {
+  let hash = 5381;
+  for (let i = 0; i < srcUrl.length; i++) {
+    hash = ((hash << 5) + hash + srcUrl.charCodeAt(i)) | 0;
+  }
+  return `imgs_${(hash >>> 0).toString(36)}`;
+}
+
+// --- Per-page budget (D-02a: counts STARTS regardless of outcome) ---
+// Mirrors progressive-guard.ts createBudget.
+function progCreateBudget(limit: number): { tryConsume(): boolean; readonly isExhausted: boolean } {
+  let started = 0;
+  return {
+    tryConsume(): boolean {
+      if (started >= limit) return false;
+      started++;
+      return true;
+    },
+    get isExhausted(): boolean { return started >= limit; },
+  };
+}
+
+// --- Per-page concurrency gate (D-02) ---
+// Mirrors progressive-guard.ts createConcurrencyGate.
+function progCreateConcurrencyGate(cap: number): { tryAcquire(): boolean; release(): void } {
+  let inFlight = 0;
+  return {
+    tryAcquire(): boolean {
+      if (inFlight >= cap) return false;
+      inFlight++;
+      return true;
+    },
+    release(): void { if (inFlight > 0) inFlight--; },
+  };
+}
+
+// --- Dwell scheduler — mirrors progressive-guard.ts createDwellScheduler ---
+// Per-key debounce: re-scroll restarts the window (D-01).
+function progCreateDwellScheduler(ms: number): { schedule(key: string, cb: () => void): void; cancel(key: string): void; cancelAll(): void } {
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  return {
+    schedule(key: string, cb: () => void): void {
+      const existing = timers.get(key);
+      if (existing !== undefined) clearTimeout(existing);
+      timers.set(key, setTimeout(() => { timers.delete(key); cb(); }, ms));
+    },
+    cancel(key: string): void {
+      const existing = timers.get(key);
+      if (existing !== undefined) { clearTimeout(existing); timers.delete(key); }
+    },
+    cancelAll(): void {
+      timers.forEach(t => clearTimeout(t));
+      timers.clear();
+    },
+  };
+}
+
+// --- Module-scope progressive engine state ---
+let progObserver: IntersectionObserver | null = null;
+let progMutationObserver: MutationObserver | null = null;
+let progBudget: ReturnType<typeof progCreateBudget> | null = null;
+let progGate: ReturnType<typeof progCreateConcurrencyGate> | null = null;
+let progDwell: ReturnType<typeof progCreateDwellScheduler> | null = null;
+// Seen srcUrl-keys this page session — cheap first-filter dedup (re-scroll guard).
+const progSeenKeys = new Set<string>();
+// img element → srcUrl key (for badge positioning/removal by image).
+const progImgToKey = new Map<HTMLImageElement, string>();
+// srcUrl key → badge element (for repositioning and removal).
+const progKeyToBadge = new Map<string, HTMLElement>();
+// Activity counters (D-04a).
+let progPending = 0;
+let progDone = 0;
+// Throttle handle for scroll/resize repositioning.
+let progRepositionHandle: ReturnType<typeof setTimeout> | null = null;
+
+// --- Badge + indicator helpers (textContent-only — never innerHTML, T-13-06) ---
+
+function progUpdateIndicator(): void {
+  const indicator = document.getElementById(HIME_PROG_INDICATOR_ID);
+  if (indicator) {
+    // D-04a: show activity count next to the ON label
+    const suffix = (progPending + progDone) > 0
+      ? ` (${progPending} pending, ${progDone} done)`
+      : '';
+    indicator.textContent = `hime: progressive ON${suffix}`; // textContent only
+  }
+}
+
+function progCreateIndicator(): void {
+  if (document.getElementById(HIME_PROG_INDICATOR_ID)) return; // idempotent
+  const el = document.createElement('div');
+  el.id = HIME_PROG_INDICATOR_ID;
+  el.style.cssText = [
+    'position: fixed',
+    'bottom: 8px',
+    'right: 8px',
+    'font-family: monospace',
+    'font-size: 11px',
+    'color: #FFA500',
+    'background: rgba(0,0,0,0.7)',
+    'padding: 2px 8px',
+    'border-radius: 3px',
+    'z-index: 2147483646',
+    'pointer-events: none',
+    'white-space: nowrap',
+  ].join(';');
+  el.textContent = 'hime: progressive ON'; // textContent — never innerHTML (T-13-06)
+  document.body.appendChild(el);
+}
+
+function progRemoveIndicator(): void {
+  document.getElementById(HIME_PROG_INDICATOR_ID)?.remove();
+}
+
+// Position a badge absolutely over an image element (getBoundingClientRect + scrollX/Y,
+// matching showLoadingOverlay positioning pattern).
+function progPositionBadge(badge: HTMLElement, img: HTMLImageElement): void {
+  const rect = img.getBoundingClientRect();
+  badge.style.top  = `${rect.top  + window.scrollY + 4}px`;
+  badge.style.left = `${rect.left + window.scrollX + 4}px`;
+}
+
+// Create and attach an on-image badge for a translated image (D-04, T-13-06).
+// textContent-only — NEVER innerHTML.
+// himeNum: worker-assigned, dedup-keyed image number (D-04).  Badge reads
+// '[hime N]' matching the panel entry so the user can cross-reference them.
+function progAddBadge(img: HTMLImageElement, srcKey: string, himeNum: number): void {
+  if (progKeyToBadge.has(srcKey)) return; // already badged
+  const badge = document.createElement('div');
+  badge.className = HIME_PROG_BADGE_CLASS;
+  badge.style.cssText = [
+    'position: absolute',
+    'font-family: monospace',
+    'font-size: 10px',
+    'color: #fff',
+    'background: rgba(74,144,217,0.85)',
+    'padding: 1px 5px',
+    'border-radius: 3px',
+    'z-index: 2147483645',
+    'cursor: pointer',
+    'white-space: nowrap',
+    'user-select: none',
+  ].join(';');
+  badge.textContent = `[hime ${himeNum}]`; // textContent only (T-13-06 / D-04)
+  progPositionBadge(badge, img);
+  document.body.appendChild(badge);
+  progKeyToBadge.set(srcKey, badge);
+
+  // Badge click = USER GESTURE → send openImagePanel to worker (D-04 / PROG-06).
+  // The observer/intersection path NEVER sends openImagePanel (PROG-06).
+  badge.addEventListener('click', () => {
+    // tabId is not directly available in the content script (chrome.tabs is not
+    // exposed to content scripts).  We omit tabId and let the worker resolve it
+    // via chrome.tabs.query — the same fallback used by progressiveTranslate.
+    chrome.runtime.sendMessage({
+      type: 'openImagePanel',
+      payload: { dedupKey: srcKey },
+    } as Message);
+  });
+}
+
+function progRemoveAllBadges(): void {
+  document.querySelectorAll('.' + HIME_PROG_BADGE_CLASS).forEach(el => el.remove());
+  progKeyToBadge.clear();
+}
+
+// Throttled reposition of all badges on scroll/resize (matching overlay pattern).
+function progRepositionAllBadges(): void {
+  if (progRepositionHandle !== null) return; // already scheduled
+  progRepositionHandle = setTimeout(() => {
+    progRepositionHandle = null;
+    progKeyToBadge.forEach((badge, srcKey) => {
+      // Find the img for this key
+      for (const [img, key] of progImgToKey) {
+        if (key === srcKey && document.body.contains(img)) {
+          progPositionBadge(badge, img);
+          break;
+        }
+      }
+    });
+  }, 100);
+}
+
+// --- Send progressiveTranslate to the worker (after all gates pass) ---
+// No API keys in payload — T-12-01 / T-13-08.
+function progSendTranslate(srcUrl: string, srcKey: string): void {
+  // Concurrency slot acquired by caller; budget consumed by caller (D-02a).
+  // We track pending here for the activity display (D-04a).
+  progPending++;
+  progUpdateIndicator();
+
+  // The openImagePanel badge-click path uses the same srcKey as dedupKey so the
+  // worker can match it to the storage.session job entry.  The worker's own
+  // content-hash dedup (getJob/setJob in background.ts) is the authoritative
+  // PROG-03 guard; the srcKey here is a cheap first-filter (see progSrcDedupKey).
+  chrome.runtime.sendMessage(
+    { type: 'progressiveTranslate', payload: { srcUrl, dedupKey: srcKey } } as Message,
+    (response) => {
+      // Release concurrency slot on reply (success, error, or no-text).
+      progGate?.release();
+      progPending = Math.max(0, progPending - 1);
+      progDone++;
+      progUpdateIndicator();
+
+      if (chrome.runtime.lastError) {
+        // Worker not reachable — treat as non-fatal; budget already consumed (D-02a).
+        return;
+      }
+      // A truthy response means the worker accepted + processed the job.
+      // response may be undefined if the worker doesn't send a reply (fire-and-forget).
+      void response; // intentional no-op — result populates the panel via worker
+    }
+  );
+}
+
+// --- Eligibility helpers ---
+
+// True if img has natural dimensions meeting the long-edge threshold.
+// For not-yet-loaded images, falls back to the rendered CSS rect.
+function progGetLongEdge(img: HTMLImageElement): number {
+  const nw = img.naturalWidth;
+  const nh = img.naturalHeight;
+  if (nw > 0 || nh > 0) return Math.max(nw, nh);
+  // Not yet loaded: use rendered rect as a proxy
+  const rect = img.getBoundingClientRect();
+  return Math.max(rect.width, rect.height);
+}
+
+function progIsEligible(img: HTMLImageElement): boolean {
+  if (!img.src) return false;
+  return progIsEligibleSize(
+    img.naturalWidth  || img.getBoundingClientRect().width,
+    img.naturalHeight || img.getBoundingClientRect().height,
+  );
+}
+
+// --- Core: handle intersection entry (dwell + gates + dedup → send) ---
+
+function progHandleIntersect(img: HTMLImageElement): void {
+  const srcUrl = img.src;
+  if (!srcUrl) return;
+  const srcKey = progSrcDedupKey(srcUrl);
+
+  // Cheap first-filter: already sent for this srcUrl this page session
+  if (progSeenKeys.has(srcKey)) return;
+
+  // Eligibility re-check at fire time (image may have loaded since observe)
+  if (!progIsEligible(img)) return;
+
+  // Budget check BEFORE acquiring concurrency or starting dwell — if exhausted,
+  // stop observing entirely (PROG-04 / D-02a budget exhaustion stops progressive).
+  if (progBudget?.isExhausted) {
+    progObserver?.disconnect();
+    return;
+  }
+
+  // Dwell debounce: wait PROG_DWELL_MS of stable intersection before billing (D-01).
+  progDwell?.schedule(srcKey, () => {
+    // Re-check after dwell: another entry may have exhausted the budget meanwhile.
+    if (progBudget?.isExhausted || progSeenKeys.has(srcKey)) return;
+
+    // Concurrency gate (D-02): if cap is reached, silently skip this dwell firing.
+    // The observer remains connected — the image may be retried if it re-enters
+    // the viewport later and the srcKey is not yet seen.
+    if (!progGate?.tryAcquire()) return;
+
+    // Budget gate (D-02a): consume a start slot NOW (before the async call).
+    if (!progBudget?.tryConsume()) {
+      progGate?.release();
+      progObserver?.disconnect();
+      return;
+    }
+
+    // Mark seen so re-scroll never re-sends (PROG-03 first filter).
+    progSeenKeys.add(srcKey);
+    progImgToKey.set(img, srcKey);
+
+    // Disconnect if budget now exhausted after this consume (PROG-04).
+    if (progBudget?.isExhausted) {
+      progObserver?.disconnect();
+    }
+
+    progSendTranslate(srcUrl, srcKey);
+  });
+}
+
+// --- Observe a single image ---
+
+function progObserveImg(img: HTMLImageElement): void {
+  if (!img.src) return;
+  // Already sent for this src — no point observing
+  if (progSeenKeys.has(progSrcDedupKey(img.src))) return;
+
+  if (img.complete && img.naturalWidth > 0) {
+    // Already loaded — check eligibility immediately
+    if (progIsEligible(img)) progObserver?.observe(img);
+  } else {
+    // Not yet loaded: observe after load to get natural dimensions
+    img.addEventListener('load', () => {
+      if (progIsEligible(img)) progObserver?.observe(img);
+    }, { once: true });
+  }
+}
+
+// --- startProgressive / stopProgressive (live toggle — PROG-01) ---
+
+function startProgressive(): void {
+  // Idempotent: if observer already running, do nothing
+  if (progObserver) return;
+
+  // (Re-)initialise per-page state
+  progBudget = progCreateBudget(PROG_PER_PAGE_BUDGET);
+  progGate   = progCreateConcurrencyGate(PROG_CONCURRENCY_CAP);
+  progDwell  = progCreateDwellScheduler(PROG_DWELL_MS);
+  progPending = 0;
+  progDone    = 0;
+
+  // Create IntersectionObserver (D-01: rootMargin fires slightly ahead of viewport).
+  progObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const img = entry.target as HTMLImageElement;
+      if (entry.isIntersecting) {
+        progHandleIntersect(img);
+      } else {
+        // Left the viewport — cancel any pending dwell so flyby does not bill.
+        const srcKey = img.src ? progSrcDedupKey(img.src) : null;
+        if (srcKey) progDwell?.cancel(srcKey);
+      }
+    }
+  }, { rootMargin: `${PROG_ROOT_MARGIN_PX}px` });
+
+  // Observe all current eligible images
+  document.querySelectorAll('img').forEach(img => progObserveImg(img as HTMLImageElement));
+
+  // MutationObserver: pick up images added dynamically (SPAs, lazy-load, etc.)
+  progMutationObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      m.addedNodes.forEach(node => {
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        const el = node as Element;
+        if (el.tagName === 'IMG') {
+          progObserveImg(el as HTMLImageElement);
+        } else {
+          el.querySelectorAll('img').forEach(img => progObserveImg(img as HTMLImageElement));
+        }
+      });
+    }
+  });
+  progMutationObserver.observe(document.body, { childList: true, subtree: true });
+
+  // Persistent ON indicator (D-03a) — textContent-only, never innerHTML
+  progCreateIndicator();
+
+  // Reposition badges on scroll/resize
+  window.addEventListener('scroll', progRepositionAllBadges, { passive: true });
+  window.addEventListener('resize', progRepositionAllBadges, { passive: true });
+
+  // Listen for progressiveActivity messages from the worker (D-04a)
+  // Handled in the main chrome.runtime.onMessage listener below
+
+  console.log('hime: progressive mode started');
+}
+
+function stopProgressive(): void {
+  if (progObserver) { progObserver.disconnect(); progObserver = null; }
+  if (progMutationObserver) { progMutationObserver.disconnect(); progMutationObserver = null; }
+  progDwell?.cancelAll();
+  progDwell  = null;
+  progBudget = null;
+  progGate   = null;
+  progSeenKeys.clear();
+  progImgToKey.clear();
+  if (progRepositionHandle !== null) { clearTimeout(progRepositionHandle); progRepositionHandle = null; }
+
+  progRemoveAllBadges();
+  progRemoveIndicator();
+
+  window.removeEventListener('scroll', progRepositionAllBadges);
+  window.removeEventListener('resize', progRepositionAllBadges);
+
+  console.log('hime: progressive mode stopped');
+}
+
+// --- Handle progressiveActivity messages from the worker (D-04a) ---
+// Registered as an addListener below (after the existing onMessage handler).
+function handleProgressiveActivity(pending: number, done: number): void {
+  progPending = pending;
+  progDone    = done;
+  progUpdateIndicator();
+
+  // Toolbar badge: show activity count (non-blocking, best-effort)
+  const activityText = pending > 0 ? `${pending}` : (done > 0 ? `${done}` : '');
+  if (activityText) {
+    void setBadge(activityText, '#4A90D9');
+  }
+}
+
+// Extend the existing chrome.runtime.onMessage handler to deal with progressive
+// messages sent FROM the worker to this content script.
+// (Worker-to-content messages for badge placement and activity counts.)
+chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
+  if (message.type === 'progressiveActivity') {
+    const p = message.payload as { pending: number; done: number };
+    handleProgressiveActivity(p.pending ?? 0, p.done ?? 0);
+    sendResponse({ success: true });
+    return false; // synchronous
+  }
+
+  if (message.type === 'progressiveBadge') {
+    // Worker notifies content that a key was translated → add badge to matching img.
+    // himeNum (D-04): worker-assigned stable number; badge shows '[hime N]' matching the panel.
+    const p = message.payload as { dedupKey: string; himeNum: number };
+    const srcKey = p.dedupKey;
+    const himeNum = typeof p.himeNum === 'number' ? p.himeNum : 0;
+    for (const [img, key] of progImgToKey) {
+      if (key === srcKey && document.body.contains(img)) {
+        progAddBadge(img, srcKey, himeNum);
+        break;
+      }
+    }
+    sendResponse({ success: true });
+    return false;
+  }
+
+  // Unknown message type — don't interfere with the existing handler.
+  return false;
+});
+
+// --- Boot: read storage and start/stop accordingly ---
+
+chrome.storage.local.get(['himeSettings'], (result) => {
+  const s = (result.himeSettings || {}) as Record<string, unknown>;
+  if (s.progressiveEnabled === true) {
+    // D-05: page-language gate — skip auto-translation when the page is already
+    // in the user's reading language, or when lang is missing/ambiguous.
+    // document.documentElement.lang is author-controlled but only used in a pure
+    // string comparison (T-14-04); fail-safe direction is gate-ON / spend nothing.
+    const pageLang   = document.documentElement.lang ?? '';
+    const targetLang = typeof s.targetLanguage === 'string' ? s.targetLanguage : '';
+    if (!progShouldGateByLanguage(pageLang, targetLang)) {
+      startProgressive();
+    }
+  }
+});
+
+// Live toggle via storage.onChanged (PROG-01 — no extension reload needed).
+// Clones the loadHotkeySettings pattern (lines 828-830 above).
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.himeSettings) return;
+  const newVal = (changes.himeSettings.newValue || {}) as Record<string, unknown>;
+  const oldVal = (changes.himeSettings.oldValue || {}) as Record<string, unknown>;
+  // BUGFIX: act ONLY on a genuine progressiveEnabled flag transition — NOT on any
+  // himeSettings write. A direction swap (Ctrl+Shift+S) mutates targetLanguage while
+  // progressiveEnabled stays true; the old `isOn && !wasOn` test then re-opened the
+  // D-05 page-language gate and kicked off a full translate-all. Comparing the flag's
+  // old vs new value makes the swap a no-op for progressive mode.
+  const wasEnabled = oldVal.progressiveEnabled === true;
+  const isEnabled  = newVal.progressiveEnabled === true;
+  if (isEnabled && !wasEnabled && !progObserver) {
+    // Genuine enable. D-05 page-language gate — same check as the boot path.
+    // Re-read the lang each time (the user may navigate, though lang changes
+    // mid-session are rare).
+    const pageLang   = document.documentElement.lang ?? '';
+    const targetLang = typeof newVal.targetLanguage === 'string' ? newVal.targetLanguage : '';
+    if (!progShouldGateByLanguage(pageLang, targetLang)) {
+      startProgressive();
+    }
+  } else if (!isEnabled && wasEnabled && progObserver) {
+    stopProgressive();
+  }
+});
