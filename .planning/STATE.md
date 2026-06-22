@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: In-Place Page Translation — Phases 15-16 (in progress; started 2026-06-22)
 status: executing
-last_updated: "2026-06-22T15:34:17.218Z"
-last_activity: 2026-06-22 -- Phase 15 execution started
+last_updated: "2026-06-22T16:10:00.000Z"
+last_activity: 2026-06-22 -- Completed 15-03 (in-place page translate + toggle); live checkpoint batched to phase-end
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-21)
 ## Current Position
 
 Phase: 15 (in-place-page-text-translation-triggers) — EXECUTING
-Plan: 2 of 4
-Status: Ready to execute
-Last activity: 2026-06-22 -- Completed 15-01-PLAN.md (pure page-walk core); next 15-02
+Plan: 4 of 4
+Status: 15-02 (worker/triggers) + 15-03 (in-place translate/toggle) code committed; both live checkpoints batched to phase-end human gate. Next 15-04 (auto-offer banner + partial-failure UI).
+Last activity: 2026-06-22 -- Completed 15-03-PLAN.md (content.ts in-place translate + toggle pill + state mirror)
 
 ## Accumulated Context
 
@@ -49,6 +49,9 @@ Carried forward (project invariants):
 - `document.execCommand('insertText')` accepted as deprecated but undo-safe for field replacement; page-text in-place replace is a separate (non-field) path — choose a DOM-safe swap that preserves layout.
 - `content.ts` is a classic script — pure logic lives in node-testable modules (e.g. `image-observer.ts`, `progressive-guard.ts`); wiring inlined.
 - [Phase ?]: 15-01: new translatePageBatch message (plain-string Record) chosen over reusing translateBatch {t,d}
+- 15-03: cursor-driven promise pool over the SYNCHRONOUS concurrency gate — dispatch loop owns scheduling, re-entered only from a reply's .finally; a false tryAcquire parks (never drops) a chunk, no busy-spin
+- 15-03: in-place replace is nodeValue-only (zero innerHTML writes); once-only original capture in a WeakMap, toggle iterates a strong pageTranslatedNodes array (WeakMap not enumerable)
+- 15-03: content.ts mirrors TranslationConfig as a local PageTranslationConfig type (classic-script no-imports law), same field shape as types.ts
 
 ### Pending Todos
 
@@ -70,3 +73,4 @@ None yet.
 | Phase | Plan | Duration | Notes |
 |-------|------|----------|-------|
 | Phase 15 P01 | 18 | 3 tasks | 3 files |
+| Phase 15 P03 | ~20min | 2 code tasks (Task 3 checkpoint deferred) | 1 file (src/content.ts) |

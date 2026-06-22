@@ -137,7 +137,7 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 
 - [x] 15-01-PLAN.md — pure page-walk.ts core (skip-set + recursive walk + chunkByBudget + buildPageBatchPrompt + key-injection-guarded parsePageBatchReply + once-only restore + failed-set) + types.ts message contracts + test/page-walk.mjs (PAGE-01..05) [Wave 1]
 - [ ] 15-02-PLAN.md — worker translatePageBatch case (BYOK batched) + right-click "Translate page" item + onClicked dispatch + popup button with state mirror (PAGE-04, TRIG-01) [Wave 2]
-- [ ] 15-03-PLAN.md — content.ts live createTreeWalker snapshot + chunked dispatch + in-place nodeValue replace + WeakMap toggle pill + translatePage/togglePage routing + session state mirror (PAGE-01/02/03/05) [Wave 3]
+- [x] 15-03-PLAN.md — content.ts live createTreeWalker snapshot + chunked dispatch + in-place nodeValue replace + WeakMap toggle pill + translatePage/togglePage routing + session state mirror (PAGE-01/02/03/05) [Wave 3] (code complete; live checkpoint batched to phase-end gate)
 - [ ] 15-04-PLAN.md — content.ts auto-offer banner gated by progShouldGateByLanguage + per-origin session dismissal + partial-failure toast/red-badge/retry-failed (TRIG-02/03, PAGE-04) [Wave 4]
 
 **UI hint**: yes
