@@ -17,6 +17,7 @@ import type {
   SearchTranslatedMessage,
   SearchResult,
   TranslateBatchMessage,
+  TranslatePageBatchMessage,
   TranslateImageMessage,
   ProgressiveTranslateMessage,
   OpenImagePanelMessage,
@@ -26,6 +27,7 @@ import type {
 import { migrateSettings } from './types.js';
 import { sanitizeSuggestion } from './predict-util.js';
 import { buildBatchTranslatePrompt, parseBatchReply } from './translate-batch.js';
+import { buildPageBatchPrompt, parsePageBatchReply } from './page-walk.js';
 import { buildQueryTranslateConfig } from './query-translate.js';
 import {
   downscaleTarget,
@@ -705,6 +707,57 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             const kind = (err as { kind?: string })?.kind ?? classifyError(s.provider, err).kind;
             const errorMessage = err instanceof Error ? err.message : 'Unknown error';
             console.error('[hime] translateBatch failed', { provider: s.provider, model: s.model, kind, message: errorMessage });
+            sendResponse({ error: errorMessage, kind });
+          }
+          break;
+        }
+
+        case 'translatePageBatch': {
+          // Verbatim clone of the translateBatch case above, adapted for the
+          // page-batch shape: items is Record<string,string> (plain page-text
+          // nodes, no { t, d } split) and the prompt/parse come from page-walk.ts.
+          const msg = message as TranslatePageBatchMessage;
+          const { items, config } = msg.payload;
+          const s = await getSettings();
+          // T-15-04 / PAGE-04 security law: the BYOK key is read ONLY from storage —
+          // NEVER from the message payload, and never echoed in any response.
+          const apiKey = s.apiKeys[s.provider] || '';
+          if (!apiKey) {
+            sendResponse({ error: `API key not configured for ${s.provider}`, kind: 'auth' });
+            break;
+          }
+          const provider = providers[s.provider];
+          if (!provider) {
+            sendResponse({ error: `Unknown provider: ${s.provider}`, kind: 'unknown' });
+            break;
+          }
+          // T-15-04: serialize ONLY the page-supplied items — no url/key added here.
+          const inputKeys = Object.keys(items);
+          const payloadText = JSON.stringify(items);
+          // Page-batch prompt is prepended so the JSON instruction overrides the
+          // system-level "output ONLY translated text" all providers inject.
+          const batchInstruction = buildPageBatchPrompt(config);
+          const userContent = `${batchInstruction}\n\n${payloadText}`;
+          try {
+            // Race against an 8s timeout. The synthetic error uses name: 'AbortError'
+            // so classifyError maps it to kind: 'network' (mirrors translateBatch).
+            const result = await Promise.race([
+              provider.translate(userContent, config, apiKey, s.model),
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(Object.assign(new Error('Translation timed out'), { name: 'AbortError' })),
+                  8000
+                )
+              ),
+            ]);
+            if (result.usage) await recordUsage(s.model, result.usage);
+            // T-15-05: parsePageBatchReply iterates inputKeys only (key-injection guard).
+            const translations = parsePageBatchReply(result.text, inputKeys);
+            sendResponse({ translations });
+          } catch (err) {
+            const kind = (err as { kind?: string })?.kind ?? classifyError(s.provider, err).kind;
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            console.error('[hime] translatePageBatch failed', { provider: s.provider, model: s.model, kind, message: errorMessage });
             sendResponse({ error: errorMessage, kind });
           }
           break;
