@@ -1,13 +1,12 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.4
-milestone_name: In-Place Page Translation
+milestone_name: In-Place Page Translation — Phases 15-16 (in progress; started 2026-06-22)
 status: planning
-stopped_at: Roadmap complete (phases 15-16)
-last_updated: "2026-06-22T00:00:00.000Z"
-last_activity: 2026-06-22 — Roadmap drafted (phases 15-16; 13/13 reqs mapped)
+last_updated: "2026-06-22T03:56:58.610Z"
+last_activity: 2026-06-22 — Roadmap drafted (phases 15-16)
 progress:
-  total_phases: 2
+  total_phases: 10
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
