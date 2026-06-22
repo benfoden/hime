@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: In-Place Page Translation — Phases 15-16 (in progress; started 2026-06-22)
 status: executing
-last_updated: "2026-06-22T16:10:00.000Z"
-last_activity: 2026-06-22 -- Completed 15-03 (in-place page translate + toggle); live checkpoint batched to phase-end
+last_updated: "2026-06-22T15:50:00.000Z"
+last_activity: 2026-06-22 -- Completed 15-04 (auto-offer banner + partial-failure UI); ALL phase-15 code done, live checkpoints batched to phase-end
 progress:
   total_phases: 10
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 4
   percent: 0
 ---
 
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-21)
 
 ## Current Position
 
-Phase: 15 (in-place-page-text-translation-triggers) — EXECUTING
-Plan: 4 of 4
-Status: 15-02 (worker/triggers) + 15-03 (in-place translate/toggle) code committed; both live checkpoints batched to phase-end human gate. Next 15-04 (auto-offer banner + partial-failure UI).
-Last activity: 2026-06-22 -- Completed 15-03-PLAN.md (content.ts in-place translate + toggle pill + state mirror)
+Phase: 15 (in-place-page-text-translation-triggers) — EXECUTING (all 4 plans' code committed)
+Plan: 4 of 4 (complete)
+Status: 15-01..15-04 code committed. ALL phase-15 live-verify checkpoints batched into one human gate at phase-end. Next: phase-end batched human verification, then phase verifier/close.
+Last activity: 2026-06-22 -- Completed 15-04-PLAN.md (auto-offer banner gated by language + per-origin session dismissal; partial-failure single-toast + red badge + retry-only-failed)
 
 ## Accumulated Context
 
@@ -52,6 +52,9 @@ Carried forward (project invariants):
 - 15-03: cursor-driven promise pool over the SYNCHRONOUS concurrency gate — dispatch loop owns scheduling, re-entered only from a reply's .finally; a false tryAcquire parks (never drops) a chunk, no busy-spin
 - 15-03: in-place replace is nodeValue-only (zero innerHTML writes); once-only original capture in a WeakMap, toggle iterates a strong pageTranslatedNodes array (WeakMap not enumerable)
 - 15-03: content.ts mirrors TranslationConfig as a local PageTranslationConfig type (classic-script no-imports law), same field shape as types.ts
+- 15-04: auto-offer banner is a SEPARATE document_end boot block reusing progShouldGateByLanguage — gates BEFORE any banner creation so same-language/unknown pages incur no spend (TRIG-02); independent of progressiveEnabled (manual page-text offer regardless of progressive-image mode)
+- 15-04: per-origin banner dismissal stored in chrome.storage.session (sticky for the session, A7 origin granularity); STORAGE_BANNER_DISMISSED mirrored as a local const (classic-script no-imports law)
+- 15-04: partial-failure shows ONE singleton-by-id toast + red badge AFTER the batch barrier settles (not per-chunk); retry re-batches ONLY [...pageFailedNodes] (consumed from Plan 03's shared Set, cleared on retry) — never the whole page (T-15-14)
 
 ### Pending Todos
 
@@ -74,3 +77,4 @@ None yet.
 |-------|------|----------|-------|
 | Phase 15 P01 | 18 | 3 tasks | 3 files |
 | Phase 15 P03 | ~20min | 2 code tasks (Task 3 checkpoint deferred) | 1 file (src/content.ts) |
+| Phase 15 P04 | ~2min | 2 code tasks (Task 3 checkpoint deferred) | 1 file (src/content.ts) |
