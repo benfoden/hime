@@ -1383,10 +1383,293 @@ function handleProgressiveActivity(pending: number, done: number): void {
   }
 }
 
+// =====================================================================
+// In-place page-text translation (Phase 15: PAGE-01..03, PAGE-05).
+// =====================================================================
+//
+// Mirrored from page-walk.ts — classic-script law, content.ts cannot import.
+// MUST stay in sync with page-walk.ts (SKIP_TAGS, isTranslatableTag,
+// chunkByBudget, PAGE_CHUNK_MAX_CHARS, PAGE_CONCURRENCY_CAP).
+const PAGE_SKIP_TAGS = new Set([
+  'SCRIPT',
+  'STYLE',
+  'NOSCRIPT',
+  'CODE',
+  'PRE',
+  'TEXTAREA',
+  'TITLE',
+  'TEMPLATE',
+  'SVG',
+  'MATH',
+  'HEAD',
+]);
+
+// MUST stay in sync with page-walk.ts isTranslatableTag.
+function pageIsTranslatableTag(tagName: string): boolean {
+  return !PAGE_SKIP_TAGS.has(tagName.toUpperCase());
+}
+
+// MUST stay in sync with page-walk.ts PAGE_CHUNK_MAX_CHARS / PAGE_CONCURRENCY_CAP.
+const PAGE_CHUNK_MAX_CHARS = 4000;
+const PAGE_CONCURRENCY_CAP = 2;
+
+// MUST stay in sync with page-walk.ts chunkByBudget — groups node-text indices
+// into chunks under a character budget (oversized lone node gets its own chunk).
+function pageChunkByBudget(texts: string[], maxChars = PAGE_CHUNK_MAX_CHARS): number[][] {
+  const chunks: number[][] = [];
+  let cur: number[] = [];
+  let size = 0;
+  for (let i = 0; i < texts.length; i++) {
+    const len = texts[i].length;
+    if (cur.length && size + len > maxChars) {
+      chunks.push(cur);
+      cur = [];
+      size = 0;
+    }
+    cur.push(i);
+    size += len;
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
+}
+
+// MUST stay in sync with types.ts STORAGE_PAGE_STATE ('himePage') — classic-script
+// law, content.ts cannot import the const. The popup reads this to label its button.
+const PAGE_STORAGE_PAGE_STATE = 'himePage';
+
+// MUST stay in sync with types.ts TranslationConfig — classic-script law, content.ts
+// cannot import the interface. Same { sourceLanguage, targetLanguage, formality } shape
+// the worker's translatePageBatch case expects (mirrors search.ts:359-363).
+type PageTranslationConfig = {
+  sourceLanguage: string;
+  targetLanguage: string;
+  formality: 'auto' | 'casual' | 'polite' | 'formal';
+};
+
+// Cheap visibility test (RESEARCH Pattern 1b). offsetParent === null catches
+// display:none / detached; position:fixed elements are rescued (they ARE visible
+// despite a null offsetParent). Misses visibility:hidden / zero-size — acceptable
+// for D-03 "visible text nodes only" go-fast scope.
+function pageIsVisible(el: HTMLElement): boolean {
+  if (el.offsetParent === null) {
+    const pos = getComputedStyle(el).position;
+    if (pos !== 'fixed') return false;
+  }
+  return true;
+}
+
+// --- Module-scope in-place page-translation state (PAGE-03 toggle store) ---
+// pageStore: live node → {original, translated}; WeakMap is NOT enumerable, so the
+// toggle iterates the strong pageTranslatedNodes array instead (Pitfall 6).
+const pageStore = new WeakMap<Text, { original: string; translated: string }>();
+let pageTranslatedNodes: Text[] = [];
+let pageState: 'original' | 'translated' = 'original';
+// Shared failed-node surface (D-04): snapshot Text nodes whose returned key was
+// absent from a chunk reply. Declared + populated HERE; Plan 04 consumes (reads/clears)
+// it for the retry hook.
+const pageFailedNodes = new Set<Text>();
+
+/**
+ * Single STATIC snapshot of visible, translatable Text nodes in document order
+ * (PAGE-05: no MutationObserver — content added after this call is never seen).
+ *
+ * Uses the browser-native createTreeWalker (SHOW_TEXT). acceptNode walks the
+ * ancestor chain rejecting any element in PAGE_SKIP_TAGS or contenteditable
+ * (Pitfall 2: SHOW_TEXT cannot FILTER_REJECT element subtrees, so we re-check
+ * ancestors per text node), rejects whitespace-only nodes, and rejects nodes whose
+ * parent element is not visible.
+ */
+function pageCollectTextNodes(): Text[] {
+  const out: Text[] = [];
+  if (!document.body) return out;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node: Node): number {
+      if (!(node.nodeValue ?? '').trim()) return NodeFilter.FILTER_REJECT;
+      // Ancestor skip-check: walk up from the text node's parent element.
+      let el: Element | null = node.parentElement;
+      while (el) {
+        if (!pageIsTranslatableTag(el.tagName)) return NodeFilter.FILTER_REJECT;
+        if ((el as HTMLElement).isContentEditable) return NodeFilter.FILTER_REJECT;
+        el = el.parentElement;
+      }
+      const parent = node.parentElement;
+      if (parent && !pageIsVisible(parent)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  let n: Node | null;
+  while ((n = walker.nextNode())) out.push(n as Text);
+  return out;
+}
+
+// Read the translation config from himeSettings, mirroring search.ts:359-363's
+// { sourceLanguage, targetLanguage, formality } shape and reusing the content.ts
+// storage-read law (chrome.storage.local.get(['himeSettings'])). The BYOK key is
+// NEVER read or sent here — the worker reads it from storage (T-15-08).
+async function pageReadConfig(): Promise<PageTranslationConfig> {
+  const result = await chrome.storage.local.get(['himeSettings']);
+  const s = (result.himeSettings || {}) as Record<string, unknown>;
+  const sourceLanguage = typeof s.sourceLanguage === 'string' ? s.sourceLanguage : '';
+  const targetLanguage = typeof s.targetLanguage === 'string' ? s.targetLanguage : '';
+  const formality: PageTranslationConfig['formality'] =
+    s.formality === 'casual' || s.formality === 'polite' || s.formality === 'formal'
+      ? s.formality
+      : 'auto';
+  const config: PageTranslationConfig = { sourceLanguage, targetLanguage, formality };
+  return config;
+}
+
+/**
+ * Send one keyed chunk to the worker (translatePageBatch) and resolve the
+ * translations map. Mirrors the translateText promise-wrapper (lastError +
+ * response.error guard). The key NEVER appears in the payload (worker owns it).
+ */
+function pageSendChunk(
+  items: Record<string, string>,
+  config: PageTranslationConfig,
+): Promise<Record<string, string>> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: 'translatePageBatch', payload: { items, config } } as Message,
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else if (response?.error) {
+          const e = new Error(response.error);
+          (e as { kind?: string }).kind = response.kind ?? 'unknown';
+          reject(e);
+        } else {
+          resolve((response?.translations ?? {}) as Record<string, string>);
+        }
+      },
+    );
+  });
+}
+
+/**
+ * Apply one chunk's translations to the snapshot (Pattern 3: nodeValue only,
+ * NEVER innerHTML). For each GLOBAL snapshot index covered by this chunk:
+ *  - key present  → capture original ONCE (Pitfall 7), set translated, write nodeValue,
+ *                   record the node in pageTranslatedNodes.
+ *  - key absent   → push the node into the returned `missing` list (per-chunk
+ *                   missing-key nodes the caller accumulates into pageFailedNodes).
+ * RESPECTS Pitfall 5 (read-then-write): the snapshot was collected up-front; this
+ * write phase runs only after the chunk reply returns.
+ */
+function pageApplyChunk(
+  snapshot: Text[],
+  chunk: number[],
+  translations: Record<string, string>,
+): Text[] {
+  const missing: Text[] = [];
+  for (const idx of chunk) {
+    const key = String(idx);
+    const node = snapshot[idx];
+    if (!node) continue;
+    const value = translations[key];
+    if (typeof value === 'string') {
+      if (!document.contains(node)) continue; // node detached since snapshot
+      if (!pageStore.has(node)) {
+        pageStore.set(node, { original: node.nodeValue ?? '', translated: '' });
+      }
+      const rec = pageStore.get(node);
+      if (rec) rec.translated = value;
+      pageTranslatedNodes.push(node);
+      node.nodeValue = value; // in-place, plain text — never innerHTML (Pattern 3 / T-15-07)
+    } else {
+      // Key absent for a node that WAS in this chunk → failed node (D-04).
+      missing.push(node);
+    }
+  }
+  return missing;
+}
+
+/**
+ * Cursor-driven promise-pool dispatch of translatePageBatch chunks under the
+ * SYNCHRONOUS concurrency gate (progCreateConcurrencyGate). The gate has no
+ * internal queue/await: tryAcquire() returns false when full and the dispatch loop
+ * owns scheduling. Each chunk is dispatched EXACTLY once:
+ *  - launch(): while the cursor has remaining chunks AND a slot is free, take the
+ *    chunk at the cursor, increment the cursor, send it, and on reply apply it,
+ *    release the slot, and RE-ENTER launch() (the ONLY re-entry trigger — no
+ *    polling/busy-spin on tryAcquire). A false tryAcquire never drops a chunk: the
+ *    chunk simply waits on the cursor until a reply frees a slot.
+ *  - the returned promise resolves only once every chunk has been dispatched and
+ *    settled (cursor exhausted AND zero in-flight).
+ *
+ * Callable with a node subset so Plan 04's retry can reuse it.
+ */
+async function pageTranslate(nodes?: Text[]): Promise<void> {
+  const snapshot = nodes ?? pageCollectTextNodes();
+  if (snapshot.length === 0) return;
+  const config = await pageReadConfig();
+  const texts = snapshot.map((n) => n.nodeValue ?? '');
+  const chunks = pageChunkByBudget(texts);
+  const gate = progCreateConcurrencyGate(PAGE_CONCURRENCY_CAP);
+
+  let cursor = 0;
+  const inFlight = new Set<Promise<void>>();
+
+  return await new Promise<void>((resolveAll, rejectAll) => {
+    const settle = (): void => {
+      if (cursor >= chunks.length && inFlight.size === 0) resolveAll();
+    };
+
+    const launch = (): void => {
+      // Start as many chunks as the gate allows, advancing the cursor each time.
+      while (cursor < chunks.length && gate.tryAcquire()) {
+        const chunk = chunks[cursor];
+        cursor++;
+        const items: Record<string, string> = {};
+        for (const idx of chunk) items[String(idx)] = texts[idx]; // GLOBAL snapshot index keys
+
+        const p = pageSendChunk(items, config)
+          .then((translations) => {
+            const missing = pageApplyChunk(snapshot, chunk, translations);
+            for (const node of missing) pageFailedNodes.add(node);
+          })
+          .catch((err) => {
+            // Whole-chunk failure: every node in this chunk is a failed node (D-04).
+            // The toast/badge population path is Plan 04; here we only surface the set.
+            for (const idx of chunk) {
+              const node = snapshot[idx];
+              if (node) pageFailedNodes.add(node);
+            }
+            void err;
+          })
+          .finally(() => {
+            gate.release();
+            inFlight.delete(p);
+            // Re-enter the launch loop from inside the reply (no busy-spin).
+            launch();
+            settle();
+          });
+        inFlight.add(p);
+      }
+      // If nothing is in flight and the cursor is exhausted, resolve.
+      settle();
+    };
+
+    try {
+      launch();
+    } catch (err) {
+      rejectAll(err instanceof Error ? err : new Error(String(err)));
+    }
+  }).then(() => {
+    pageState = 'translated';
+  });
+}
+
 // Extend the existing chrome.runtime.onMessage handler to deal with progressive
 // messages sent FROM the worker to this content script.
 // (Worker-to-content messages for badge placement and activity counts.)
 chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
+  if (message.type === 'translatePage') {
+    void pageTranslate();
+    sendResponse({ success: true });
+    return false; // synchronous ack — translation runs async in the background
+  }
+
   if (message.type === 'progressiveActivity') {
     const p = message.payload as { pending: number; done: number };
     handleProgressiveActivity(p.pending ?? 0, p.done ?? 0);
