@@ -160,7 +160,7 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 - [x] 16-01-PLAN.md — pure seams + contracts: overlay-geometry.ts (mapBox), overlay-fit.ts (fitText), collectParagraphBoxes + OverlayBlock/translateImageBlocks/includeImages types + RED node tests (OVL-01/04/05) [Wave 1]
 - [x] 16-02-PLAN.md — worker + provider: ocr() surfaces paragraph blocks, downscaleAndGuard returns submitted dims, translateImageBlocks keyed-JSON batch case + capture-fallback flag (OVL-01) [Wave 2]
 - [x] 16-03-PLAN.md — popup "Include images" opt-in checkbox (default OFF) persisted to himeSettings, folded into Translate page (OVL-01 / D-01) [Wave 2]
-- [ ] 16-04-PLAN.md — content.ts overlay layer: mirrored mapBox/fitText, gated collect+dispatch, render/anchor (ResizeObserver) black/white boxes, per-image + global toggle (OVL-01..05 / D-01/02/03) [Wave 3]
+- [x] 16-04-PLAN.md — content.ts overlay layer: mirrored mapBox/fitText, gated collect+dispatch, render/anchor (ResizeObserver) black/white boxes, per-image + global toggle (OVL-01..05 / D-01/02/03) [Wave 3]
 - [ ] 16-05-PLAN.md — build + full suite green + batched live load-unpacked human-verify of all 5 OVL behaviors (OVL-01..05) [Wave 4]
 
 **UI hint**: yes
@@ -185,7 +185,7 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 | 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 4/4 | Complete | 2026-06-21 |
 | 14. UX / Quality Hardening + Vision Settings | v1.3 | 5/5 | Complete   | 2026-06-21 |
 | 15. In-Place Page-Text Translation + Triggers | v1.4 | 4/4 | Complete   | 2026-06-22 |
-| 16. In-Place Image Overlay Translation | v1.4 | 3/5 | In Progress|  |
+| 16. In-Place Image Overlay Translation | v1.4 | 4/5 | In Progress|  |
 
 ## Backlog
 
@@ -193,7 +193,7 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 
 **Goal:** [Captured for future planning] Translate all search-result headings in a first pass, then descriptions in a second pass, so the user gets the most useful information (titles) fastest — progressive SERP rendering instead of waiting for the full batch.
 **Requirements:** TBD
-**Plans:** 3/5 plans executed
+**Plans:** 4/5 plans executed
 
 Plans:
 
