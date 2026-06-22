@@ -19,6 +19,7 @@ import type {
   TranslateBatchMessage,
   TranslatePageBatchMessage,
   TranslateImageMessage,
+  TranslateImageBlocksMessage,
   ProgressiveTranslateMessage,
   OpenImagePanelMessage,
   ImageEntry,
@@ -198,13 +199,14 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 async function resolveImageBytes(
   srcUrl: string,
   tabId: number,
-): Promise<{ base64: string; mime: string }> {
+): Promise<{ base64: string; mime: string; viaCaptureFallback: boolean }> {
   // (a) data: URL — bytes are inline; derive MIME from the prefix.
   if (srcUrl.startsWith('data:')) {
     const mimeMatch = /^data:([^;,]*)[;,]/.exec(srcUrl);
     return {
       base64: stripBase64Prefix(srcUrl),
       mime: mimeMatch?.[1] || 'image/png',
+      viaCaptureFallback: false,
     };
   }
 
@@ -216,7 +218,7 @@ async function resolveImageBytes(
       if (response.ok) {
         const blob = await response.blob();
         const base64 = arrayBufferToBase64(await blob.arrayBuffer());
-        return { base64, mime: blob.type || 'image/png' };
+        return { base64, mime: blob.type || 'image/png', viaCaptureFallback: false };
       }
     } catch {
       // Fall through to the capture fallback (403 / opaque / network).
@@ -224,9 +226,11 @@ async function resolveImageBytes(
   }
 
   // (c) captureVisibleTab fallback — for blob:, tainted, or fetch-blocked images.
+  // Phase 16 OVL-01: flag this path so translateImageBlocks can skip overlay
+  // for screenshot-resolved images (RESEARCH Pitfall 2 / T-16-06).
   const tab = await chrome.tabs.get(tabId);
   const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-  return { base64: stripBase64Prefix(dataUrl), mime: 'image/png' };
+  return { base64: stripBase64Prefix(dataUrl), mime: 'image/png', viaCaptureFallback: true };
 }
 
 // VIS-03 MIME guard + downscale (Pitfall 3 / T-12-15). Re-encodes exotic MIME to
@@ -763,6 +767,113 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             const kind = (err as { kind?: string })?.kind ?? classifyError(s.provider, err).kind;
             const errorMessage = err instanceof Error ? err.message : 'Unknown error';
             console.error('[hime] translatePageBatch failed', { provider: s.provider, model: s.model, kind, message: errorMessage });
+            sendResponse({ error: errorMessage, kind });
+          }
+          break;
+        }
+
+        case 'translateImageBlocks': {
+          // Phase 16 OVL-01: OCR one image into per-paragraph boxes, batch-translate
+          // all blocks in a SINGLE keyed-JSON round-trip (mirrors translatePageBatch),
+          // and reply with { blocks, submitted } for content-side overlay positioning.
+          //
+          // Security law (T-12-01 / T-16-02): keys are read from storage ONLY —
+          // NEVER from the message payload (which carries only srcUrl/tabId/dedupKey/config),
+          // and NEVER echoed in any reply.
+          const msg = message as TranslateImageBlocksMessage;
+          const { srcUrl, tabId, dedupKey, config } = msg.payload;
+          const s = await getSettings();
+
+          // T-16-02: read keys from storage exclusively.
+          const googleKey = s.googleApiKey;
+          if (!googleKey) {
+            sendResponse({ error: 'Google Cloud API key not configured — add it in options', kind: 'auth' });
+            break;
+          }
+          const apiKey = s.apiKeys[s.provider] || '';
+          if (!apiKey) {
+            sendResponse({ error: `API key not configured for ${s.provider}`, kind: 'auth' });
+            break;
+          }
+          const provider = providers[s.provider];
+          if (!provider) {
+            sendResponse({ error: `Unknown provider: ${s.provider}`, kind: 'unknown' });
+            break;
+          }
+
+          try {
+            // Resolve image bytes via the data:/fetch/captureVisibleTab ladder.
+            const resolved = await resolveImageBytes(srcUrl, tabId ?? 0);
+
+            // T-16-06: captureVisibleTab bytes are in screenshot space — boxes
+            // cannot be mapped back to the <img>. Reply with captureFallback flag
+            // so the content script skips overlay (RESEARCH Pitfall 2).
+            if (resolved.viaCaptureFallback) {
+              sendResponse({ captureFallback: true });
+              break;
+            }
+
+            // Downscale to Vision long-edge cap + re-encode exotic MIMEs.
+            // The widened return now carries submitted {width,height} (Plan 02 Task 2).
+            const guarded = await downscaleAndGuard(resolved.base64, resolved.mime);
+
+            // OCR the image — result now carries blocks[] (Plan 02 Task 1).
+            const ocrResult = await visionProvider.ocr(guarded.base64, guarded.mime, googleKey);
+            if (ocrResult?.usage) await recordUsage('google-vision', ocrResult.usage);
+
+            // No-text sentinel → empty blocks (image had no OCR-able text).
+            if (!ocrResult) {
+              sendResponse({ blocks: [] });
+              break;
+            }
+
+            const blocks = ocrResult.blocks ?? [];
+            if (blocks.length === 0) {
+              sendResponse({ blocks: [] });
+              break;
+            }
+
+            // Build the keyed-JSON items map (T-15-04 / T-16-04 — no key added here).
+            const inputKeys = blocks.map((_, i) => String(i));
+            const items: Record<string, string> = {};
+            for (let i = 0; i < blocks.length; i++) {
+              items[String(i)] = blocks[i].text;
+            }
+
+            // One LLM round-trip for ALL blocks of this image (OVL-01 / Pattern 5).
+            const batchInstruction = buildPageBatchPrompt(config);
+            const userContent = `${batchInstruction}\n\n${JSON.stringify(items)}`;
+
+            const translateResult = await Promise.race([
+              provider.translate(userContent, config, apiKey, s.model),
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(Object.assign(new Error('Translation timed out'), { name: 'AbortError' })),
+                  8000,
+                ),
+              ),
+            ]);
+            if (translateResult.usage) await recordUsage(s.model, translateResult.usage);
+
+            // T-16-04: parsePageBatchReply iterates inputKeys only (key-injection guard).
+            const translations = parsePageBatchReply(translateResult.text, inputKeys);
+
+            // Zip translations onto blocks by index; missing key → original text (page-walk.ts:166).
+            const out = blocks.map((b, i) => ({
+              box: b.box,
+              original: b.text,
+              translated: translations[String(i)] ?? b.text,
+            }));
+
+            // T-16-02: submitted dims (not keys) are the only new data in this reply.
+            sendResponse({
+              blocks: out,
+              submitted: { w: guarded.width, h: guarded.height },
+            });
+          } catch (err) {
+            const kind = (err as { kind?: string })?.kind ?? classifyError(s.provider, err).kind;
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            console.error('[hime] translateImageBlocks failed', { provider: s.provider, model: s.model, kind, message: errorMessage });
             sendResponse({ error: errorMessage, kind });
           }
           break;
