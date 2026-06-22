@@ -9,6 +9,7 @@ let openOptionsBtn: HTMLButtonElement;
 let openSearchBtn: HTMLButtonElement;
 let openImagePanelBtn: HTMLButtonElement;
 let translatePageBtn: HTMLButtonElement;
+let includeImagesCheckbox: HTMLInputElement;
 
 // Shape of the global page-state mirror in chrome.storage.session (D-01). It is a
 // SINGLE record across all tabs — Plan 03's content script writes the active page's
@@ -28,6 +29,7 @@ async function loadSettings(): Promise<void> {
   
   sourceLangSpan.textContent = settings.sourceLanguage;
   targetLangSpan.textContent = settings.targetLanguage;
+  includeImagesCheckbox.checked = settings.includeImages ?? false;
 
   await refreshTranslatePageLabel();
 }
@@ -126,12 +128,20 @@ document.addEventListener('DOMContentLoaded', () => {
   openSearchBtn = document.getElementById('openSearch') as HTMLButtonElement;
   openImagePanelBtn = document.getElementById('openImagePanel') as HTMLButtonElement;
   translatePageBtn = document.getElementById('translatePage') as HTMLButtonElement;
+  includeImagesCheckbox = document.getElementById('includeImages') as HTMLInputElement;
 
   swapBtn.addEventListener('click', swapDirection);
   openOptionsBtn.addEventListener('click', openOptions);
   openSearchBtn.addEventListener('click', openSearch);
   openImagePanelBtn.addEventListener('click', openImagePanel);
   translatePageBtn.addEventListener('click', translatePageAction);
-  
+  includeImagesCheckbox.addEventListener('change', async () => {
+    const result = await chrome.storage.local.get(['himeSettings']);
+    const current: Partial<Settings> = result.himeSettings || {};
+    await chrome.storage.local.set({
+      himeSettings: { ...current, includeImages: includeImagesCheckbox.checked },
+    });
+  });
+
   loadSettings();
 });
