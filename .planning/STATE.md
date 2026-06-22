@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: In-Place Page Translation — Phases 15-16 (in progress; started 2026-06-22)
-status: planning
-last_updated: "2026-06-22T03:56:58.610Z"
-last_activity: 2026-06-22 — Roadmap drafted (phases 15-16)
+status: executing
+last_updated: "2026-06-22T15:34:17.218Z"
+last_activity: 2026-06-22 -- Phase 15 execution started
 progress:
   total_phases: 10
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 4
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ See: .planning/PROJECT.md (updated 2026-06-21)
 
 **Core value:** Type English, get natural Japanese inline — without breaking your keyboard flow.
 **Last shipped:** v1.3 Image Translation (phases 12-14, 2026-06-21)
-**Current focus:** v1.4 In-Place Page Translation (phases 15-16) — roadmap complete; ready to plan Phase 15
+**Current focus:** Phase 15 — in-place-page-text-translation-triggers
 
 ## Current Position
 
-Phase: 15 (In-Place Page-Text Translation + Triggers) — not started
-Plan: —
-Status: Roadmap complete (2 phases, 13/13 reqs mapped); ready to plan Phase 15
-Last activity: 2026-06-22 — Roadmap drafted (phases 15-16)
+Phase: 15 (in-place-page-text-translation-triggers) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-06-22 -- Completed 15-01-PLAN.md (pure page-walk core); next 15-02
 
 ## Accumulated Context
 
@@ -48,6 +48,7 @@ Carried forward (project invariants):
 - All network + BYOK keys stay in the background service worker — never on the page.
 - `document.execCommand('insertText')` accepted as deprecated but undo-safe for field replacement; page-text in-place replace is a separate (non-field) path — choose a DOM-safe swap that preserves layout.
 - `content.ts` is a classic script — pure logic lives in node-testable modules (e.g. `image-observer.ts`, `progressive-guard.ts`); wiring inlined.
+- [Phase ?]: 15-01: new translatePageBatch message (plain-string Record) chosen over reusing translateBatch {t,d}
 
 ### Pending Todos
 
@@ -63,3 +64,9 @@ None yet.
 
 - Roadmap complete: Phase 15 (PAGE+TRIG, 8 reqs) → Phase 16 (OVL, 5 reqs).
 - Next: `/gsd-plan-phase 15` to decompose the in-place page-text + trigger slice.
+
+## Performance Metrics
+
+| Phase | Plan | Duration | Notes |
+|-------|------|----------|-------|
+| Phase 15 P01 | 18 | 3 tasks | 3 files |
