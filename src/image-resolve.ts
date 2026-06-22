@@ -147,16 +147,50 @@ export function stripBase64Prefix(dataUrlOrB64: string): string {
 // then page-level, then 0.
 // ----------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Phase 16 geometry types — bounding box for overlay positioning.
+// ---------------------------------------------------------------------------
+
+/** A single vertex in pixel-coordinate space (submitted-image frame). */
+interface VertexRaw {
+  x?: number;
+  y?: number;
+}
+
+/** Google Vision boundingBox as returned on paragraph/block nodes. */
+interface BoundingBox {
+  /** Absolute pixel vertices in submitted-image pixel space (CRITICAL — see RESEARCH Pitfall 1). */
+  vertices?: VertexRaw[];
+  /** Normalized [0,1] vertices; multiply by submitted dims for absolute pixels (A2). */
+  normalizedVertices?: VertexRaw[];
+}
+
+/** A single Vision symbol with optional text content and break hint. */
+interface SymbolNode {
+  text?: string;
+  confidence?: number;
+  property?: {
+    detectedBreak?: {
+      /** SPACE | EOL_SURE_SPACE | LINE_BREAK | HYPHEN | SURE_SPACE */
+      type?: string;
+    };
+  };
+}
+
 interface ConfHolder {
   confidence?: number;
 }
 interface WordNode extends ConfHolder {
-  symbols?: ConfHolder[];
+  /** Paragraph-level nodes also carry boundingBox on words (Vision API). */
+  boundingBox?: BoundingBox;
+  symbols?: SymbolNode[];
 }
 interface ParagraphNode {
+  boundingBox?: BoundingBox;
   words?: WordNode[];
 }
 interface BlockNode {
+  boundingBox?: BoundingBox;
   paragraphs?: ParagraphNode[];
 }
 interface PageNode extends ConfHolder {
@@ -168,6 +202,107 @@ interface FullTextAnnotation {
 }
 interface VisionResponse {
   responses?: Array<{ fullTextAnnotation?: FullTextAnnotation }>;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 16 OverlayBlock — per-paragraph text + geometry for overlay rendering.
+// ---------------------------------------------------------------------------
+
+/**
+ * One overlay block: assembled paragraph text + its 4-vertex bounding box in
+ * submitted-image pixel space. Consumed by mapBox() (overlay-geometry.ts) to
+ * position the DOM overlay box over the rendered <img>.
+ *
+ * Re-exported from types.ts as the canonical contract shape (downstream plans
+ * import OverlayBlock from types.ts or directly from image-resolve.ts).
+ */
+export interface OverlayBlock {
+  /** Assembled paragraph text (from words[].symbols[].text + detectedBreak spacing). */
+  text: string;
+  /** 4 vertices in submitted-image pixel space, matching Vision's coordinate frame. */
+  box: { x: number; y: number }[];
+}
+
+/**
+ * Assemble paragraph text from its word/symbol tree, inserting spaces and
+ * newlines per Vision's detectedBreak codes (Pitfall 3: there is no .text
+ * field at the paragraph/word level in fullTextAnnotation).
+ *
+ * detectedBreak.type:
+ *   SPACE | EOL_SURE_SPACE → append ' ' after the symbol
+ *   LINE_BREAK             → append '\n' after the symbol
+ *   (any other / absent)   → no separator
+ *
+ * @internal
+ */
+function assembleParagraphText(para: ParagraphNode): string {
+  let out = '';
+  for (const word of para.words ?? []) {
+    for (const sym of word.symbols ?? []) {
+      out += sym.text ?? '';
+      const breakType = sym.property?.detectedBreak?.type;
+      if (breakType === 'SPACE' || breakType === 'EOL_SURE_SPACE') {
+        out += ' ';
+      } else if (breakType === 'LINE_BREAK') {
+        out += '\n';
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Extract one OverlayBlock per paragraph from a Vision fullTextAnnotation,
+ * walking pages → blocks → paragraphs.
+ *
+ * Paragraphs are included only when:
+ *   (a) the assembled text is non-empty after trimming, AND
+ *   (b) the bounding box has exactly 4 vertices.
+ *
+ * Box vertex source: boundingBox.vertices (absolute pixel, submitted-image
+ * frame) is preferred; falls back to boundingBox.normalizedVertices × submitted
+ * dims when vertices are absent (RESEARCH A2).
+ *
+ * Defensive: never throws on a sparse/partial annotation (optional-chaining
+ * throughout, mirrors meanWordConfidence defensiveness — T-16-01).
+ *
+ * @param fta       A Vision fullTextAnnotation (may be null/undefined → returns []).
+ * @param submitted Optional submitted image dimensions for normalizedVertices fallback.
+ */
+export function collectParagraphBoxes(
+  fta: FullTextAnnotation | undefined | null,
+  submitted?: { w: number; h: number },
+): OverlayBlock[] {
+  if (!fta) return [];
+  const out: OverlayBlock[] = [];
+
+  for (const page of fta.pages ?? []) {
+    for (const block of page.blocks ?? []) {
+      for (const para of block.paragraphs ?? []) {
+        const text = assembleParagraphText(para);
+        if (!text.trim()) continue; // drop empty/whitespace-only paragraphs (T-16-01)
+
+        // Read bounding box vertices (RESEARCH A2 fallback to normalizedVertices × submitted).
+        const rawBB = para.boundingBox;
+        let rawVerts: VertexRaw[] | undefined = rawBB?.vertices;
+
+        if ((!rawVerts || rawVerts.length === 0) && rawBB?.normalizedVertices && submitted) {
+          // Normalize fallback: multiply [0,1] coords by submitted dims.
+          rawVerts = rawBB.normalizedVertices.map((v) => ({
+            x: (v.x ?? 0) * submitted.w,
+            y: (v.y ?? 0) * submitted.h,
+          }));
+        }
+
+        if (!rawVerts || rawVerts.length !== 4) continue; // drop malformed boxes (T-16-01)
+
+        const box = rawVerts.map((v) => ({ x: v.x ?? 0, y: v.y ?? 0 }));
+        out.push({ text, box });
+      }
+    }
+  }
+
+  return out;
 }
 
 function mean(values: number[]): number {
