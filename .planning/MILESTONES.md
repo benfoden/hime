@@ -1,5 +1,22 @@
 # Milestones
 
+## v1.3 Image Translation (Shipped: 2026-06-22)
+
+**Phases completed:** 3 phases (12–14), 16 plans
+
+**Audit:** passed (16/16 requirements; all 4 E2E flows wired). See `milestones/v1.3-MILESTONE-AUDIT.md`.
+
+**Key accomplishments:**
+
+- Right-click any `<img>` → OCR + translate the text inside it, surfaced as readable text in the side panel (original + translation + detected language). Image bytes resolved in the background worker via a fetch/`captureVisibleTab` ladder for cross-origin and tainted-canvas images.
+- Provider-agnostic `VisionProvider` (Google Cloud Vision `images:annotate` DOCUMENT_TEXT_DETECTION for OCR + language detection), with images validated/downscaled to Google's limits (≤10 MB, ≤75 M-px) so oversized inputs fail gracefully.
+- **Deviation D-V01:** OCR'd text translates through the user's existing LLM provider, not Cloud Translation v2 — the Google key needs only the Cloud Vision scope, and translation reuses already-configured provider + target language.
+- Progressive viewport mode (opt-in, default OFF): IntersectionObserver auto-translation with first-enable privacy warning, content-hash dedup (re-scroll never re-bills), and cost guards — concurrency cap, per-page budget, 400 ms dwell debounce, min-size + page-language eligibility filters.
+- Explicit per-image state machine (loading / no-text / low-confidence / error — never a silent blank); `[hime N]` numbered badges; copy buttons for translation + original; CJK/vertical-text note.
+- BYOK key entry + Vision connection test in settings; all vision calls routed through the background service worker, key never exposed to the page.
+
+---
+
 ## v1.2 Translated Search (Shipped: 2026-06-20)
 
 **Phases completed:** 4 phases (8–11), 11 plans
