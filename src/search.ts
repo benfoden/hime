@@ -24,7 +24,7 @@
 import { renderSerp } from './serp-render.js';
 import { buildDisclosureText } from './disclosure.js';
 import type { DisclosureInput } from './disclosure.js';
-import { buildBatchPayload, mergeTranslations, chunkResults } from './translate-batch.js';
+import { buildBatchPayload, mergeTranslations } from './translate-batch.js';
 import type {
   SearchResult,
   SearchTranslatedResponse,
@@ -47,12 +47,16 @@ let formality: TranslationConfig['formality'] = 'auto';
 let backTranslate = true;
 const TOGGLE_KEY = 'himeSearchTranslateResults';
 
-// Back-translation is sent in small per-request batches rather than one big
-// translateBatch call: smaller payloads finish well under the worker's 8s cap
-// (XLT-05 reliability — large single batches were timing out → spurious
-// 'network' errors). Reasonable inter-batch delay avoids hammering the provider.
-const SEARCH_BATCH_SIZE = 5;
-const SEARCH_BATCH_DELAY_MS = 400;
+// Back-translation streams in small ordered batches (top → bottom), rendering each
+// as it lands, rather than one big translateBatch call: smaller payloads finish well
+// under the worker's 8s cap, and per-batch retries + a final failure sweep make ALL
+// results translate reliably (the prior all-or-nothing batch left transient failures
+// permanently raw — e.g. results 0-4 staying in the source language). Backoff between
+// attempts rides out the provider's per-minute rate limit (the query translation
+// fires a request immediately before, so the first batch is prone to a transient 429).
+const SEARCH_BATCH_SIZE = 3; // small → finer top-to-bottom streaming, smaller payloads
+const SEARCH_BATCH_DELAY_MS = 350; // gap between batches (RPM-friendly)
+const SEARCH_MAX_ATTEMPTS = 4; // attempts per batch before deferring to the sweep
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // Cache of the most recent search so toggling the checkbox re-applies the
@@ -342,6 +346,7 @@ async function runSearch(
  */
 async function applyOverlay(mount: HTMLElement, runToken: number): Promise<void> {
   if (!lastRaw) return;
+  const raw = lastRaw; // non-null capture for the closures/loops below
 
   // No back-translation wanted (toggle off) or nothing to translate back
   // (results already in the reader's language) → show raw rows.
@@ -363,63 +368,86 @@ async function applyOverlay(mount: HTMLElement, runToken: number): Promise<void>
   // Compute the overlay: translate target→source (back to the reader's language).
   // Direction is swapped vs the query path: results arrive in the target language
   // and must come back to the source language the reader understands.
-  //
-  // Sent in small batches (SEARCH_BATCH_SIZE rows each) with a short delay between
-  // them rather than one big request — large single batches were exceeding the
-  // worker's 8s cap and surfacing as spurious 'network' failures (XLT-05). Each
-  // chunk gets one retry; rows whose chunk fails stay raw (graceful degradation).
   const config: TranslationConfig = {
     sourceLanguage: targetLanguage,
     targetLanguage: sourceLanguage,
     formality,
   };
-  const chunks = chunkResults(lastRaw, SEARCH_BATCH_SIZE);
-  const merged = lastRaw.slice();
-  let anyTranslated = false;
-  let anyFailed = false;
 
-  for (let ci = 0; ci < chunks.length; ci++) {
-    // Stale-run guard before every send/render (T-11-09): a newer search/toggle
-    // started while we awaited a chunk → abort without caching or clobbering.
-    if (currentRun !== runToken) return;
-    if (ci > 0) await sleep(SEARCH_BATCH_DELAY_MS);
+  // `merged` carries the live view: translated rows replace their raw counterpart
+  // in place (mergeTranslations returns NEW objects for translated rows and the SAME
+  // ref for untranslated ones, so `merged[i] !== lastRaw[i]` ⇔ row i is translated).
+  const merged = raw.slice();
+  const translatedIdx = new Set<number>();
 
-    const translations = await translateChunk(chunks[ci], config);
-    if (currentRun !== runToken) return;
-
-    if (translations) {
-      const offset = ci * SEARCH_BATCH_SIZE;
-      const slice = mergeTranslations(chunks[ci], translations);
-      for (let j = 0; j < slice.length; j++) merged[offset + j] = slice[j];
-      anyTranslated = true;
-      // Progressive render so translated rows appear batch-by-batch.
-      renderSerp({ kind: 'populated', results: merged }, document, mount);
-    } else {
-      anyFailed = true; // chunk's raw rows remain in `merged` (XLT-05)
+  // Translate one ordered window [start, start+size) and stream it in. Returns the
+  // indices that did NOT translate (for the sweep). Honors the stale-run guard.
+  const runWindow = async (start: number, size: number): Promise<number[]> => {
+    const idxs: number[] = [];
+    for (let i = start; i < Math.min(start + size, raw.length); i++) {
+      if (!translatedIdx.has(i)) idxs.push(i);
     }
+    if (idxs.length === 0) return [];
+    const chunk = idxs.map((i) => raw[i]);
+    const translations = await translateChunkWithRetry(chunk, config, SEARCH_MAX_ATTEMPTS);
+    if (currentRun !== runToken) return []; // stale → caller bails
+    if (!translations) return idxs; // whole window failed → defer to sweep
+    const slice = mergeTranslations(chunk, translations);
+    const stillFailed: number[] = [];
+    idxs.forEach((i, j) => {
+      if (slice[j] !== chunk[j]) {
+        merged[i] = slice[j]; // translated row
+        translatedIdx.add(i);
+      } else {
+        stillFailed.push(i); // a key the model dropped → sweep it
+      }
+    });
+    // Stream: render the partial view so translated rows appear top-to-bottom.
+    renderSerp({ kind: 'populated', results: merged }, document, mount);
+    return stillFailed;
+  };
+
+  // Pass 1 — ordered windows, top to bottom, streaming each as it lands.
+  const failed: number[] = [];
+  for (let start = 0; start < raw.length; start += SEARCH_BATCH_SIZE) {
+    if (currentRun !== runToken) return;
+    if (start > 0) await sleep(SEARCH_BATCH_DELAY_MS);
+    failed.push(...(await runWindow(start, SEARCH_BATCH_SIZE)));
+    if (currentRun !== runToken) return;
+  }
+
+  // Pass 2 — failure sweep: retry the stragglers one at a time (smallest possible
+  // payload, freshest backoff) so ALL results end up translated, not just some.
+  for (const i of failed) {
+    if (currentRun !== runToken) return;
+    if (translatedIdx.has(i)) continue;
+    await sleep(SEARCH_BATCH_DELAY_MS);
+    await runWindow(i, 1);
+    if (currentRun !== runToken) return;
   }
 
   if (currentRun !== runToken) return;
-  // Cache only a fully-translated overlay so a later toggle re-translate retries
-  // the rows that failed this pass; otherwise leave the partial view rendered.
-  if (anyTranslated && !anyFailed) {
+  // Cache only a FULLY-translated overlay so a later toggle re-runs the stragglers
+  // instead of caching a partial view (XLT-05). Partial views stay rendered, uncached.
+  if (translatedIdx.size === raw.length) {
     lastTranslated = merged;
-    renderSerp({ kind: 'populated', results: merged }, document, mount);
   }
 }
 
 /**
- * Translate one batch of raw results target→source via the worker, with a single
- * retry on comm/worker failure (the 8s-timeout AbortError surfaces as a 'network'
- * error or a comms reject). Returns the translations map, or null if both attempts
- * fail — the caller then leaves those rows raw (XLT-05 graceful degradation).
+ * Translate one batch of raw results target→source via the worker, retrying up to
+ * `maxAttempts` with exponential backoff. The 8s worker-timeout AbortError surfaces
+ * as a 'network' error/comms reject, and the provider's per-minute rate limit (the
+ * query translation fires right before) can transiently fail the first call — backoff
+ * rides both out. Returns the translations map, or null if every attempt fails.
  */
-async function translateChunk(
+async function translateChunkWithRetry(
   chunk: SearchResult[],
   config: TranslationConfig,
+  maxAttempts: number,
 ): Promise<Record<string, { t: string; d: string }> | null> {
   const items = buildBatchPayload(chunk);
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const reply = (await chrome.runtime.sendMessage({
         type: 'translateBatch',
@@ -427,9 +455,12 @@ async function translateChunk(
       })) as TranslateBatchResponse;
       if (!reply.error && reply.translations) return reply.translations;
     } catch {
-      // comm failure — fall through to retry / give up
+      // comm failure — fall through to backoff/retry
     }
-    if (attempt === 0) await sleep(SEARCH_BATCH_DELAY_MS);
+    if (attempt < maxAttempts - 1) {
+      // Exponential backoff: 350ms, 700ms, 1400ms … to clear a transient rate limit.
+      await sleep(SEARCH_BATCH_DELAY_MS * 2 ** attempt);
+    }
   }
   return null;
 }
