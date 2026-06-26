@@ -591,7 +591,11 @@ function metaLabel(id: string): string {
   if (!m) return id;
   const avgPrice = (m.inPrice + m.outPrice) / 2;
   const priceStr = avgPrice < 1 ? `$${avgPrice.toFixed(2)}` : `$${avgPrice.toFixed(2)}`;
-  return `${id}  ·  ${m.tokPerSec} tok/s  ·  jp↔en ${m.jpEn.toFixed(1)}  ·  ${priceStr}/1M`;
+  // jpEn is a FLORES-200 ja↔en translation-QUALITY score (0-5), shown to help model
+  // choice — it does NOT set or constrain the translation direction (source/target
+  // come from the user's language settings). Labelled "qual …/5" so it doesn't read
+  // as a hardcoded language pair.
+  return `${id}  ·  ${m.tokPerSec} tok/s  ·  ja↔en qual ${m.jpEn.toFixed(1)}/5  ·  ${priceStr}/1M`;
 }
 
 export { metaLabel };
