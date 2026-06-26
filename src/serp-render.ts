@@ -16,7 +16,10 @@ import type { SearchResult, ErrorKind } from './types.js';
 
 export type SerpState =
   | { kind: 'loading' }
-  | { kind: 'populated'; results: SearchResult[] }
+  // `translating: true` marks rows whose text is being back-translated — each row
+  // gets the `serp-translating` class (a left→right colour wave over the text) until
+  // the search page replaces its text in place. Omitted/false = settled rows.
+  | { kind: 'populated'; results: SearchResult[]; translating?: boolean }
   | { kind: 'empty' }
   | { kind: 'error'; errorKind: ErrorKind; message: string };
 
@@ -41,7 +44,7 @@ export function renderSerp(state: SerpState, doc: Document, mount: HTMLElement):
       mount.appendChild(skeletonList(doc));
       break;
     case 'populated':
-      state.results.forEach(r => mount.appendChild(resultRow(doc, r)));
+      state.results.forEach(r => mount.appendChild(resultRow(doc, r, state.translating === true)));
       break;
     case 'empty':
       mount.appendChild(emptyNotice(doc));
@@ -108,8 +111,8 @@ function faviconEl(doc: Document, r: SearchResult): HTMLElement {
 }
 
 /** Build a single result row (.serp-row) for a SearchResult. */
-function resultRow(doc: Document, r: SearchResult): HTMLElement {
-  const row = el(doc, 'div', { className: 'serp-row' });
+function resultRow(doc: Document, r: SearchResult, translating = false): HTMLElement {
+  const row = el(doc, 'div', { className: translating ? 'serp-row serp-translating' : 'serp-row' });
 
   // Head: favicon + hostname
   const head = el(doc, 'div', { className: 'serp-head' });

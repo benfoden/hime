@@ -312,6 +312,46 @@ a.serp-title:hover {
   }
 }
 
+/* ── Translating wave (.serp-translating) ──
+   Raw rows paint instantly; while their text is being back-translated, a colour
+   wave sweeps left→right across the title + snippet text. The text stays readable
+   (gradient base IS the normal text colour; a brighter band moves across it). The
+   search page removes this class per row as it replaces the text with the translation. */
+.serp-translating a.serp-title,
+.serp-translating .serp-snippet {
+  background-image: linear-gradient(
+    100deg,
+    currentColor 0%,
+    currentColor 38%,
+    #4a90d9 50%,
+    currentColor 62%,
+    currentColor 100%
+  );
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: serp-translating-wave 1.15s linear infinite;
+}
+
+@keyframes serp-translating-wave {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .serp-translating a.serp-title,
+  .serp-translating .serp-snippet {
+    animation: none;
+  }
+}
+
 /* ── Empty state (.serp-empty) ── */
 
 .serp-empty {

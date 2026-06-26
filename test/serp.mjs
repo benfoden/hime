@@ -30,6 +30,32 @@ function render(state) {
 }
 
 // ---------------------------------------------------------------------------
+// SERP-TRANSLATING: the `translating` flag tags every row with .serp-translating
+// (the CSS colour-wave) so raw rows can paint immediately while back-translation
+// streams in; omitted/false leaves rows un-tagged.
+// ---------------------------------------------------------------------------
+
+test('SERP-translating: translating:true tags every row with .serp-translating', () => {
+  const mount = render({ ...MOCKS.populated, translating: true });
+  const rows = mount.querySelectorAll('.serp-row');
+  assert.ok(rows.length > 0, 'expected rows');
+  for (const row of rows) {
+    assert.ok(row.classList.contains('serp-translating'), 'row should carry the wave class');
+  }
+});
+
+test('SERP-translating: default/omitted leaves rows un-tagged (settled)', () => {
+  const plain = render(MOCKS.populated);
+  for (const row of plain.querySelectorAll('.serp-row')) {
+    assert.ok(!row.classList.contains('serp-translating'), 'settled row must not carry the wave class');
+  }
+  const explicitFalse = render({ ...MOCKS.populated, translating: false });
+  for (const row of explicitFalse.querySelectorAll('.serp-row')) {
+    assert.ok(!row.classList.contains('serp-translating'), 'translating:false must not tag rows');
+  }
+});
+
+// ---------------------------------------------------------------------------
 // SERP-01a: populated state renders one row per result with favicon, hostname,
 //           title anchor, and snippet.
 // ---------------------------------------------------------------------------

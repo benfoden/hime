@@ -54,9 +54,10 @@ const TOGGLE_KEY = 'himeSearchTranslateResults';
 // permanently raw — e.g. results 0-4 staying in the source language). Backoff between
 // attempts rides out the provider's per-minute rate limit (the query translation
 // fires a request immediately before, so the first batch is prone to a transient 429).
-const SEARCH_BATCH_SIZE = 3; // small → finer top-to-bottom streaming, smaller payloads
-const SEARCH_BATCH_DELAY_MS = 350; // gap between batches (RPM-friendly)
-const SEARCH_MAX_ATTEMPTS = 4; // attempts per batch before deferring to the sweep
+const SEARCH_BATCH_SIZE = 3; // small → finer streaming, smaller/faster payloads
+const SEARCH_BATCH_STAGGER_MS = 120; // delay between concurrent batch STARTS (top first, RPM-gentle)
+const SEARCH_BACKOFF_BASE_MS = 350; // base for exponential retry backoff
+const SEARCH_MAX_ATTEMPTS = 3; // attempts per batch before deferring to the sweep
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // Cache of the most recent search so toggling the checkbox re-applies the
@@ -376,6 +377,11 @@ async function applyOverlay(mount: HTMLElement, runToken: number): Promise<void>
     return;
   }
 
+  // Paint ALL raw rows immediately with the "translating" wave (instant feedback),
+  // then translate concurrently and replace each row's text IN PLACE as it lands.
+  if (currentRun !== runToken) return;
+  renderSerp({ kind: 'populated', results: raw, translating: true }, document, mount);
+
   // Compute the overlay: translate target→source (back to the reader's language).
   // Direction is swapped vs the query path: results arrive in the target language
   // and must come back to the source language the reader understands.
@@ -385,61 +391,89 @@ async function applyOverlay(mount: HTMLElement, runToken: number): Promise<void>
     formality,
   };
 
-  // `merged` carries the live view: translated rows replace their raw counterpart
-  // in place (mergeTranslations returns NEW objects for translated rows and the SAME
-  // ref for untranslated ones, so `merged[i] !== lastRaw[i]` ⇔ row i is translated).
+  // `merged` carries the final cache view: translated rows replace their raw
+  // counterpart (mergeTranslations returns NEW objects for translated rows and the
+  // SAME ref for untranslated ones, so `merged[i] !== raw[i]` ⇔ row i is translated).
   const merged = raw.slice();
   const translatedIdx = new Set<number>();
+  const failed: number[] = [];
 
-  // Translate one ordered window [start, start+size) and stream it in. Returns the
-  // indices that did NOT translate (for the sweep). Honors the stale-run guard.
-  const runWindow = async (start: number, size: number): Promise<number[]> => {
-    const idxs: number[] = [];
-    for (let i = start; i < Math.min(start + size, raw.length); i++) {
-      if (!translatedIdx.has(i)) idxs.push(i);
-    }
-    if (idxs.length === 0) return [];
-    const chunk = idxs.map((i) => raw[i]);
-    const translations = await translateChunkWithRetry(chunk, config, SEARCH_MAX_ATTEMPTS);
-    if (currentRun !== runToken) return []; // stale → caller bails
-    if (!translations) return idxs; // whole window failed → defer to sweep
-    const slice = mergeTranslations(chunk, translations);
-    const stillFailed: number[] = [];
-    idxs.forEach((i, j) => {
-      if (slice[j] !== chunk[j]) {
-        merged[i] = slice[j]; // translated row
-        translatedIdx.add(i);
-      } else {
-        stillFailed.push(i); // a key the model dropped → sweep it
-      }
-    });
-    // Stream: render the partial view so translated rows appear top-to-bottom.
-    renderSerp({ kind: 'populated', results: merged }, document, mount);
-    return stillFailed;
+  // In-place row swap: replace one row's title + snippet text and drop the wave,
+  // WITHOUT re-rendering the whole list (keeps the other rows' animation smooth).
+  const swapRow = (i: number, result: SearchResult): void => {
+    const row = mount.querySelectorAll('.serp-row')[i] as HTMLElement | undefined;
+    if (!row) return;
+    const titleEl = row.querySelector('a.serp-title');
+    if (titleEl) titleEl.textContent = result.title;
+    const snippetEl = row.querySelector('.serp-snippet');
+    if (snippetEl) snippetEl.textContent = result.description;
+    row.classList.remove('serp-translating');
   };
 
-  // Pass 1 — ordered windows, top to bottom, streaming each as it lands.
-  const failed: number[] = [];
-  for (let start = 0; start < raw.length; start += SEARCH_BATCH_SIZE) {
+  // Translate one window and stream its rows in. Collects any indices that did not
+  // translate into `failed` for the sweep. Honors the stale-run guard.
+  const runWindow = async (idxs: number[]): Promise<void> => {
+    if (idxs.length === 0) return;
+    const chunk = idxs.map((i) => raw[i]);
+    const translations = await translateChunkWithRetry(chunk, config, SEARCH_MAX_ATTEMPTS);
     if (currentRun !== runToken) return;
-    if (start > 0) await sleep(SEARCH_BATCH_DELAY_MS);
-    failed.push(...(await runWindow(start, SEARCH_BATCH_SIZE)));
-    if (currentRun !== runToken) return;
-  }
+    if (!translations) {
+      failed.push(...idxs.filter((i) => !translatedIdx.has(i)));
+      return;
+    }
+    const slice = mergeTranslations(chunk, translations);
+    idxs.forEach((i, j) => {
+      if (translatedIdx.has(i)) return;
+      if (slice[j] !== chunk[j]) {
+        merged[i] = slice[j];
+        translatedIdx.add(i);
+        swapRow(i, slice[j]); // stream this row in
+      } else {
+        failed.push(i); // a key the model dropped → sweep it
+      }
+    });
+  };
 
-  // Pass 2 — failure sweep: retry the stragglers one at a time (smallest possible
-  // payload, freshest backoff) so ALL results end up translated, not just some.
+  // Pass 1 — CONCURRENT staggered batches. Firing batches in parallel (instead of
+  // awaiting each) drops wall-clock from sum-of-batches to ≈ slowest batch; the small
+  // start stagger biases earlier (top) rows to land first and is gentle on the
+  // provider's rate limit. Each batch swaps its own rows in as soon as it resolves.
+  const windows: number[][] = [];
+  for (let start = 0; start < raw.length; start += SEARCH_BATCH_SIZE) {
+    windows.push(
+      Array.from({ length: Math.min(SEARCH_BATCH_SIZE, raw.length - start) }, (_, k) => start + k),
+    );
+  }
+  await Promise.all(
+    windows.map(async (idxs, bi) => {
+      await sleep(bi * SEARCH_BATCH_STAGGER_MS);
+      if (currentRun !== runToken) return;
+      await runWindow(idxs);
+    }),
+  );
+  if (currentRun !== runToken) return;
+
+  // Pass 2 — failure sweep: retry stragglers one at a time (smallest payload, fresh
+  // backoff) so ALL results end up translated, not just some.
   for (const i of failed) {
     if (currentRun !== runToken) return;
     if (translatedIdx.has(i)) continue;
-    await sleep(SEARCH_BATCH_DELAY_MS);
-    await runWindow(i, 1);
+    await runWindow([i]);
     if (currentRun !== runToken) return;
   }
-
   if (currentRun !== runToken) return;
+
+  // Settle: drop the wave from any row that ultimately couldn't translate (it keeps
+  // its raw text — graceful degradation, XLT-05), so no row is left shimmering.
+  for (let i = 0; i < raw.length; i++) {
+    if (translatedIdx.has(i)) continue;
+    (mount.querySelectorAll('.serp-row')[i] as HTMLElement | undefined)?.classList.remove(
+      'serp-translating',
+    );
+  }
+
   // Cache only a FULLY-translated overlay so a later toggle re-runs the stragglers
-  // instead of caching a partial view (XLT-05). Partial views stay rendered, uncached.
+  // instead of caching a partial view (XLT-05).
   if (translatedIdx.size === raw.length) {
     lastTranslated = merged;
   }
@@ -469,8 +503,8 @@ async function translateChunkWithRetry(
       // comm failure — fall through to backoff/retry
     }
     if (attempt < maxAttempts - 1) {
-      // Exponential backoff: 350ms, 700ms, 1400ms … to clear a transient rate limit.
-      await sleep(SEARCH_BATCH_DELAY_MS * 2 ** attempt);
+      // Exponential backoff: 350ms, 700ms … to clear a transient rate limit.
+      await sleep(SEARCH_BACKOFF_BASE_MS * 2 ** attempt);
     }
   }
   return null;
