@@ -313,41 +313,68 @@ a.serp-title:hover {
 }
 
 /* ── Translating wave (.serp-translating) ──
-   Raw rows paint instantly; while their text is being back-translated, a colour
-   wave sweeps left→right across the title + snippet text. The text stays readable
-   (gradient base IS the normal text colour; a brighter band moves across it). The
-   search page removes this class per row as it replaces the text with the translation. */
+   Raw rows paint instantly; while their text is being back-translated, a small
+   fade-out band sweeps left→right across the title + snippet text. The MAJORITY of
+   the text stays fully visible — only a narrow band dips in opacity and travels
+   across (a mask, so the real text colour is preserved). The search page removes this
+   class per row and adds .serp-revealed as it swaps in the translation. */
 .serp-translating a.serp-title,
 .serp-translating .serp-snippet {
-  background-image: linear-gradient(
+  -webkit-mask-image: linear-gradient(
     100deg,
-    currentColor 0%,
-    currentColor 38%,
-    #4a90d9 50%,
-    currentColor 62%,
-    currentColor 100%
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 1) 42%,
+    rgba(0, 0, 0, 0.3) 50%,
+    rgba(0, 0, 0, 1) 58%,
+    rgba(0, 0, 0, 1) 100%
   );
-  background-size: 220% 100%;
-  background-repeat: no-repeat;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  animation: serp-translating-wave 1.15s linear infinite;
+  mask-image: linear-gradient(
+    100deg,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 1) 42%,
+    rgba(0, 0, 0, 0.3) 50%,
+    rgba(0, 0, 0, 1) 58%,
+    rgba(0, 0, 0, 1) 100%
+  );
+  -webkit-mask-size: 220% 100%;
+  mask-size: 220% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  animation: serp-translating-wave 3.45s linear infinite;
 }
 
 @keyframes serp-translating-wave {
   from {
-    background-position: 200% 0;
+    -webkit-mask-position: 200% 0;
+    mask-position: 200% 0;
   }
   to {
-    background-position: -120% 0;
+    -webkit-mask-position: -120% 0;
+    mask-position: -120% 0;
+  }
+}
+
+/* Per-row reveal: the translated text fades in once it lands (paired with the
+   fade-out band above for a clean fade-out → fade-in swap). */
+.serp-revealed a.serp-title,
+.serp-revealed .serp-snippet {
+  animation: serp-reveal-fade 320ms ease-out;
+}
+
+@keyframes serp-reveal-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .serp-translating a.serp-title,
-  .serp-translating .serp-snippet {
+  .serp-translating .serp-snippet,
+  .serp-revealed a.serp-title,
+  .serp-revealed .serp-snippet {
     animation: none;
   }
 }

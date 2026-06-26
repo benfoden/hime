@@ -47,15 +47,17 @@ let formality: TranslationConfig['formality'] = 'auto';
 let backTranslate = true;
 const TOGGLE_KEY = 'himeSearchTranslateResults';
 
-// Back-translation streams in small ordered batches (top → bottom), rendering each
-// as it lands, rather than one big translateBatch call: smaller payloads finish well
-// under the worker's 8s cap, and per-batch retries + a final failure sweep make ALL
-// results translate reliably (the prior all-or-nothing batch left transient failures
-// permanently raw — e.g. results 0-4 staying in the source language). Backoff between
-// attempts rides out the provider's per-minute rate limit (the query translation
-// fires a request immediately before, so the first batch is prone to a transient 429).
-const SEARCH_BATCH_SIZE = 3; // small → finer streaming, smaller/faster payloads
-const SEARCH_BATCH_STAGGER_MS = 120; // delay between concurrent batch STARTS (top first, RPM-gentle)
+// Back-translation runs in two SEQUENTIAL batches: the top 3 first (fast first
+// paint), then the remaining 7. Within a batch, rows reveal top→bottom with a small
+// stagger so they fade in 1,2,3… in strict visual order (the prior CONCURRENT windows
+// let the small last batch land first → "the last rows appear first"). Per-batch
+// retries + a final failure sweep make ALL results translate reliably (the old
+// all-or-nothing batch left transient failures permanently raw — e.g. results 0-4
+// staying in the source language). Backoff between attempts rides out the provider's
+// per-minute rate limit (the query translation fires a request immediately before, so
+// the first batch is prone to a transient 429).
+const SEARCH_FIRST_BATCH = 3; // top rows translated/revealed first, then the rest
+const SEARCH_REVEAL_STAGGER_MS = 90; // delay between consecutive row reveals (top→bottom fade)
 const SEARCH_BACKOFF_BASE_MS = 350; // base for exponential retry backoff
 const SEARCH_MAX_ATTEMPTS = 3; // attempts per batch before deferring to the sweep
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -408,6 +410,7 @@ async function applyOverlay(mount: HTMLElement, runToken: number): Promise<void>
     const snippetEl = row.querySelector('.serp-snippet');
     if (snippetEl) snippetEl.textContent = result.description;
     row.classList.remove('serp-translating');
+    row.classList.add('serp-revealed'); // fade the translated text in
   };
 
   // Translate one window and stream its rows in. Collects any indices that did not
@@ -422,35 +425,36 @@ async function applyOverlay(mount: HTMLElement, runToken: number): Promise<void>
       return;
     }
     const slice = mergeTranslations(chunk, translations);
-    idxs.forEach((i, j) => {
-      if (translatedIdx.has(i)) return;
+    // Reveal top→bottom with a small stagger so the rows fade in 1,2,3… in order
+    // (a single reply lands all of a batch's rows at once; the stagger paces them).
+    let revealed = false;
+    for (let j = 0; j < idxs.length; j++) {
+      if (currentRun !== runToken) return;
+      const i = idxs[j];
+      if (translatedIdx.has(i)) continue;
       if (slice[j] !== chunk[j]) {
+        if (revealed) await sleep(SEARCH_REVEAL_STAGGER_MS);
         merged[i] = slice[j];
         translatedIdx.add(i);
-        swapRow(i, slice[j]); // stream this row in
+        swapRow(i, slice[j]); // fade this row in
+        revealed = true;
       } else {
         failed.push(i); // a key the model dropped → sweep it
       }
-    });
+    }
   };
 
-  // Pass 1 — CONCURRENT staggered batches. Firing batches in parallel (instead of
-  // awaiting each) drops wall-clock from sum-of-batches to ≈ slowest batch; the small
-  // start stagger biases earlier (top) rows to land first and is gentle on the
-  // provider's rate limit. Each batch swaps its own rows in as soon as it resolves.
-  const windows: number[][] = [];
-  for (let start = 0; start < raw.length; start += SEARCH_BATCH_SIZE) {
-    windows.push(
-      Array.from({ length: Math.min(SEARCH_BATCH_SIZE, raw.length - start) }, (_, k) => start + k),
-    );
+  // Pass 1 — two SEQUENTIAL batches: the top 3 first (fast first paint), then the
+  // remaining rows. Awaiting batch 1 fully (translate + staggered reveal) before
+  // firing batch 2 keeps the visual order strictly top→bottom and stops the second
+  // request racing the first's reveal. Each row fades in as it lands.
+  const allIdx = Array.from({ length: raw.length }, (_, i) => i);
+  const batches: number[][] = [allIdx.slice(0, SEARCH_FIRST_BATCH)];
+  if (allIdx.length > SEARCH_FIRST_BATCH) batches.push(allIdx.slice(SEARCH_FIRST_BATCH));
+  for (const idxs of batches) {
+    if (currentRun !== runToken) return;
+    await runWindow(idxs);
   }
-  await Promise.all(
-    windows.map(async (idxs, bi) => {
-      await sleep(bi * SEARCH_BATCH_STAGGER_MS);
-      if (currentRun !== runToken) return;
-      await runWindow(idxs);
-    }),
-  );
   if (currentRun !== runToken) return;
 
   // Pass 2 — failure sweep: retry stragglers one at a time (smallest payload, fresh
