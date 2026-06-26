@@ -1614,6 +1614,7 @@ async function pageTranslate(nodes?: Text[]): Promise<void> {
 
   let cursor = 0;
   let lastKind: string | undefined; // remembered from the most recent whole-chunk failure
+  let lastMessage: string | undefined; // the worker's real error text (surfaced in the toast)
   const inFlight = new Set<Promise<void>>();
 
   return await new Promise<void>((resolveAll, rejectAll) => {
@@ -1645,6 +1646,7 @@ async function pageTranslate(nodes?: Text[]): Promise<void> {
             }
             pageRecordChunkFailure(chunkNodes);
             lastKind = (err as { kind?: string })?.kind ?? lastKind;
+            lastMessage = err instanceof Error ? err.message : lastMessage;
           })
           .finally(() => {
             gate.release();
@@ -1671,7 +1673,7 @@ async function pageTranslate(nodes?: Text[]): Promise<void> {
     pageWriteStateMirror('translated');
     // D-04: successes are already applied (page stays usable). If any nodes failed
     // (whole-chunk path here + Plan 03's per-key missing-key path), surface ONE toast.
-    if (pageFailedNodes.size > 0) pageShowErrorToast(lastKind);
+    if (pageFailedNodes.size > 0) pageShowErrorToast(lastKind, lastMessage);
   });
 }
 
@@ -1903,13 +1905,16 @@ function pageRecordChunkFailure(nodes: Text[]): void {
  * dismiss ✕. Also sets the red error badge via badgeForKind/setBadge (D-04).
  * textContent-only — never innerHTML.
  */
-function pageShowErrorToast(kind?: string): void {
+function pageShowErrorToast(kind?: string, detail?: string): void {
   if (!document.body) return;
   const badge = badgeForKind(kind);
   void setBadge(badge.text, badge.color); // red error badge (content.ts:515-535)
 
   const count = pageFailedNodes.size;
-  const message = `Translation failed for ${count} section${count === 1 ? '' : 's'}.`;
+  // Surface the worker's REAL error (kind + message) so failures are diagnosable —
+  // an opaque "failed for N sections" hid the actual cause (T-16 verify defect).
+  const reason = detail ? ` ${kind ? `[${kind}] ` : ''}${detail}` : kind ? ` [${kind}]` : '';
+  const message = `Translation failed for ${count} section${count === 1 ? '' : 's'}.${reason}`;
 
   let el = document.getElementById(HIME_PAGE_TOAST_ID);
   if (el) {
