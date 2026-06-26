@@ -20,6 +20,21 @@ export function buildBatchPayload(results: SearchResult[]): Record<string, Batch
 }
 
 /**
+ * Split an array into fixed-size chunks (preserving order). Used to break a
+ * SERP back-translation into smaller per-request batches so each translateBatch
+ * call stays well under the worker's 8s timeout, with delays scheduled between
+ * chunks by the caller (XLT-05 reliability). size <= 0 falls back to one chunk.
+ */
+export function chunkResults<T>(items: readonly T[], size: number): T[][] {
+  if (size <= 0) return items.length ? [items.slice()] : [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
  * Build the system prompt for a batch translation request.
  * Uses the same array-join shape as buildSystemPrompt but instructs strict JSON
  * output — never includes "Output ONLY the translated text" (conflicts with JSON).
@@ -29,6 +44,7 @@ export function buildBatchTranslatePrompt(config: TranslationConfig): string {
   const formalityInstruction = getFormalityInstruction(config.formality);
   return [
     `You are a translation engine. Translate each item to ${config.targetLanguage}.`,
+    `Every translated value MUST be written entirely in ${config.targetLanguage} — never any other language or writing system (e.g. for Japanese use Japanese, never Chinese).`,
     `Input shape: {"0":{"t":<title>,"d":<description>}, "1":{...}, ...}`,
     `Return ONLY a valid JSON object with the same keys and shape — no explanation, no markdown, no code fences.`,
     `Translate each t (title) and d (description); preserve the exact same keys; do not add or remove keys.`,

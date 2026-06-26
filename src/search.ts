@@ -24,7 +24,7 @@
 import { renderSerp } from './serp-render.js';
 import { buildDisclosureText } from './disclosure.js';
 import type { DisclosureInput } from './disclosure.js';
-import { buildBatchPayload, mergeTranslations } from './translate-batch.js';
+import { buildBatchPayload, mergeTranslations, chunkResults } from './translate-batch.js';
 import type {
   SearchResult,
   SearchTranslatedResponse,
@@ -46,6 +46,14 @@ let formality: TranslationConfig['formality'] = 'auto';
 // Results back-translation toggle (persisted). Default on.
 let backTranslate = true;
 const TOGGLE_KEY = 'himeSearchTranslateResults';
+
+// Back-translation is sent in small per-request batches rather than one big
+// translateBatch call: smaller payloads finish well under the worker's 8s cap
+// (XLT-05 reliability — large single batches were timing out → spurious
+// 'network' errors). Reasonable inter-batch delay avoids hammering the provider.
+const SEARCH_BATCH_SIZE = 5;
+const SEARCH_BATCH_DELAY_MS = 400;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // Cache of the most recent search so toggling the checkbox re-applies the
 // overlay WITHOUT a Brave re-fetch (and without re-translating once cached).
@@ -355,36 +363,73 @@ async function applyOverlay(mount: HTMLElement, runToken: number): Promise<void>
   // Compute the overlay: translate target→source (back to the reader's language).
   // Direction is swapped vs the query path: results arrive in the target language
   // and must come back to the source language the reader understands.
-  const items = buildBatchPayload(lastRaw);
+  //
+  // Sent in small batches (SEARCH_BATCH_SIZE rows each) with a short delay between
+  // them rather than one big request — large single batches were exceeding the
+  // worker's 8s cap and surfacing as spurious 'network' failures (XLT-05). Each
+  // chunk gets one retry; rows whose chunk fails stay raw (graceful degradation).
   const config: TranslationConfig = {
     sourceLanguage: targetLanguage,
     targetLanguage: sourceLanguage,
     formality,
   };
+  const chunks = chunkResults(lastRaw, SEARCH_BATCH_SIZE);
+  const merged = lastRaw.slice();
+  let anyTranslated = false;
+  let anyFailed = false;
 
-  let batchReply: TranslateBatchResponse;
-  try {
-    batchReply = await chrome.runtime.sendMessage({
-      type: 'translateBatch',
-      payload: { items, config },
-    }) as TranslateBatchResponse;
-  } catch {
-    // translateBatch communication failure — leave raw results visible (XLT-05)
-    return;
+  for (let ci = 0; ci < chunks.length; ci++) {
+    // Stale-run guard before every send/render (T-11-09): a newer search/toggle
+    // started while we awaited a chunk → abort without caching or clobbering.
+    if (currentRun !== runToken) return;
+    if (ci > 0) await sleep(SEARCH_BATCH_DELAY_MS);
+
+    const translations = await translateChunk(chunks[ci], config);
+    if (currentRun !== runToken) return;
+
+    if (translations) {
+      const offset = ci * SEARCH_BATCH_SIZE;
+      const slice = mergeTranslations(chunks[ci], translations);
+      for (let j = 0; j < slice.length; j++) merged[offset + j] = slice[j];
+      anyTranslated = true;
+      // Progressive render so translated rows appear batch-by-batch.
+      renderSerp({ kind: 'populated', results: merged }, document, mount);
+    } else {
+      anyFailed = true; // chunk's raw rows remain in `merged` (XLT-05)
+    }
   }
 
-  // Guard: if a newer run/toggle started while we awaited translateBatch, discard
-  // this stale overlay — don't clobber the newer state (T-11-09).
-  if (currentRun !== runToken) {
-    return;
+  if (currentRun !== runToken) return;
+  // Cache only a fully-translated overlay so a later toggle re-translate retries
+  // the rows that failed this pass; otherwise leave the partial view rendered.
+  if (anyTranslated && !anyFailed) {
+    lastTranslated = merged;
+    renderSerp({ kind: 'populated', results: merged }, document, mount);
   }
+}
 
-  if (batchReply.error || !batchReply.translations) {
-    // translateBatch failed — leave raw results in place (XLT-05 graceful degradation)
-    return;
+/**
+ * Translate one batch of raw results target→source via the worker, with a single
+ * retry on comm/worker failure (the 8s-timeout AbortError surfaces as a 'network'
+ * error or a comms reject). Returns the translations map, or null if both attempts
+ * fail — the caller then leaves those rows raw (XLT-05 graceful degradation).
+ */
+async function translateChunk(
+  chunk: SearchResult[],
+  config: TranslationConfig,
+): Promise<Record<string, { t: string; d: string }> | null> {
+  const items = buildBatchPayload(chunk);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const reply = (await chrome.runtime.sendMessage({
+        type: 'translateBatch',
+        payload: { items, config },
+      })) as TranslateBatchResponse;
+      if (!reply.error && reply.translations) return reply.translations;
+    } catch {
+      // comm failure — fall through to retry / give up
+    }
+    if (attempt === 0) await sleep(SEARCH_BATCH_DELAY_MS);
   }
-
-  // Apply translated overlay: merge translations onto raw results, then cache.
-  lastTranslated = mergeTranslations(lastRaw, batchReply.translations);
-  renderSerp({ kind: 'populated', results: lastTranslated }, document, mount);
+  return null;
 }

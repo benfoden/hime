@@ -9,6 +9,7 @@ export function buildSystemPrompt(config: TranslationConfig): string {
   const formalityInstruction = getFormalityInstruction(config.formality);
   return [
     `You are a translation engine. Translate the following text to ${config.targetLanguage}.`,
+    `The output MUST be written entirely in ${config.targetLanguage} — never any other language or writing system (e.g. for Japanese use Japanese, never Chinese).`,
     `Output ONLY the translated text — no explanations, no quotes, no markdown.`,
     `Use natural, native-sounding phrasing that a native speaker would actually use.`,
     formalityInstruction,

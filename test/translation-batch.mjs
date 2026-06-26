@@ -23,6 +23,7 @@ const {
   buildBatchTranslatePrompt,
   parseBatchReply,
   mergeTranslations,
+  chunkResults,
 } = await import(path.join(__dirname, '../dist/translate-batch.js'));
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,42 @@ test('XLT-02: buildBatchTranslatePrompt contains JSON instruction and target lan
   assert.ok(prompt.includes('JSON'), 'prompt should contain "JSON"');
   assert.ok(prompt.includes('same keys'), 'prompt should contain "same keys"');
   assert.ok(!prompt.includes('Output ONLY the translated text'), 'prompt must NOT contain the single-output instruction');
+});
+
+test('XLT-05: buildBatchTranslatePrompt pins the output language (no Chinese-for-Japanese drift)', () => {
+  const prompt = buildBatchTranslatePrompt(CONFIG);
+  // The pin must name the target language and forbid other scripts so CJK targets
+  // don't drift (target Japanese, output Chinese — the reported defect).
+  assert.ok(
+    /MUST be written entirely in Japanese/.test(prompt),
+    'prompt should hard-pin the target language',
+  );
+  assert.ok(/never any other language/i.test(prompt), 'prompt should forbid other languages/scripts');
+});
+
+// ---------------------------------------------------------------------------
+// XLT-05: chunkResults — small per-request batches for reliable back-translation
+// ---------------------------------------------------------------------------
+
+test('XLT-05: chunkResults splits into fixed-size, order-preserving chunks', () => {
+  const arr = [0, 1, 2, 3, 4, 5, 6];
+  const chunks = chunkResults(arr, 5);
+  assert.deepEqual(chunks, [[0, 1, 2, 3, 4], [5, 6]], 'splits into size-5 chunks, remainder last');
+  assert.deepEqual(chunks.flat(), arr, 'preserves order and all elements');
+});
+
+test('XLT-05: chunkResults exact multiple yields full chunks only', () => {
+  assert.deepEqual(chunkResults([1, 2, 3, 4], 2), [[1, 2], [3, 4]]);
+});
+
+test('XLT-05: chunkResults edge cases (empty, single, size>=len, size<=0)', () => {
+  assert.deepEqual(chunkResults([], 5), [], 'empty → no chunks');
+  assert.deepEqual(chunkResults([9], 5), [[9]], 'single under size → one chunk');
+  assert.deepEqual(chunkResults([1, 2], 9), [[1, 2]], 'size >= len → one chunk');
+  assert.deepEqual(chunkResults([1, 2, 3], 0), [[1, 2, 3]], 'size 0 → single fallback chunk');
+  // returns copies, not the input ref
+  const src = [1, 2];
+  assert.notEqual(chunkResults(src, 5)[0], src, 'chunk is a copy, not the input array');
 });
 
 // ---------------------------------------------------------------------------
