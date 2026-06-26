@@ -958,6 +958,30 @@ test('BraveSearchClient: request URL contains q, count, result_filter=web params
   assert.equal(u.origin + u.pathname, BRAVE_ENDPOINT);
 });
 
+// SRCH-LANG wiring: search_lang must actually reach the Brave request URL — the
+// 魔法少女 regression was the param being absent, so Brave auto-detected the wrong
+// locale. These prove opts.searchLang → &search_lang=<code>, and that it is OMITTED
+// (never empty) when not supplied.
+test('BraveSearchClient: opts.searchLang reaches the URL as &search_lang', async () => {
+  const client = new BraveSearchClient();
+  const captured = {};
+  await withFetch(braveOkFetch(SAMPLE_BRAVE_BODY, captured), () =>
+    client.search('魔法少女', 'k', { count: 10, searchLang: 'ja' }),
+  );
+  const u = new URL(captured.url);
+  assert.equal(u.searchParams.get('search_lang'), 'ja', 'search_lang=ja must be on the Brave request');
+});
+
+test('BraveSearchClient: no searchLang → search_lang param is absent (not empty)', async () => {
+  const client = new BraveSearchClient();
+  const captured = {};
+  await withFetch(braveOkFetch(SAMPLE_BRAVE_BODY, captured), () =>
+    client.search('q', 'k', { count: 10 }),
+  );
+  const u = new URL(captured.url);
+  assert.equal(u.searchParams.has('search_lang'), false, 'search_lang must be omitted when not provided');
+});
+
 test('BraveSearchClient: 429 rejects with .kind === "search_quota"', async () => {
   const client = new BraveSearchClient();
   await withFetch(
