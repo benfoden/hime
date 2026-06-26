@@ -131,6 +131,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
+  // Caret in the search box on load/reload/open. The `autofocus` attribute covers
+  // first paint; focus() here is the reliable cross-case path, and re-focusing on
+  // window focus puts the caret back when the tab is re-activated. Select any
+  // existing value so a re-open lets the user type over the prior query immediately.
+  const focusSearch = (): void => {
+    input.focus();
+    input.select();
+  };
+  focusSearch();
+  window.addEventListener('focus', focusSearch);
+
   // Load the persisted toggle state (default on). Absent/true → on; explicit false → off.
   try {
     const stored = await chrome.storage.local.get(TOGGLE_KEY);
