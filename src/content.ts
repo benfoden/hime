@@ -1776,68 +1776,86 @@ const HIME_PAGE_BANNER_ID = 'hime-page-banner';
  * non-dismissed origins (TRIG-02). The "Translate this page" button runs the SAME
  * path as the translatePage message (pageTranslate, Plan 03).
  */
+// Minimalist auto-offer affordance (TRIG-03): a single translation-icon tab pinned
+// to the top-right edge — a rounded, semitransparent-black tab. Click translates the
+// page; a small dismiss ✕ fades in on hover (so the resting state is just the icon).
+// Icon is a Material "translate" glyph drawn via a CSS background data-URI SVG — no
+// innerHTML (XSS law: every element built with style/textContent only).
+const HIME_TRANSLATE_ICON_SVG =
+  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='#fff'>" +
+  "<path d='M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v1.99h11.17" +
+  'C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02' +
+  "L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z'/></svg>";
+
 function pageShowOfferBanner(origin: string): void {
   if (document.getElementById(HIME_PAGE_BANNER_ID)) return; // idempotent
   if (!document.body) return;
+
   const el = document.createElement('div');
   el.id = HIME_PAGE_BANNER_ID;
+  el.setAttribute('role', 'button');
+  el.setAttribute('aria-label', 'Translate this page');
+  el.title = 'Translate this page';
   el.style.cssText = [
     'position: fixed',
-    'top: 0',
-    'left: 0',
+    'top: 14px',
     'right: 0',
-    'display: flex',
-    'align-items: center',
-    'gap: 12px',
-    'font-family: sans-serif',
-    'font-size: 13px',
-    'color: #fff',
-    'background: rgba(74,144,217,0.96)',
-    'padding: 6px 12px',
+    'width: 34px',
+    'height: 38px',
+    'background-color: rgba(0,0,0,0.55)',
+    'border-radius: 19px 0 0 19px', // rounded tab flush to the right edge
+    'background-repeat: no-repeat',
+    'background-position: 8px center',
+    'background-size: 19px 19px',
+    'cursor: pointer',
     'z-index: 2147483646',
     'pointer-events: auto',
-    'box-sizing: border-box',
+    'box-shadow: 0 1px 5px rgba(0,0,0,0.28)',
+    'transition: background-color .15s ease',
   ].join(';');
-
-  const label = document.createElement('span');
-  label.textContent = 'This page is in another language.'; // textContent only — never innerHTML
-  label.style.cssText = 'flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-
-  const translateBtn = document.createElement('button');
-  translateBtn.textContent = 'Translate this page'; // textContent only
-  translateBtn.style.cssText = [
-    'font-family: sans-serif',
-    'font-size: 13px',
-    'color: #4A90D9',
-    'background: #fff',
-    'border: none',
-    'border-radius: 4px',
-    'padding: 4px 12px',
-    'cursor: pointer',
-  ].join(';');
-  translateBtn.addEventListener('click', () => {
+  el.style.backgroundImage = `url("data:image/svg+xml,${encodeURIComponent(HIME_TRANSLATE_ICON_SVG)}")`;
+  el.addEventListener('click', () => {
     void pageTranslate(); // same path as the translatePage message (Plan 03)
     pageDismissBanner(origin);
   });
 
-  const dismissBtn = document.createElement('button');
-  dismissBtn.textContent = '✕'; // ✕ textContent only
-  dismissBtn.setAttribute('aria-label', 'Dismiss');
-  dismissBtn.style.cssText = [
+  // Hover-revealed dismiss ✕ (stays hidden so the resting UI is a single icon).
+  const dismiss = document.createElement('span');
+  dismiss.textContent = '×'; // textContent only — never innerHTML
+  dismiss.setAttribute('aria-label', 'Dismiss');
+  dismiss.style.cssText = [
+    'position: absolute',
+    'top: -6px',
+    'left: -6px',
+    'width: 16px',
+    'height: 16px',
+    'line-height: 15px',
+    'text-align: center',
     'font-family: sans-serif',
-    'font-size: 15px',
-    'line-height: 1',
+    'font-size: 13px',
     'color: #fff',
-    'background: transparent',
-    'border: none',
+    'background: rgba(0,0,0,0.8)',
+    'border-radius: 50%',
     'cursor: pointer',
-    'padding: 2px 6px',
+    'opacity: 0',
+    'transition: opacity .12s ease',
+    'pointer-events: auto',
   ].join(';');
-  dismissBtn.addEventListener('click', () => pageDismissBanner(origin));
+  dismiss.addEventListener('click', (e) => {
+    e.stopPropagation(); // don't trigger the translate click
+    void pageDismissBanner(origin);
+  });
+  el.appendChild(dismiss);
 
-  el.appendChild(label);
-  el.appendChild(translateBtn);
-  el.appendChild(dismissBtn);
+  el.addEventListener('mouseenter', () => {
+    dismiss.style.opacity = '1';
+    el.style.backgroundColor = 'rgba(0,0,0,0.72)';
+  });
+  el.addEventListener('mouseleave', () => {
+    dismiss.style.opacity = '0';
+    el.style.backgroundColor = 'rgba(0,0,0,0.55)';
+  });
+
   document.body.appendChild(el);
 }
 
