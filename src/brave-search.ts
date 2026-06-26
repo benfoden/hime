@@ -28,14 +28,38 @@ export class BraveSearchClient {
   async search(
     query: string,
     apiKey: string,
-    opts: { count?: number; searchLang?: string } = {},
+    opts: { count?: number; country?: string } = {},
+  ): Promise<SearchResult[]> {
+    // Locale pinning (via `country`) is strictly ADDITIVE: if Brave rejects the
+    // value (a 4xx — e.g. 422 Unprocessable on an unsupported code), retry ONCE
+    // without it so a bad code can never break core search. Worst case we fall
+    // back to Brave's default region (pre-pinning behaviour); best case results
+    // are locale-pinned. Other failures (auth/quota/network) throw as before.
+    try {
+      return await this.searchOnce(query, apiKey, opts);
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      const isParamReject = status === 422 || status === 400;
+      if (opts.country && isParamReject) {
+        return await this.searchOnce(query, apiKey, { ...opts, country: undefined });
+      }
+      throw err;
+    }
+  }
+
+  private async searchOnce(
+    query: string,
+    apiKey: string,
+    opts: { count?: number; country?: string },
   ): Promise<SearchResult[]> {
     const url = new URL(BRAVE_ENDPOINT);
     url.searchParams.set('q', query);
     url.searchParams.set('count', String(opts.count ?? 10));
     // 'web' filter suppresses news/videos/etc. (RESEARCH Pitfall 6).
     url.searchParams.set('result_filter', 'web');
-    if (opts.searchLang) url.searchParams.set('search_lang', opts.searchLang);
+    // `country` (ISO 3166-1 alpha-2) pins the result locale — verified to fix the
+    // 魔法少女 JA/ZH ambiguity where search_lang did not (see types.ts LANGUAGE_COUNTRY).
+    if (opts.country) url.searchParams.set('country', opts.country);
     // NOTE: text_decorations is intentionally NOT set — Brave's default leaves
     // <strong> tags in description; Phase 8 returns raw, Phase 9 strips (Pitfall 2).
 
@@ -63,9 +87,11 @@ export class BraveSearchClient {
     }
 
     if (!response.ok) {
-      // No documented 429 body shape; tolerate a non-JSON / empty body.
+      // Tolerate a non-JSON / empty body. Brave's validation errors nest the
+      // detail under error.detail / error.code / errors[]; pull the most specific
+      // text we can so a 422 surfaces WHY (not just "unknown") for debugging.
       const body = await response.json().catch(() => ({}));
-      const bodyMessage = (body as { message?: string })?.message;
+      const bodyMessage = extractBraveErrorMessage(body);
       // NEVER auto-retry on 429 (D-07) — classify and throw.
       const c = classifyBraveError(null, { status: response.status, bodyMessage });
       const e = new Error(c.message);
@@ -78,6 +104,25 @@ export class BraveSearchClient {
     const items: BraveWebResult[] = data?.web?.results ?? [];
     return items.map(mapBraveResult);
   }
+}
+
+// Pull the most specific human-readable message out of a Brave error body.
+// Brave shapes vary: { message }, { error: { detail|code } }, or
+// { error: { meta: { errors: [{ msg|detail }] } } }. Best-effort, never throws.
+function extractBraveErrorMessage(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const b = body as Record<string, any>;
+  const metaErrors = b.error?.meta?.errors;
+  const firstMeta = Array.isArray(metaErrors) && metaErrors.length
+    ? (metaErrors[0]?.msg ?? metaErrors[0]?.detail ?? JSON.stringify(metaErrors[0]))
+    : undefined;
+  return (
+    b.message ??
+    b.error?.detail ??
+    b.error?.message ??
+    firstMeta ??
+    b.error?.code
+  );
 }
 
 function mapBraveResult(r: BraveWebResult): SearchResult {

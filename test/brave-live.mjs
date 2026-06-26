@@ -49,14 +49,18 @@ test('brave-live: transport + auth + mapping (live key)', { skip: key ? false : 
   console.log('\n✓ PASS — transport + auth + mapping all green');
 });
 
-// SRCH-LANG live pair check — the real "translates the right pair" guard. The
+// SRCH-LOCALE live pair check — the real "translates the right pair" guard. The
 // 魔法少女 ("magical girl") query is identical in Japanese and Chinese kanji, so
-// WITHOUT search_lang Brave returned zh.wikipedia.org. With search_lang='ja' the
-// results must skew Japanese. Opt-in (needs a live key); proves the end-to-end
-// locale pinning that unit tests can only prove structurally.
-test('brave-live: search_lang=ja pins Japanese results for the 魔法少女 regression', { skip: key ? false : 'BRAVE_API_KEY not set — live pair check skipped (metered/BYOK)' }, async () => {
+// WITHOUT locale pinning Brave returned zh.wikipedia.org. country='JP' is what
+// fixes it (verified via scripts/brave-lang-probe.mjs — search_lang did NOT). Opt-in
+// (needs a live key); proves the end-to-end locale pinning structurally-proven elsewhere.
+test('brave-live: country=JP pins Japanese results for the 魔法少女 regression', { skip: key ? false : 'BRAVE_API_KEY not set — live pair check skipped (metered/BYOK)' }, async () => {
+  // Brave's Free plan is 1 req/s — space this off the prior live test so the
+  // back-to-back calls don't 429 (a rate-limit collision, not a real failure).
+  await new Promise((r) => setTimeout(r, 1600));
+
   const client = new BraveSearchClient();
-  const results = await client.search('魔法少女', key, { count: 10, searchLang: 'ja' });
+  const results = await client.search('魔法少女', key, { count: 10, country: 'JP' });
   assert.ok(results.length > 0, 'expected results for 魔法少女');
 
   const hosts = results.map((r) => r.hostname || '');
@@ -66,8 +70,8 @@ test('brave-live: search_lang=ja pins Japanese results for the 魔法少女 regr
   // (a .jp TLD or a ja.* subdomain) in the top results.
   const zhLeak = hosts.filter((h) => /(^|\.)zh\./.test(h) || h.endsWith('.cn'));
   const jaSignal = hosts.filter((h) => /(^|\.)ja\./.test(h) || /\.jp$/.test(h));
-  assert.equal(zhLeak.length, 0, `Chinese-locale results leaked despite search_lang=ja: ${zhLeak.join(', ')}`);
+  assert.equal(zhLeak.length, 0, `Chinese-locale results leaked despite country=JP: ${zhLeak.join(', ')}`);
   assert.ok(jaSignal.length > 0, `expected at least one Japanese-locale result (ja.* / .jp) — got: ${hosts.join(', ')}`);
 
-  console.log('\n✓ PASS — search_lang=ja returns Japanese-locale results, no zh leak');
+  console.log('\n✓ PASS — country=JP returns Japanese-locale results, no zh leak');
 });

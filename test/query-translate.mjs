@@ -82,98 +82,81 @@ test('no customPrompt: returned config has exactly sourceLanguage, targetLanguag
 });
 
 // ---------------------------------------------------------------------------
-// SRCH-LANG: languageToBraveSearchLang — pin Brave result locale.
+// SRCH-LOCALE: languageToBraveCountry — pin Brave result locale via `country`.
 //
 // This is the CORE-PROMISE guard: hime must search in the right language. The
 // 魔法少女 ("magical girl") regression — valid Japanese AND Chinese in pure kanji —
-// returned zh.wikipedia.org because Brave got NO search_lang and auto-detected,
-// then STAYED broken because the code was 'jp' (invalid; Brave wants ISO 639-1 'ja').
-// These tests pin every supported language to its exact Brave code (golden table),
-// require coverage for all but the known-unsupported, and reject any non-ISO-639-1
-// value — so a future 'jp'-style typo fails CI instead of shipping.
+// returned zh.wikipedia.org. Empirically (test/brave-lang-probe.mjs vs the live API)
+// `search_lang` did NOT pin the locale and Brave's enum even rejects 'ja' (422);
+// `country=JP` is what returns ja.wikipedia.org. So we pin by country (ISO 3166-1
+// alpha-2). These tests pin every supported language to its exact country code,
+// require coverage for all of them, and reject anything that isn't a 2-letter
+// uppercase country code — so a wrong/lowercased value fails CI instead of shipping.
 // ---------------------------------------------------------------------------
 
-const { languageToBraveSearchLang, SUPPORTED_LANGUAGES } = await import(
+const { languageToBraveCountry, SUPPORTED_LANGUAGES } = await import(
   path.join(__dirname, '../dist/types.js')
 );
 
-// Exact expected Brave search_lang per supported language. Brave uses ISO 639-1
-// (verified against Brave's Web Search API docs) — Japanese is 'ja' NOT 'jp' —
-// with Chinese split by script ('zh-hans'/'zh-hant'). undefined = Brave has no
-// matching locale → omit the param (auto-detect). Update THIS table deliberately
-// when the supported set changes; a silent drift fails the coverage test below.
-const EXPECTED_BRAVE_LANG = {
-  English: 'en',
-  Japanese: 'ja',
-  Korean: 'ko',
-  'Chinese (Simplified)': 'zh-hans',
-  'Chinese (Traditional)': 'zh-hant',
-  Spanish: 'es',
-  French: 'fr',
-  German: 'de',
-  Italian: 'it',
-  Portuguese: 'pt',
-  Dutch: 'nl',
-  Russian: 'ru',
-  Polish: 'pl',
-  Turkish: 'tr',
-  Arabic: 'ar',
-  Hindi: 'hi',
-  Vietnamese: 'vi',
-  Thai: 'th',
-  Indonesian: undefined, // Brave has no Indonesian search_lang → auto-detect
+// Exact expected Brave `country` (ISO 3166-1 alpha-2) per supported language —
+// the primary country for that language. undefined would mean "no mapping → Brave
+// default (US)". Update THIS table deliberately when the supported set changes; a
+// silent drift fails the coverage test below.
+const EXPECTED_BRAVE_COUNTRY = {
+  English: 'US',
+  Japanese: 'JP',
+  Korean: 'KR',
+  'Chinese (Simplified)': 'CN',
+  'Chinese (Traditional)': 'TW',
+  Spanish: 'ES',
+  French: 'FR',
+  German: 'DE',
+  Italian: 'IT',
+  Portuguese: 'BR',
+  Dutch: 'NL',
+  Russian: 'RU',
+  Polish: 'PL',
+  Turkish: 'TR',
+  Arabic: 'SA',
+  Hindi: 'IN',
+  Vietnamese: 'VN',
+  Thai: 'TH',
+  Indonesian: 'ID',
 };
 
-// A reference set of real ISO 639-1 two-letter codes (the standard Brave's
-// search_lang follows). Deliberately does NOT contain 'jp' — that's the whole
-// point: the bug code must be rejected. Chinese is the documented exception
-// (script-qualified), allowed separately below.
-const ISO_639_1 = new Set([
-  'en', 'ja', 'ko', 'zh', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'ru', 'pl', 'tr',
-  'ar', 'hi', 'vi', 'th', 'id', 'ms', 'sv', 'da', 'fi', 'no', 'nb', 'cs', 'sk',
-  'hu', 'ro', 'bg', 'hr', 'sr', 'uk', 'el', 'he', 'fa', 'ur', 'bn', 'ta', 'te',
-  'ml', 'kn', 'mr', 'gu', 'pa', 'ca', 'eu', 'gl', 'et', 'lv', 'lt', 'sl',
-]);
-const BRAVE_SCRIPT_EXCEPTIONS = new Set(['zh-hans', 'zh-hant']);
-
-test('SRCH-LANG (golden): every supported language maps to its exact Brave code', () => {
-  for (const [name, expected] of Object.entries(EXPECTED_BRAVE_LANG)) {
+test('SRCH-LOCALE (golden): every supported language maps to its exact Brave country', () => {
+  for (const [name, expected] of Object.entries(EXPECTED_BRAVE_COUNTRY)) {
     assert.equal(
-      languageToBraveSearchLang(name),
+      languageToBraveCountry(name),
       expected,
-      `${name} must map to ${JSON.stringify(expected)} (Brave ISO 639-1) — a wrong code makes Brave auto-detect the wrong locale`,
+      `${name} must map to country ${JSON.stringify(expected)} — wrong/missing country lets Brave pick the wrong locale`,
     );
   }
 });
 
-test('SRCH-LANG (regression): Japanese is "ja", and "jp" is never a valid code', () => {
-  assert.equal(languageToBraveSearchLang('Japanese'), 'ja');
-  // The exact bug: 'jp' is not ISO 639-1 and must never appear as a mapped value.
+test('SRCH-LOCALE (regression): Japanese pins country JP (the 魔法少女 → ja.wikipedia fix)', () => {
+  assert.equal(languageToBraveCountry('Japanese'), 'JP');
+});
+
+test('SRCH-LOCALE (validity): every mapped value is a 2-letter uppercase ISO 3166-1 code', () => {
   for (const lang of SUPPORTED_LANGUAGES) {
-    assert.notEqual(languageToBraveSearchLang(lang), 'jp', `${lang} must not map to invalid 'jp'`);
+    const code = languageToBraveCountry(lang);
+    if (code === undefined) continue; // no mapping → Brave default, allowed
+    assert.match(code, /^[A-Z]{2}$/, `${lang} → "${code}" is not a 2-letter uppercase country code`);
   }
 });
 
-test('SRCH-LANG (validity): every mapped value is a real ISO 639-1 code (or zh-hans/zh-hant)', () => {
-  for (const lang of SUPPORTED_LANGUAGES) {
-    const code = languageToBraveSearchLang(lang);
-    if (code === undefined) continue; // unsupported → omitted, allowed
-    const valid = ISO_639_1.has(code) || BRAVE_SCRIPT_EXCEPTIONS.has(code);
-    assert.ok(valid, `${lang} → "${code}" is not a valid Brave search_lang (ISO 639-1 / zh-han*)`);
-  }
-});
-
-test('SRCH-LANG (coverage): the supported set matches the expected table (no silent drift)', () => {
-  // If a language is added/removed in SUPPORTED_LANGUAGES, this fails until the
-  // golden table is updated — forcing a deliberate Brave-code decision per language.
+test('SRCH-LOCALE (coverage): the supported set matches the expected table (no silent drift)', () => {
+  // Adding/removing a language in SUPPORTED_LANGUAGES fails this until the golden
+  // table is updated — forcing a deliberate Brave-country decision per language.
   assert.deepEqual(
     [...SUPPORTED_LANGUAGES].sort(),
-    Object.keys(EXPECTED_BRAVE_LANG).sort(),
-    'SUPPORTED_LANGUAGES drifted from EXPECTED_BRAVE_LANG — add the new language with its Brave code',
+    Object.keys(EXPECTED_BRAVE_COUNTRY).sort(),
+    'SUPPORTED_LANGUAGES drifted from EXPECTED_BRAVE_COUNTRY — add the new language with its country',
   );
 });
 
-test('SRCH-LANG: unknown/free-text returns undefined (caller omits search_lang)', () => {
-  assert.equal(languageToBraveSearchLang('Klingon'), undefined);
-  assert.equal(languageToBraveSearchLang(''), undefined);
+test('SRCH-LOCALE: unknown/free-text returns undefined (caller omits country)', () => {
+  assert.equal(languageToBraveCountry('Klingon'), undefined);
+  assert.equal(languageToBraveCountry(''), undefined);
 });

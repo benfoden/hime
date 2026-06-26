@@ -508,40 +508,42 @@ export function languageToIso(displayName: string): string {
   return fallback || 'en';
 }
 
-// Display-name → Brave Search `search_lang` code. Per Brave's official Web Search
-// API docs this is ISO 639-1 (e.g. `de` for German, default `en`) — so Japanese is
-// `ja` (NOT `jp` — an invalid value Brave silently ignores). Chinese is the one
-// exception Brave splits by script: `zh-hans` / `zh-hant`. Kept as a dedicated map
-// (not languageToIso, which stores `zh-CN`/`zh-TW`). Passing this pins the result
-// locale; WITHOUT it Brave language-detects the (often script-ambiguous) translated
-// query and picks the wrong locale — e.g. the pure-kanji query 魔法少女 ("magical
-// girl") is valid Japanese AND Chinese, so Brave returned zh.wikipedia.org. Anything
-// absent (e.g. Indonesian) returns undefined → Brave's auto-detect, the prior behaviour.
-const BRAVE_SEARCH_LANG: Readonly<Record<string, string>> = {
-  English: 'en',
-  Japanese: 'ja',
-  Korean: 'ko',
-  'Chinese (Simplified)': 'zh-hans',
-  'Chinese (Traditional)': 'zh-hant',
-  Spanish: 'es',
-  French: 'fr',
-  German: 'de',
-  Italian: 'it',
-  Portuguese: 'pt',
-  Dutch: 'nl',
-  Russian: 'ru',
-  Polish: 'pl',
-  Turkish: 'tr',
-  Arabic: 'ar',
-  Hindi: 'hi',
-  Vietnamese: 'vi',
-  Thai: 'th',
+// Display-name → Brave Search `country` code (ISO 3166-1 alpha-2). This — NOT
+// `search_lang` — is the lever that actually pins Brave's result locale. Verified
+// empirically (scripts/brave-lang-probe.mjs against the live API): the pure-kanji query
+// 魔法少女 ("magical girl") is valid Japanese AND Chinese, so with no targeting Brave
+// returned zh.wikipedia.org. `search_lang=jp` alone did NOT fix it (still Chinese),
+// and `search_lang=ja` is a 422 (Brave's enum wants `jp`, contradicting the "ISO
+// 639-1" docs). `country=JP` returned ja.wikipedia.org / pixiv etc. — so we target by
+// country. Each language maps to its primary country; absent ones (none currently)
+// would return undefined → Brave's default (US). NOTE: codes are ISO 3166-1 alpha-2
+// (uppercase), distinct from the lowercase language codes in LANGUAGE_ISO.
+const LANGUAGE_COUNTRY: Readonly<Record<string, string>> = {
+  English: 'US',
+  Japanese: 'JP',
+  Korean: 'KR',
+  'Chinese (Simplified)': 'CN',
+  'Chinese (Traditional)': 'TW',
+  Spanish: 'ES',
+  French: 'FR',
+  German: 'DE',
+  Italian: 'IT',
+  Portuguese: 'BR',
+  Dutch: 'NL',
+  Russian: 'RU',
+  Polish: 'PL',
+  Turkish: 'TR',
+  Arabic: 'SA',
+  Hindi: 'IN',
+  Vietnamese: 'VN',
+  Thai: 'TH',
+  Indonesian: 'ID',
 };
 
-// Resolve a display name to a Brave `search_lang` code, or undefined when Brave
-// has no matching locale (caller then omits the param → Brave auto-detect).
-export function languageToBraveSearchLang(displayName: string): string | undefined {
-  return BRAVE_SEARCH_LANG[displayName];
+// Resolve a display name to a Brave `country` code (ISO 3166-1 alpha-2), or
+// undefined when there's no mapping (caller omits the param → Brave's default US).
+export function languageToBraveCountry(displayName: string): string | undefined {
+  return LANGUAGE_COUNTRY[displayName];
 }
 
 // Default settings
