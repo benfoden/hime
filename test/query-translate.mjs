@@ -90,8 +90,8 @@ const { languageToBraveSearchLang } = await import(
   path.join(__dirname, '../dist/types.js')
 );
 
-test('SRCH-LANG: Japanese maps to Brave code "jp" (NOT ISO "ja")', () => {
-  assert.equal(languageToBraveSearchLang('Japanese'), 'jp');
+test('SRCH-LANG: Japanese maps to ISO 639-1 "ja" (Brave search_lang; NOT "jp")', () => {
+  assert.equal(languageToBraveSearchLang('Japanese'), 'ja');
 });
 
 test('SRCH-LANG: Chinese variants map to Brave zh-hans / zh-hant', () => {
@@ -99,10 +99,10 @@ test('SRCH-LANG: Chinese variants map to Brave zh-hans / zh-hant', () => {
   assert.equal(languageToBraveSearchLang('Chinese (Traditional)'), 'zh-hant');
 });
 
-test('SRCH-LANG: common languages map to their Brave codes', () => {
+test('SRCH-LANG: common languages map to their ISO 639-1 codes', () => {
   assert.equal(languageToBraveSearchLang('English'), 'en');
   assert.equal(languageToBraveSearchLang('Korean'), 'ko');
-  assert.equal(languageToBraveSearchLang('Portuguese'), 'pt-br');
+  assert.equal(languageToBraveSearchLang('Portuguese'), 'pt');
 });
 
 test('SRCH-LANG: a language Brave lacks (Indonesian) returns undefined → auto-detect', () => {

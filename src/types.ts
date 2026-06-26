@@ -508,18 +508,18 @@ export function languageToIso(displayName: string): string {
   return fallback || 'en';
 }
 
-// Display-name → Brave Search `search_lang` code. Brave uses its OWN codes that
-// differ from ISO-639-1 (e.g. Japanese is `jp` not `ja`; Chinese is `zh-hans` /
-// `zh-hant`), so this is a separate map from LANGUAGE_ISO. Passing this to Brave
-// pins the result locale; WITHOUT it Brave language-detects the (often
-// script-ambiguous) translated query and can pick the wrong locale — e.g. the
-// pure-kanji query 魔法少女 ("magical girl") is valid Japanese AND Chinese, so Brave
-// returned zh.wikipedia.org. Only languages Brave actually supports are listed;
-// anything absent (e.g. Indonesian) returns undefined → Brave's auto-detect, the
-// prior behaviour.
+// Display-name → Brave Search `search_lang` code. Per Brave's official Web Search
+// API docs this is ISO 639-1 (e.g. `de` for German, default `en`) — so Japanese is
+// `ja` (NOT `jp` — an invalid value Brave silently ignores). Chinese is the one
+// exception Brave splits by script: `zh-hans` / `zh-hant`. Kept as a dedicated map
+// (not languageToIso, which stores `zh-CN`/`zh-TW`). Passing this pins the result
+// locale; WITHOUT it Brave language-detects the (often script-ambiguous) translated
+// query and picks the wrong locale — e.g. the pure-kanji query 魔法少女 ("magical
+// girl") is valid Japanese AND Chinese, so Brave returned zh.wikipedia.org. Anything
+// absent (e.g. Indonesian) returns undefined → Brave's auto-detect, the prior behaviour.
 const BRAVE_SEARCH_LANG: Readonly<Record<string, string>> = {
   English: 'en',
-  Japanese: 'jp',
+  Japanese: 'ja',
   Korean: 'ko',
   'Chinese (Simplified)': 'zh-hans',
   'Chinese (Traditional)': 'zh-hant',
@@ -527,7 +527,7 @@ const BRAVE_SEARCH_LANG: Readonly<Record<string, string>> = {
   French: 'fr',
   German: 'de',
   Italian: 'it',
-  Portuguese: 'pt-br',
+  Portuguese: 'pt',
   Dutch: 'nl',
   Russian: 'ru',
   Polish: 'pl',
