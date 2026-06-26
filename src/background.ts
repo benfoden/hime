@@ -25,7 +25,7 @@ import type {
   ImageEntry,
   ImageResult
 } from './types.js';
-import { migrateSettings } from './types.js';
+import { migrateSettings, languageToBraveSearchLang } from './types.js';
 import { sanitizeSuggestion } from './predict-util.js';
 import { buildBatchTranslatePrompt, parseBatchReply } from './translate-batch.js';
 import { buildPageBatchPrompt, parsePageBatchReply } from './page-walk.js';
@@ -656,7 +656,13 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
 
           // First caller for this query — issue the fetch and register it.
           // D-07: NO 429 auto-retry; the transport classifies and throws.
-          const promise = braveClient.search(searchQuery, apiKey, { count: 10 });
+          // Pin Brave's result locale to the language searchQuery is actually in,
+          // so a script-ambiguous translated query (e.g. 魔法少女, valid JA *and* ZH)
+          // doesn't get auto-detected to the wrong locale. On a failed translation
+          // the query stays raw in the source language; otherwise it's the target.
+          const searchLangName = translationFailed ? sourceLanguage : targetLanguage;
+          const searchLang = languageToBraveSearchLang(searchLangName);
+          const promise = braveClient.search(searchQuery, apiKey, { count: 10, searchLang });
           inFlightSearches.set(dedupKey, promise);
           try {
             const results = await promise;

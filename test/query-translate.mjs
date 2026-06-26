@@ -80,3 +80,36 @@ test('no customPrompt: returned config has exactly sourceLanguage, targetLanguag
   assert.deepEqual(keys, ['formality', 'sourceLanguage', 'targetLanguage'],
     'config should have exactly three fields: sourceLanguage, targetLanguage, formality');
 });
+
+// ---------------------------------------------------------------------------
+// SRCH-LANG: languageToBraveSearchLang — pin Brave result locale (fixes the
+// 魔法少女 (JA≡ZH) ambiguity that returned zh.wikipedia.org for a Japanese search)
+// ---------------------------------------------------------------------------
+
+const { languageToBraveSearchLang } = await import(
+  path.join(__dirname, '../dist/types.js')
+);
+
+test('SRCH-LANG: Japanese maps to Brave code "jp" (NOT ISO "ja")', () => {
+  assert.equal(languageToBraveSearchLang('Japanese'), 'jp');
+});
+
+test('SRCH-LANG: Chinese variants map to Brave zh-hans / zh-hant', () => {
+  assert.equal(languageToBraveSearchLang('Chinese (Simplified)'), 'zh-hans');
+  assert.equal(languageToBraveSearchLang('Chinese (Traditional)'), 'zh-hant');
+});
+
+test('SRCH-LANG: common languages map to their Brave codes', () => {
+  assert.equal(languageToBraveSearchLang('English'), 'en');
+  assert.equal(languageToBraveSearchLang('Korean'), 'ko');
+  assert.equal(languageToBraveSearchLang('Portuguese'), 'pt-br');
+});
+
+test('SRCH-LANG: a language Brave lacks (Indonesian) returns undefined → auto-detect', () => {
+  assert.equal(languageToBraveSearchLang('Indonesian'), undefined);
+});
+
+test('SRCH-LANG: unknown/free-text returns undefined (caller omits search_lang)', () => {
+  assert.equal(languageToBraveSearchLang('Klingon'), undefined);
+  assert.equal(languageToBraveSearchLang(''), undefined);
+});

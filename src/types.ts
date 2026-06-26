@@ -508,6 +508,42 @@ export function languageToIso(displayName: string): string {
   return fallback || 'en';
 }
 
+// Display-name → Brave Search `search_lang` code. Brave uses its OWN codes that
+// differ from ISO-639-1 (e.g. Japanese is `jp` not `ja`; Chinese is `zh-hans` /
+// `zh-hant`), so this is a separate map from LANGUAGE_ISO. Passing this to Brave
+// pins the result locale; WITHOUT it Brave language-detects the (often
+// script-ambiguous) translated query and can pick the wrong locale — e.g. the
+// pure-kanji query 魔法少女 ("magical girl") is valid Japanese AND Chinese, so Brave
+// returned zh.wikipedia.org. Only languages Brave actually supports are listed;
+// anything absent (e.g. Indonesian) returns undefined → Brave's auto-detect, the
+// prior behaviour.
+const BRAVE_SEARCH_LANG: Readonly<Record<string, string>> = {
+  English: 'en',
+  Japanese: 'jp',
+  Korean: 'ko',
+  'Chinese (Simplified)': 'zh-hans',
+  'Chinese (Traditional)': 'zh-hant',
+  Spanish: 'es',
+  French: 'fr',
+  German: 'de',
+  Italian: 'it',
+  Portuguese: 'pt-br',
+  Dutch: 'nl',
+  Russian: 'ru',
+  Polish: 'pl',
+  Turkish: 'tr',
+  Arabic: 'ar',
+  Hindi: 'hi',
+  Vietnamese: 'vi',
+  Thai: 'th',
+};
+
+// Resolve a display name to a Brave `search_lang` code, or undefined when Brave
+// has no matching locale (caller then omits the param → Brave auto-detect).
+export function languageToBraveSearchLang(displayName: string): string | undefined {
+  return BRAVE_SEARCH_LANG[displayName];
+}
+
 // Default settings
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'openai',
