@@ -770,14 +770,19 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           const batchInstruction = buildPageBatchPrompt(config);
           const userContent = `${batchInstruction}\n\n${payloadText}`;
           try {
-            // Race against an 8s timeout. The synthetic error uses name: 'AbortError'
-            // so classifyError maps it to kind: 'network' (mirrors translateBatch).
+            // Race against a 45s timeout. Unlike the tiny SERP snippets the search
+            // path translates in <8s, a page chunk is up to PAGE_CHUNK_MAX_CHARS
+            // (4000) chars in ONE non-streaming call — 8s was too tight and timed
+            // out every chunk on real pages (T-16 verify defect). The synthetic
+            // error uses name: 'AbortError' so classifyError maps it to kind:
+            // 'network'. Concurrency is capped at 2 (page-walk PAGE_CONCURRENCY_CAP),
+            // so this does not fan out free-tier RPM.
             const result = await Promise.race([
               provider.translate(userContent, config, apiKey, s.model),
               new Promise<never>((_, reject) =>
                 setTimeout(
                   () => reject(Object.assign(new Error('Translation timed out'), { name: 'AbortError' })),
-                  8000
+                  45000
                 )
               ),
             ]);
