@@ -1509,8 +1509,13 @@ function pageCollectTextNodes(): Text[] {
 async function pageReadConfig(): Promise<PageTranslationConfig> {
   const result = await chrome.storage.local.get(['himeSettings']);
   const s = (result.himeSettings || {}) as Record<string, unknown>;
-  const sourceLanguage = typeof s.sourceLanguage === 'string' ? s.sourceLanguage : '';
-  const targetLanguage = typeof s.targetLanguage === 'string' ? s.targetLanguage : '';
+  // Mirror DEFAULT_SETTINGS (types.ts) so the overlay path resolves a real
+  // target language exactly like getSettings()→migrateSettings does. Empty-string
+  // fallbacks here produced a prompt "translate to <empty>" → the model picked an
+  // arbitrary script (Japanese target rendered as Chinese). Classic-script law:
+  // these literals MUST stay in sync with DEFAULT_SETTINGS.sourceLanguage/targetLanguage.
+  const sourceLanguage = typeof s.sourceLanguage === 'string' && s.sourceLanguage ? s.sourceLanguage : 'English';
+  const targetLanguage = typeof s.targetLanguage === 'string' && s.targetLanguage ? s.targetLanguage : 'Japanese';
   const formality: PageTranslationConfig['formality'] =
     s.formality === 'casual' || s.formality === 'polite' || s.formality === 'formal'
       ? s.formality
