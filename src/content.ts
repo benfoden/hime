@@ -1704,12 +1704,17 @@ function pageApplyState(state: 'original' | 'translated'): void {
  * so the popup can origin-check before relabeling.
  */
 function pageWriteStateMirror(state: 'original' | 'translated'): void {
-  void chrome.storage.session.set({
-    [PAGE_STORAGE_PAGE_STATE]: {
-      origin: location.origin,
-      state: state === 'translated' ? 'translated' : 'original-shown',
-    },
-  });
+  // session storage may be unavailable to this content script (worker hasn't yet
+  // run setAccessLevel, or older Chrome) → swallow rather than throw an uncaught
+  // rejection. The popup just won't get the live mirror; not worth surfacing.
+  void chrome.storage.session
+    .set({
+      [PAGE_STORAGE_PAGE_STATE]: {
+        origin: location.origin,
+        state: state === 'translated' ? 'translated' : 'original-shown',
+      },
+    })
+    .catch(() => {});
 }
 
 /**
@@ -1844,12 +1849,19 @@ function pageShowOfferBanner(origin: string): void {
  */
 async function pageDismissBanner(origin: string): Promise<void> {
   document.getElementById(HIME_PAGE_BANNER_ID)?.remove();
-  const stored = await chrome.storage.session.get(STORAGE_BANNER_DISMISSED);
-  const current = (stored[STORAGE_BANNER_DISMISSED] as string[] | undefined) ?? [];
-  if (current.includes(origin)) return; // dedup
-  await chrome.storage.session.set({
-    [STORAGE_BANNER_DISMISSED]: [...current, origin],
-  });
+  // session storage may be unavailable to this content script (see pageWriteStateMirror).
+  // The banner is already removed from the DOM above; if persistence fails it simply
+  // re-offers on the next load rather than throwing an uncaught rejection.
+  try {
+    const stored = await chrome.storage.session.get(STORAGE_BANNER_DISMISSED);
+    const current = (stored[STORAGE_BANNER_DISMISSED] as string[] | undefined) ?? [];
+    if (current.includes(origin)) return; // dedup
+    await chrome.storage.session.set({
+      [STORAGE_BANNER_DISMISSED]: [...current, origin],
+    });
+  } catch {
+    /* session storage not accessible here — dismissal just isn't persisted */
+  }
 }
 
 // --- Partial-failure resilience (Phase 15: PAGE-04, D-04) ---
@@ -2560,8 +2572,17 @@ chrome.storage.local.get(['himeSettings'], async (result) => {
   // Gate BEFORE any banner creation: same-language/unknown → no banner, no spend.
   if (progShouldGateByLanguage(pageLang, target)) return;
   const origin = location.origin;
-  const stored = await chrome.storage.session.get(STORAGE_BANNER_DISMISSED);
-  const dismissed = stored[STORAGE_BANNER_DISMISSED] as string[] | undefined;
+  // The per-origin dismissed-set lives in session storage, which may be
+  // inaccessible to this content script (worker hasn't run setAccessLevel yet, or
+  // older Chrome). Guard so a foreign-language page (e.g. Amazon JP) never throws
+  // "Access to storage is not allowed from this context" as an uncaught rejection.
+  let dismissed: string[] | undefined;
+  try {
+    const stored = await chrome.storage.session.get(STORAGE_BANNER_DISMISSED);
+    dismissed = stored[STORAGE_BANNER_DISMISSED] as string[] | undefined;
+  } catch {
+    dismissed = undefined; // can't read dismissals → fall through and offer the banner
+  }
   if (dismissed?.includes(origin)) return; // dismissed this session (A7 origin granularity)
   pageShowOfferBanner(origin);
 });

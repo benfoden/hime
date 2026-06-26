@@ -47,6 +47,21 @@ const providers: Record<string, TranslationProvider> = {
   openrouter: new OpenRouterProvider(),
 };
 
+// Grant content scripts access to chrome.storage.session. By DEFAULT session
+// storage is restricted to TRUSTED_CONTEXTS (worker/popup/options) — a content
+// script reading it (the page-state mirror + per-origin banner-dismissed set in
+// content.ts) throws "Access to storage is not allowed from this context" (seen on
+// foreign-language pages like Amazon JP, where the language gate reaches the
+// storage.session.get). Set the access level on EVERY worker load (it is not
+// guaranteed to persist across SW restarts); content.ts also guards its calls.
+if (chrome.storage.session.setAccessLevel) {
+  chrome.storage.session
+    .setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' })
+    .catch(() => {
+      /* older Chrome without setAccessLevel, or already set — content.ts guards anyway */
+    });
+}
+
 // Brave Search transport (Plan 08-02). Single module-scope instance.
 const braveClient = new BraveSearchClient();
 
