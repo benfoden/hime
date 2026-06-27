@@ -834,7 +834,11 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
 
           try {
             // Resolve image bytes via the data:/fetch/captureVisibleTab ladder.
-            const resolved = await resolveImageBytes(srcUrl, tabId ?? 0);
+            // Fall back to the sender's tab id (not 0) so the captureVisibleTab
+            // branch targets the real tab — chrome.tabs.get(0) would throw and
+            // surface an error-toast instead of cleanly skipping a fetch-blocked
+            // image (OVL-01). Mirrors progressiveTranslate/openImagePanel below.
+            const resolved = await resolveImageBytes(srcUrl, tabId ?? sender.tab?.id ?? 0);
 
             // SVG is vector (icons/logos/diagrams) — Vision can't OCR it and the
             // canvas decode rejects it ("Unsupported image format: image/svg+xml").
