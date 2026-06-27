@@ -867,16 +867,31 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
               items[String(i)] = blocks[i].text;
             }
 
+            // Read-direction flip (mirror ocrAndTranslateImage, lines ~355-363):
+            // the incoming config is the COMPOSE direction (e.g. English→Japanese),
+            // but a reader of a Japanese image wants it in their native (source)
+            // language. Without this, a Japanese image got "translate to Japanese"
+            // → a no-op that rendered the raw OCR text as the overlay (T-16 verify
+            // defect). Detect Japanese OCR text and swap source/target so it
+            // resolves to the non-Japanese side.
+            const jpPattern = /[぀-ゟ゠-ヿ一-鿿]/;
+            const inputIsJP = jpPattern.test(blocks.map((b) => b.text).join('\n'));
+            const effectiveConfig: TranslationConfig = inputIsJP
+              ? { ...config, sourceLanguage: config.targetLanguage, targetLanguage: config.sourceLanguage }
+              : config;
+
             // One LLM round-trip for ALL blocks of this image (OVL-01 / Pattern 5).
-            const batchInstruction = buildPageBatchPrompt(config);
+            const batchInstruction = buildPageBatchPrompt(effectiveConfig);
             const userContent = `${batchInstruction}\n\n${JSON.stringify(items)}`;
 
+            // 45s timeout to match the page-batch path — an 8s cap timed out real
+            // multi-block image translations (T-16 verify defect).
             const translateResult = await Promise.race([
-              provider.translate(userContent, config, apiKey, s.model),
+              provider.translate(userContent, effectiveConfig, apiKey, s.model),
               new Promise<never>((_, reject) =>
                 setTimeout(
                   () => reject(Object.assign(new Error('Translation timed out'), { name: 'AbortError' })),
-                  8000,
+                  45000,
                 ),
               ),
             ]);
