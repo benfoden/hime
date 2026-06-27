@@ -65,7 +65,8 @@ export class OpenAIProvider implements TranslationProvider {
     const systemPrompt = buildSystemPrompt(config);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    // 60s: page/image batches exceed the old 10s cap and self-aborted (T-16). Ceiling only.
+    const timeout = setTimeout(() => controller.abort(), 60000);
 
     try {
       let response: Response;

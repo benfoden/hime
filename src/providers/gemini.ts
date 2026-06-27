@@ -69,7 +69,11 @@ export class GeminiProvider implements TranslationProvider {
     const systemPrompt = buildSystemPrompt(config);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    // 60s: a full-page / image-overlay batch is up to ~4000 chars in one call and
+    // routinely exceeds 10s on free-tier models. The old 10s cap self-aborted every
+    // page chunk ("The user aborted a request") while compose-sized calls finished
+    // fine (T-16 verify defect). Ceiling only — fast calls still return immediately.
+    const timeout = setTimeout(() => controller.abort(), 60000);
 
     try {
       let response: Response;
