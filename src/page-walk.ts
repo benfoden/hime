@@ -71,9 +71,11 @@ export function collectTextNodesRecursive(root: Node, isEditable: (el: Element) 
 // blast-radius and 8s-timeout risk on a single chunk; smaller = more resilient,
 // more calls. 4000 is a conservative middle ground — tune as real pages dictate.
 export const PAGE_CHUNK_MAX_CHARS = 4000;
-// Max simultaneous translatePageBatch chunk calls so a 500-node page does not fire
-// dozens of LLM requests at once. Mirrors progressive-guard's concurrency cap — tune.
-export const PAGE_CONCURRENCY_CAP = 2;
+// Max simultaneous translatePageBatch chunk calls. 1 = strict top-to-bottom
+// streaming (chunks apply in document order as they return) and minimal free-tier
+// rate pressure; higher values stampede the per-minute limit (T-16). Keep in sync
+// with content.ts PAGE_CONCURRENCY_CAP.
+export const PAGE_CONCURRENCY_CAP = 1;
 
 /**
  * Group node-text indices into chunks under a character budget (PAGE-04).

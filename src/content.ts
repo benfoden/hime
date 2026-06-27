@@ -934,7 +934,7 @@ console.log('hime: Content script loaded');
 const PROG_MIN_LONG_EDGE_PX = 150;    // progressive-guard.ts MIN_LONG_EDGE_PX
 const PROG_ROOT_MARGIN_PX   = 200;    // progressive-guard.ts ROOT_MARGIN_PX
 const PROG_DWELL_MS         = 400;    // progressive-guard.ts DWELL_MS
-const PROG_CONCURRENCY_CAP  = 2;      // progressive-guard.ts CONCURRENCY_CAP
+const PROG_CONCURRENCY_CAP  = 1;      // 1 image at a time — limits free-tier rate pressure (T-16); was 2
 const PROG_PER_PAGE_BUDGET  = 10;     // progressive-guard.ts PER_PAGE_BUDGET
 
 // --- UI class/id constants ---
@@ -1411,15 +1411,19 @@ function pageIsTranslatableTag(tagName: string): boolean {
 
 // MUST stay in sync with page-walk.ts PAGE_CHUNK_MAX_CHARS / PAGE_CONCURRENCY_CAP.
 const PAGE_CHUNK_MAX_CHARS = 4000;
-const PAGE_CONCURRENCY_CAP = 2;
+// Cap 1 = strict top-to-bottom streaming: chunks dispatch in document order and
+// each applies on arrival, so translated text fills the page top→down as it comes
+// back. It also minimises free-tier rate pressure — concurrent page+image passes
+// at cap 2 each (4 in flight) exhausted the per-minute limit and failed chunks even
+// after retries (T-16). Sequential is slower but reliable and visibly ordered.
+const PAGE_CONCURRENCY_CAP = 1;
 
 // Retry/backoff for batch translate calls — mirrors search.ts (the reliable path).
-// Free-tier providers transiently time out or rate-limit under the concurrent
-// page + image load; without retry a single hiccup permanently failed that chunk
-// (T-16: "all page sections fail, random images succeed"). Backoff also paces the
-// concurrent chunks so they ride out the provider's per-minute limit.
-const BATCH_MAX_ATTEMPTS = 3;
-const BATCH_BACKOFF_BASE_MS = 600;
+// Free-tier providers transiently time out or rate-limit under load; without retry
+// a single hiccup permanently failed that chunk. Backoff also paces requests to
+// ride out the provider's per-minute limit (T-16).
+const BATCH_MAX_ATTEMPTS = 4;
+const BATCH_BACKOFF_BASE_MS = 800;
 const batchSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // MUST stay in sync with page-walk.ts chunkByBudget — groups node-text indices
