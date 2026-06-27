@@ -352,11 +352,12 @@ async function ocrAndTranslateImage(
   const provider = providers[settings.provider];
   if (!provider) throw new Error(`Unknown provider: ${settings.provider}`);
 
-  const jpPattern = /[぀-ゟ゠-ヿ一-鿿]/;
-  const inputIsJP = jpPattern.test(originalText);
-  const target = inputIsJP ? settings.sourceLanguage : settings.targetLanguage;
+  // Translate to the configured target (popup "X → Y" → Y is the result). Source
+  // is model-auto-detected; no JP-detect flip (it inverted the user's chosen
+  // direction — T-16 verify defect).
+  const target = settings.targetLanguage;
   const config: TranslationConfig = {
-    sourceLanguage: inputIsJP ? settings.targetLanguage : settings.sourceLanguage,
+    sourceLanguage: settings.sourceLanguage,
     targetLanguage: target,
     formality: settings.formality,
     customPrompt: settings.customPrompt,
@@ -765,20 +766,12 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           // T-15-04: serialize ONLY the page-supplied items — no url/key added here.
           const inputKeys = Object.keys(items);
           const payloadText = JSON.stringify(items);
-          // Read-direction flip (mirror the image-overlay path): the incoming
-          // config is the COMPOSE direction (e.g. English→Japanese), but a reader
-          // of a Japanese page wants it in their native (source) language. Without
-          // this, a Japanese page got "translate to Japanese" → a no-op that left
-          // the page text untranslated (T-16 verify defect). Detect Japanese page
-          // text and swap source/target so it resolves to the non-Japanese side.
-          const jpPattern = /[぀-ゟ゠-ヿ一-鿿]/;
-          const inputIsJP = jpPattern.test(Object.values(items).join('\n'));
-          const effectiveConfig = inputIsJP
-            ? { ...config, sourceLanguage: config.targetLanguage, targetLanguage: config.sourceLanguage }
-            : config;
-          // Page-batch prompt is prepended so the JSON instruction overrides the
-          // system-level "output ONLY translated text" all providers inject.
-          const batchInstruction = buildPageBatchPrompt(effectiveConfig);
+          // Translate straight to config.targetLanguage — the popup direction
+          // "X → Y" means translate the page FROM X TO Y, so the right-side target
+          // is always the on-page result. Source is model-auto-detected; no
+          // language-detection flip (a prior JP-detect heuristic inverted the
+          // user's chosen direction and no-op'd it — T-16 verify defect).
+          const batchInstruction = buildPageBatchPrompt(config);
           const userContent = `${batchInstruction}\n\n${payloadText}`;
           try {
             // Race against a 45s timeout. Unlike the tiny SERP snippets the search
@@ -789,7 +782,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             // 'network'. Concurrency is capped at 2 (page-walk PAGE_CONCURRENCY_CAP),
             // so this does not fan out free-tier RPM.
             const result = await Promise.race([
-              provider.translate(userContent, effectiveConfig, apiKey, s.model),
+              provider.translate(userContent, config, apiKey, s.model),
               new Promise<never>((_, reject) =>
                 setTimeout(
                   () => reject(Object.assign(new Error('Translation timed out'), { name: 'AbortError' })),
@@ -878,27 +871,16 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
               items[String(i)] = blocks[i].text;
             }
 
-            // Read-direction flip (mirror ocrAndTranslateImage, lines ~355-363):
-            // the incoming config is the COMPOSE direction (e.g. English→Japanese),
-            // but a reader of a Japanese image wants it in their native (source)
-            // language. Without this, a Japanese image got "translate to Japanese"
-            // → a no-op that rendered the raw OCR text as the overlay (T-16 verify
-            // defect). Detect Japanese OCR text and swap source/target so it
-            // resolves to the non-Japanese side.
-            const jpPattern = /[぀-ゟ゠-ヿ一-鿿]/;
-            const inputIsJP = jpPattern.test(blocks.map((b) => b.text).join('\n'));
-            const effectiveConfig: TranslationConfig = inputIsJP
-              ? { ...config, sourceLanguage: config.targetLanguage, targetLanguage: config.sourceLanguage }
-              : config;
-
-            // One LLM round-trip for ALL blocks of this image (OVL-01 / Pattern 5).
-            const batchInstruction = buildPageBatchPrompt(effectiveConfig);
+            // Translate straight to config.targetLanguage — same direction model
+            // as the page-text path: the popup "X → Y" target is always the
+            // overlay result. Source is model-auto-detected; no JP-detect flip.
+            const batchInstruction = buildPageBatchPrompt(config);
             const userContent = `${batchInstruction}\n\n${JSON.stringify(items)}`;
 
             // 45s timeout to match the page-batch path — an 8s cap timed out real
             // multi-block image translations (T-16 verify defect).
             const translateResult = await Promise.race([
-              provider.translate(userContent, effectiveConfig, apiKey, s.model),
+              provider.translate(userContent, config, apiKey, s.model),
               new Promise<never>((_, reject) =>
                 setTimeout(
                   () => reject(Object.assign(new Error('Translation timed out'), { name: 'AbortError' })),
