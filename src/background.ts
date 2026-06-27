@@ -765,9 +765,20 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           // T-15-04: serialize ONLY the page-supplied items — no url/key added here.
           const inputKeys = Object.keys(items);
           const payloadText = JSON.stringify(items);
+          // Read-direction flip (mirror the image-overlay path): the incoming
+          // config is the COMPOSE direction (e.g. English→Japanese), but a reader
+          // of a Japanese page wants it in their native (source) language. Without
+          // this, a Japanese page got "translate to Japanese" → a no-op that left
+          // the page text untranslated (T-16 verify defect). Detect Japanese page
+          // text and swap source/target so it resolves to the non-Japanese side.
+          const jpPattern = /[぀-ゟ゠-ヿ一-鿿]/;
+          const inputIsJP = jpPattern.test(Object.values(items).join('\n'));
+          const effectiveConfig = inputIsJP
+            ? { ...config, sourceLanguage: config.targetLanguage, targetLanguage: config.sourceLanguage }
+            : config;
           // Page-batch prompt is prepended so the JSON instruction overrides the
           // system-level "output ONLY translated text" all providers inject.
-          const batchInstruction = buildPageBatchPrompt(config);
+          const batchInstruction = buildPageBatchPrompt(effectiveConfig);
           const userContent = `${batchInstruction}\n\n${payloadText}`;
           try {
             // Race against a 45s timeout. Unlike the tiny SERP snippets the search
@@ -778,7 +789,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             // 'network'. Concurrency is capped at 2 (page-walk PAGE_CONCURRENCY_CAP),
             // so this does not fan out free-tier RPM.
             const result = await Promise.race([
-              provider.translate(userContent, config, apiKey, s.model),
+              provider.translate(userContent, effectiveConfig, apiKey, s.model),
               new Promise<never>((_, reject) =>
                 setTimeout(
                   () => reject(Object.assign(new Error('Translation timed out'), { name: 'AbortError' })),
