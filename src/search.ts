@@ -47,6 +47,21 @@ let formality: TranslationConfig['formality'] = 'auto';
 let backTranslate = true;
 const TOGGLE_KEY = 'himeSearchTranslateResults';
 
+// Back-translation runs in two SEQUENTIAL batches: the top 3 first (fast first
+// paint), then the remaining 7. Within a batch, rows reveal top→bottom with a small
+// stagger so they fade in 1,2,3… in strict visual order (the prior CONCURRENT windows
+// let the small last batch land first → "the last rows appear first"). Per-batch
+// retries + a final failure sweep make ALL results translate reliably (the old
+// all-or-nothing batch left transient failures permanently raw — e.g. results 0-4
+// staying in the source language). Backoff between attempts rides out the provider's
+// per-minute rate limit (the query translation fires a request immediately before, so
+// the first batch is prone to a transient 429).
+const SEARCH_FIRST_BATCH = 3; // top rows translated/revealed first, then the rest
+const SEARCH_REVEAL_STAGGER_MS = 90; // delay between consecutive row reveals (top→bottom fade)
+const SEARCH_BACKOFF_BASE_MS = 350; // base for exponential retry backoff
+const SEARCH_MAX_ATTEMPTS = 3; // attempts per batch before deferring to the sweep
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 // Cache of the most recent search so toggling the checkbox re-applies the
 // overlay WITHOUT a Brave re-fetch (and without re-translating once cached).
 let lastRaw: SearchResult[] | null = null; // target-language Brave rows
@@ -118,6 +133,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     // DOM incomplete — bail out gracefully (should never happen in production)
     return;
   }
+
+  // Caret in the search box on load/reload/open. The `autofocus` attribute covers
+  // first paint; focus() here is the reliable cross-case path, and re-focusing on
+  // window focus puts the caret back when the tab is re-activated. Select any
+  // existing value so a re-open lets the user type over the prior query immediately.
+  const focusSearch = (): void => {
+    input.focus();
+    input.select();
+  };
+  focusSearch();
+  window.addEventListener('focus', focusSearch);
 
   // Load the persisted toggle state (default on). Absent/true → on; explicit false → off.
   try {
@@ -334,6 +360,7 @@ async function runSearch(
  */
 async function applyOverlay(mount: HTMLElement, runToken: number): Promise<void> {
   if (!lastRaw) return;
+  const raw = lastRaw; // non-null capture for the closures/loops below
 
   // No back-translation wanted (toggle off) or nothing to translate back
   // (results already in the reader's language) → show raw rows.
@@ -352,39 +379,137 @@ async function applyOverlay(mount: HTMLElement, runToken: number): Promise<void>
     return;
   }
 
+  // Paint ALL raw rows immediately with the "translating" wave (instant feedback),
+  // then translate concurrently and replace each row's text IN PLACE as it lands.
+  if (currentRun !== runToken) return;
+  renderSerp({ kind: 'populated', results: raw, translating: true }, document, mount);
+
   // Compute the overlay: translate target→source (back to the reader's language).
   // Direction is swapped vs the query path: results arrive in the target language
   // and must come back to the source language the reader understands.
-  const items = buildBatchPayload(lastRaw);
   const config: TranslationConfig = {
     sourceLanguage: targetLanguage,
     targetLanguage: sourceLanguage,
     formality,
   };
 
-  let batchReply: TranslateBatchResponse;
-  try {
-    batchReply = await chrome.runtime.sendMessage({
-      type: 'translateBatch',
-      payload: { items, config },
-    }) as TranslateBatchResponse;
-  } catch {
-    // translateBatch communication failure — leave raw results visible (XLT-05)
-    return;
+  // `merged` carries the final cache view: translated rows replace their raw
+  // counterpart (mergeTranslations returns NEW objects for translated rows and the
+  // SAME ref for untranslated ones, so `merged[i] !== raw[i]` ⇔ row i is translated).
+  const merged = raw.slice();
+  const translatedIdx = new Set<number>();
+  const failed: number[] = [];
+
+  // In-place row swap: replace one row's title + snippet text and drop the wave,
+  // WITHOUT re-rendering the whole list (keeps the other rows' animation smooth).
+  const swapRow = (i: number, result: SearchResult): void => {
+    const row = mount.querySelectorAll('.serp-row')[i] as HTMLElement | undefined;
+    if (!row) return;
+    const titleEl = row.querySelector('a.serp-title');
+    if (titleEl) titleEl.textContent = result.title;
+    const snippetEl = row.querySelector('.serp-snippet');
+    if (snippetEl) snippetEl.textContent = result.description;
+    row.classList.remove('serp-translating');
+    row.classList.add('serp-revealed'); // fade the translated text in
+  };
+
+  // Translate one window and stream its rows in. Collects any indices that did not
+  // translate into `failed` for the sweep. Honors the stale-run guard.
+  const runWindow = async (idxs: number[]): Promise<void> => {
+    if (idxs.length === 0) return;
+    const chunk = idxs.map((i) => raw[i]);
+    const translations = await translateChunkWithRetry(chunk, config, SEARCH_MAX_ATTEMPTS);
+    if (currentRun !== runToken) return;
+    if (!translations) {
+      failed.push(...idxs.filter((i) => !translatedIdx.has(i)));
+      return;
+    }
+    const slice = mergeTranslations(chunk, translations);
+    // Reveal top→bottom with a small stagger so the rows fade in 1,2,3… in order
+    // (a single reply lands all of a batch's rows at once; the stagger paces them).
+    let revealed = false;
+    for (let j = 0; j < idxs.length; j++) {
+      if (currentRun !== runToken) return;
+      const i = idxs[j];
+      if (translatedIdx.has(i)) continue;
+      if (slice[j] !== chunk[j]) {
+        if (revealed) await sleep(SEARCH_REVEAL_STAGGER_MS);
+        merged[i] = slice[j];
+        translatedIdx.add(i);
+        swapRow(i, slice[j]); // fade this row in
+        revealed = true;
+      } else {
+        failed.push(i); // a key the model dropped → sweep it
+      }
+    }
+  };
+
+  // Pass 1 — two SEQUENTIAL batches: the top 3 first (fast first paint), then the
+  // remaining rows. Awaiting batch 1 fully (translate + staggered reveal) before
+  // firing batch 2 keeps the visual order strictly top→bottom and stops the second
+  // request racing the first's reveal. Each row fades in as it lands.
+  const allIdx = Array.from({ length: raw.length }, (_, i) => i);
+  const batches: number[][] = [allIdx.slice(0, SEARCH_FIRST_BATCH)];
+  if (allIdx.length > SEARCH_FIRST_BATCH) batches.push(allIdx.slice(SEARCH_FIRST_BATCH));
+  for (const idxs of batches) {
+    if (currentRun !== runToken) return;
+    await runWindow(idxs);
+  }
+  if (currentRun !== runToken) return;
+
+  // Pass 2 — failure sweep: retry stragglers one at a time (smallest payload, fresh
+  // backoff) so ALL results end up translated, not just some.
+  for (const i of failed) {
+    if (currentRun !== runToken) return;
+    if (translatedIdx.has(i)) continue;
+    await runWindow([i]);
+    if (currentRun !== runToken) return;
+  }
+  if (currentRun !== runToken) return;
+
+  // Settle: drop the wave from any row that ultimately couldn't translate (it keeps
+  // its raw text — graceful degradation, XLT-05), so no row is left shimmering.
+  for (let i = 0; i < raw.length; i++) {
+    if (translatedIdx.has(i)) continue;
+    (mount.querySelectorAll('.serp-row')[i] as HTMLElement | undefined)?.classList.remove(
+      'serp-translating',
+    );
   }
 
-  // Guard: if a newer run/toggle started while we awaited translateBatch, discard
-  // this stale overlay — don't clobber the newer state (T-11-09).
-  if (currentRun !== runToken) {
-    return;
+  // Cache only a FULLY-translated overlay so a later toggle re-runs the stragglers
+  // instead of caching a partial view (XLT-05).
+  if (translatedIdx.size === raw.length) {
+    lastTranslated = merged;
   }
+}
 
-  if (batchReply.error || !batchReply.translations) {
-    // translateBatch failed — leave raw results in place (XLT-05 graceful degradation)
-    return;
+/**
+ * Translate one batch of raw results target→source via the worker, retrying up to
+ * `maxAttempts` with exponential backoff. The 8s worker-timeout AbortError surfaces
+ * as a 'network' error/comms reject, and the provider's per-minute rate limit (the
+ * query translation fires right before) can transiently fail the first call — backoff
+ * rides both out. Returns the translations map, or null if every attempt fails.
+ */
+async function translateChunkWithRetry(
+  chunk: SearchResult[],
+  config: TranslationConfig,
+  maxAttempts: number,
+): Promise<Record<string, { t: string; d: string }> | null> {
+  const items = buildBatchPayload(chunk);
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const reply = (await chrome.runtime.sendMessage({
+        type: 'translateBatch',
+        payload: { items, config },
+      })) as TranslateBatchResponse;
+      if (!reply.error && reply.translations) return reply.translations;
+    } catch {
+      // comm failure — fall through to backoff/retry
+    }
+    if (attempt < maxAttempts - 1) {
+      // Exponential backoff: 350ms, 700ms … to clear a transient rate limit.
+      await sleep(SEARCH_BACKOFF_BASE_MS * 2 ** attempt);
+    }
   }
-
-  // Apply translated overlay: merge translations onto raw results, then cache.
-  lastTranslated = mergeTranslations(lastRaw, batchReply.translations);
-  renderSerp({ kind: 'populated', results: lastTranslated }, document, mount);
+  return null;
 }

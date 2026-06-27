@@ -238,6 +238,114 @@ test('VIS-02b: testConnection rejects with a classified key-free auth error on a
 });
 
 // ---------------------------------------------------------------------------
+// VIS-01f (OVL-01 / Phase 16 Plan 02): ocr() surfaces paragraph blocks via
+//   collectParagraphBoxes alongside the unchanged originalText path.
+//   Fixture: 2 paragraphs each with boundingBox.vertices (4 vertices) and
+//   assembled text from words[].symbols[].text.
+// ---------------------------------------------------------------------------
+test('VIS-01f: ocr() surfaces paragraph blocks with text and 4-vertex boxes', async () => {
+  const { GoogleVisionProvider } = await loadProvider();
+
+  // A minimal Vision annotate response with 2 paragraphs, each carrying
+  // boundingBox.vertices (submitted-pixel space) and word/symbol text.
+  const VISION_WITH_BLOCKS = {
+    responses: [
+      {
+        fullTextAnnotation: {
+          text: 'Hello\nWorld',
+          pages: [
+            {
+              property: {
+                detectedLanguages: [{ languageCode: 'en', confidence: 0.99 }],
+              },
+              blocks: [
+                {
+                  paragraphs: [
+                    {
+                      boundingBox: {
+                        vertices: [
+                          { x: 10, y: 20 },
+                          { x: 100, y: 20 },
+                          { x: 100, y: 50 },
+                          { x: 10, y: 50 },
+                        ],
+                      },
+                      words: [
+                        {
+                          confidence: 0.95,
+                          symbols: [
+                            { text: 'H' },
+                            { text: 'e' },
+                            { text: 'l' },
+                            { text: 'l' },
+                            { text: 'o', property: { detectedBreak: { type: 'LINE_BREAK' } } },
+                          ],
+                        },
+                      ],
+                    },
+                    {
+                      boundingBox: {
+                        vertices: [
+                          { x: 10, y: 60 },
+                          { x: 90, y: 60 },
+                          { x: 90, y: 90 },
+                          { x: 10, y: 90 },
+                        ],
+                      },
+                      words: [
+                        {
+                          confidence: 0.92,
+                          symbols: [
+                            { text: 'W' },
+                            { text: 'o' },
+                            { text: 'r' },
+                            { text: 'l' },
+                            { text: 'd' },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+  };
+
+  const stub = stubFetch([VISION_WITH_BLOCKS]);
+  try {
+    const provider = new GoogleVisionProvider();
+    const result = await provider.ocr('YmFzZTY0', 'image/png', 'SECRET_KEY');
+
+    // Existing contract is unchanged: originalText still present.
+    assert.ok(result !== null, 'result must not be null (has text)');
+    assert.equal(typeof result.originalText, 'string', 'originalText still present');
+    assert.ok(result.originalText.length > 0, 'originalText non-empty');
+
+    // OVL-01: blocks array now present with 2 entries.
+    assert.ok(Array.isArray(result.blocks), 'result.blocks must be an array');
+    assert.equal(result.blocks.length, 2, 'expected 2 paragraph blocks');
+
+    // Each block has non-empty text and a 4-vertex box.
+    for (const block of result.blocks) {
+      assert.equal(typeof block.text, 'string', 'block.text must be a string');
+      assert.ok(block.text.trim().length > 0, 'block.text must be non-empty');
+      assert.ok(Array.isArray(block.box), 'block.box must be an array');
+      assert.equal(block.box.length, 4, 'block.box must have exactly 4 vertices');
+      for (const v of block.box) {
+        assert.equal(typeof v.x, 'number', 'vertex.x must be a number');
+        assert.equal(typeof v.y, 'number', 'vertex.y must be a number');
+      }
+    }
+  } finally {
+    stub.restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
 // VIS-02c (IMG-07): the key never appears in a testConnection error string.
 // ---------------------------------------------------------------------------
 test('VIS-02c: the API key never leaks into a testConnection error message', async () => {

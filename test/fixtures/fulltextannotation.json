@@ -1,0 +1,105 @@
+{
+  "pages": [
+    {
+      "confidence": 0.98,
+      "blocks": [
+        {
+          "paragraphs": [
+            {
+              "boundingBox": {
+                "vertices": [
+                  { "x": 10, "y": 20 },
+                  { "x": 120, "y": 20 },
+                  { "x": 120, "y": 50 },
+                  { "x": 10, "y": 50 }
+                ]
+              },
+              "words": [
+                {
+                  "confidence": 0.99,
+                  "symbols": [
+                    { "text": "H" },
+                    { "text": "e" },
+                    { "text": "l" },
+                    { "text": "l" },
+                    {
+                      "text": "o",
+                      "property": { "detectedBreak": { "type": "SPACE" } }
+                    }
+                  ]
+                },
+                {
+                  "confidence": 0.97,
+                  "symbols": [
+                    { "text": "W" },
+                    { "text": "o" },
+                    { "text": "r" },
+                    { "text": "l" },
+                    { "text": "d" }
+                  ]
+                }
+              ]
+            },
+            {
+              "boundingBox": {
+                "vertices": [
+                  { "x": 10, "y": 60 },
+                  { "x": 90, "y": 60 },
+                  { "x": 90, "y": 85 },
+                  { "x": 10, "y": 85 }
+                ]
+              },
+              "words": [
+                {
+                  "confidence": 0.95,
+                  "symbols": [
+                    { "text": "F" },
+                    { "text": "o" },
+                    {
+                      "text": "o",
+                      "property": { "detectedBreak": { "type": "SPACE" } }
+                    }
+                  ]
+                },
+                {
+                  "confidence": 0.96,
+                  "symbols": [
+                    { "text": "B" },
+                    { "text": "a" },
+                    {
+                      "text": "r",
+                      "property": { "detectedBreak": { "type": "LINE_BREAK" } }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "paragraphs": [
+            {
+              "boundingBox": {
+                "vertices": [
+                  { "x": 5, "y": 100 },
+                  { "x": 200, "y": 100 },
+                  { "x": 200, "y": 130 },
+                  { "x": 5, "y": 130 }
+                ]
+              },
+              "words": [
+                {
+                  "confidence": 0.90,
+                  "symbols": [
+                    { "text": " " }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "text": "Hello World\nFoo Bar\n "
+}

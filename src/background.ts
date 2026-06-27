@@ -17,15 +17,18 @@ import type {
   SearchTranslatedMessage,
   SearchResult,
   TranslateBatchMessage,
+  TranslatePageBatchMessage,
   TranslateImageMessage,
+  TranslateImageBlocksMessage,
   ProgressiveTranslateMessage,
   OpenImagePanelMessage,
   ImageEntry,
   ImageResult
 } from './types.js';
-import { migrateSettings } from './types.js';
+import { migrateSettings, languageToBraveCountry } from './types.js';
 import { sanitizeSuggestion } from './predict-util.js';
 import { buildBatchTranslatePrompt, parseBatchReply } from './translate-batch.js';
+import { buildPageBatchPrompt, parsePageBatchReply } from './page-walk.js';
 import { buildQueryTranslateConfig } from './query-translate.js';
 import {
   downscaleTarget,
@@ -43,6 +46,21 @@ const providers: Record<string, TranslationProvider> = {
   gemini: new GeminiProvider(),
   openrouter: new OpenRouterProvider(),
 };
+
+// Grant content scripts access to chrome.storage.session. By DEFAULT session
+// storage is restricted to TRUSTED_CONTEXTS (worker/popup/options) — a content
+// script reading it (the page-state mirror + per-origin banner-dismissed set in
+// content.ts) throws "Access to storage is not allowed from this context" (seen on
+// foreign-language pages like Amazon JP, where the language gate reaches the
+// storage.session.get). Set the access level on EVERY worker load (it is not
+// guaranteed to persist across SW restarts); content.ts also guards its calls.
+if (chrome.storage.session.setAccessLevel) {
+  chrome.storage.session
+    .setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' })
+    .catch(() => {
+      /* older Chrome without setAccessLevel, or already set — content.ts guards anyway */
+    });
+}
 
 // Brave Search transport (Plan 08-02). Single module-scope instance.
 const braveClient = new BraveSearchClient();
@@ -196,13 +214,14 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 async function resolveImageBytes(
   srcUrl: string,
   tabId: number,
-): Promise<{ base64: string; mime: string }> {
+): Promise<{ base64: string; mime: string; viaCaptureFallback: boolean }> {
   // (a) data: URL — bytes are inline; derive MIME from the prefix.
   if (srcUrl.startsWith('data:')) {
     const mimeMatch = /^data:([^;,]*)[;,]/.exec(srcUrl);
     return {
       base64: stripBase64Prefix(srcUrl),
       mime: mimeMatch?.[1] || 'image/png',
+      viaCaptureFallback: false,
     };
   }
 
@@ -214,7 +233,7 @@ async function resolveImageBytes(
       if (response.ok) {
         const blob = await response.blob();
         const base64 = arrayBufferToBase64(await blob.arrayBuffer());
-        return { base64, mime: blob.type || 'image/png' };
+        return { base64, mime: blob.type || 'image/png', viaCaptureFallback: false };
       }
     } catch {
       // Fall through to the capture fallback (403 / opaque / network).
@@ -222,9 +241,11 @@ async function resolveImageBytes(
   }
 
   // (c) captureVisibleTab fallback — for blob:, tainted, or fetch-blocked images.
+  // Phase 16 OVL-01: flag this path so translateImageBlocks can skip overlay
+  // for screenshot-resolved images (RESEARCH Pitfall 2 / T-16-06).
   const tab = await chrome.tabs.get(tabId);
   const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-  return { base64: stripBase64Prefix(dataUrl), mime: 'image/png' };
+  return { base64: stripBase64Prefix(dataUrl), mime: 'image/png', viaCaptureFallback: true };
 }
 
 // VIS-03 MIME guard + downscale (Pitfall 3 / T-12-15). Re-encodes exotic MIME to
@@ -234,7 +255,7 @@ async function resolveImageBytes(
 async function downscaleAndGuard(
   base64: string,
   mime: string,
-): Promise<{ base64: string; mime: string }> {
+): Promise<{ base64: string; mime: string; width: number; height: number }> {
   const reencode = needsReencode(mime);
 
   // Decode to measure real dimensions. createImageBitmap from a Blob handles
@@ -259,8 +280,11 @@ async function downscaleAndGuard(
 
   // Fast path: already a supported MIME at an in-bounds size → pass through.
   if (!reencode && !target.scaled) {
+    // Phase 16 OVL-01: capture dims BEFORE bitmap.close() invalidates the handle.
+    const w = bitmap.width;
+    const h = bitmap.height;
     bitmap.close();
-    return { base64, mime };
+    return { base64, mime, width: w, height: h };
   }
 
   const canvas = new OffscreenCanvas(target.width, target.height);
@@ -290,7 +314,9 @@ async function downscaleAndGuard(
     throw e;
   }
 
-  return { base64: outBase64, mime: outBlob.type || outMime };
+  // Phase 16 OVL-01: return submitted (post-downscale) dims so the content
+  // script can undo the downscale ratio in mapBox() step (a) (RESEARCH Pitfall 1).
+  return { base64: outBase64, mime: outBlob.type || outMime, width: target.width, height: target.height };
 }
 
 // OCR an image via the Vision provider, then translate the extracted text
@@ -326,11 +352,12 @@ async function ocrAndTranslateImage(
   const provider = providers[settings.provider];
   if (!provider) throw new Error(`Unknown provider: ${settings.provider}`);
 
-  const jpPattern = /[぀-ゟ゠-ヿ一-鿿]/;
-  const inputIsJP = jpPattern.test(originalText);
-  const target = inputIsJP ? settings.sourceLanguage : settings.targetLanguage;
+  // Translate to the configured target (popup "X → Y" → Y is the result). Source
+  // is model-auto-detected; no JP-detect flip (it inverted the user's chosen
+  // direction — T-16 verify defect).
+  const target = settings.targetLanguage;
   const config: TranslationConfig = {
-    sourceLanguage: inputIsJP ? settings.targetLanguage : settings.sourceLanguage,
+    sourceLanguage: settings.sourceLanguage,
     targetLanguage: target,
     formality: settings.formality,
     customPrompt: settings.customPrompt,
@@ -645,7 +672,14 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
 
           // First caller for this query — issue the fetch and register it.
           // D-07: NO 429 auto-retry; the transport classifies and throws.
-          const promise = braveClient.search(searchQuery, apiKey, { count: 10 });
+          // Pin Brave's result locale (via `country`) to the language searchQuery
+          // is actually in, so a script-ambiguous translated query (e.g. 魔法少女,
+          // valid JA *and* ZH) doesn't get auto-detected to the wrong locale. On a
+          // failed translation the query stays raw in the source language; otherwise
+          // it's the target. (search_lang does NOT pin locale — country does.)
+          const searchLangName = translationFailed ? sourceLanguage : targetLanguage;
+          const country = languageToBraveCountry(searchLangName);
+          const promise = braveClient.search(searchQuery, apiKey, { count: 10, country });
           inFlightSearches.set(dedupKey, promise);
           try {
             const results = await promise;
@@ -705,6 +739,192 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             const kind = (err as { kind?: string })?.kind ?? classifyError(s.provider, err).kind;
             const errorMessage = err instanceof Error ? err.message : 'Unknown error';
             console.error('[hime] translateBatch failed', { provider: s.provider, model: s.model, kind, message: errorMessage });
+            sendResponse({ error: errorMessage, kind });
+          }
+          break;
+        }
+
+        case 'translatePageBatch': {
+          // Verbatim clone of the translateBatch case above, adapted for the
+          // page-batch shape: items is Record<string,string> (plain page-text
+          // nodes, no { t, d } split) and the prompt/parse come from page-walk.ts.
+          const msg = message as TranslatePageBatchMessage;
+          const { items, config } = msg.payload;
+          const s = await getSettings();
+          // T-15-04 / PAGE-04 security law: the BYOK key is read ONLY from storage —
+          // NEVER from the message payload, and never echoed in any response.
+          const apiKey = s.apiKeys[s.provider] || '';
+          if (!apiKey) {
+            sendResponse({ error: `API key not configured for ${s.provider}`, kind: 'auth' });
+            break;
+          }
+          const provider = providers[s.provider];
+          if (!provider) {
+            sendResponse({ error: `Unknown provider: ${s.provider}`, kind: 'unknown' });
+            break;
+          }
+          // T-15-04: serialize ONLY the page-supplied items — no url/key added here.
+          const inputKeys = Object.keys(items);
+          const payloadText = JSON.stringify(items);
+          // Translate straight to config.targetLanguage — the popup direction
+          // "X → Y" means translate the page FROM X TO Y, so the right-side target
+          // is always the on-page result. Source is model-auto-detected; no
+          // language-detection flip (a prior JP-detect heuristic inverted the
+          // user's chosen direction and no-op'd it — T-16 verify defect).
+          const batchInstruction = buildPageBatchPrompt(config);
+          const userContent = `${batchInstruction}\n\n${payloadText}`;
+          try {
+            // Race against a 45s timeout. Unlike the tiny SERP snippets the search
+            // path translates in <8s, a page chunk is up to PAGE_CHUNK_MAX_CHARS
+            // (4000) chars in ONE non-streaming call — 8s was too tight and timed
+            // out every chunk on real pages (T-16 verify defect). The synthetic
+            // error uses name: 'AbortError' so classifyError maps it to kind:
+            // 'network'. Concurrency is capped at 2 (page-walk PAGE_CONCURRENCY_CAP),
+            // so this does not fan out free-tier RPM.
+            const result = await Promise.race([
+              provider.translate(userContent, config, apiKey, s.model),
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(Object.assign(new Error('Translation timed out'), { name: 'AbortError' })),
+                  45000
+                )
+              ),
+            ]);
+            if (result.usage) await recordUsage(s.model, result.usage);
+            // T-15-05: parsePageBatchReply iterates inputKeys only (key-injection guard).
+            const translations = parsePageBatchReply(result.text, inputKeys);
+            sendResponse({ translations });
+          } catch (err) {
+            const kind = (err as { kind?: string })?.kind ?? classifyError(s.provider, err).kind;
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            console.error('[hime] translatePageBatch failed', { provider: s.provider, model: s.model, kind, message: errorMessage });
+            sendResponse({ error: errorMessage, kind });
+          }
+          break;
+        }
+
+        case 'translateImageBlocks': {
+          // Phase 16 OVL-01: OCR one image into per-paragraph boxes, batch-translate
+          // all blocks in a SINGLE keyed-JSON round-trip (mirrors translatePageBatch),
+          // and reply with { blocks, submitted } for content-side overlay positioning.
+          //
+          // Security law (T-12-01 / T-16-02): keys are read from storage ONLY —
+          // NEVER from the message payload (which carries only srcUrl/tabId/dedupKey/config),
+          // and NEVER echoed in any reply.
+          const msg = message as TranslateImageBlocksMessage;
+          const { srcUrl, tabId, dedupKey, config } = msg.payload;
+          const s = await getSettings();
+
+          // T-16-02: read keys from storage exclusively.
+          const googleKey = s.googleApiKey;
+          if (!googleKey) {
+            sendResponse({ error: 'Google Cloud API key not configured — add it in options', kind: 'auth' });
+            break;
+          }
+          const apiKey = s.apiKeys[s.provider] || '';
+          if (!apiKey) {
+            sendResponse({ error: `API key not configured for ${s.provider}`, kind: 'auth' });
+            break;
+          }
+          const provider = providers[s.provider];
+          if (!provider) {
+            sendResponse({ error: `Unknown provider: ${s.provider}`, kind: 'unknown' });
+            break;
+          }
+
+          try {
+            // Resolve image bytes via the data:/fetch/captureVisibleTab ladder.
+            const resolved = await resolveImageBytes(srcUrl, tabId ?? 0);
+
+            // SVG is vector (icons/logos/diagrams) — Vision can't OCR it and the
+            // canvas decode rejects it ("Unsupported image format: image/svg+xml").
+            // Skip silently rather than erroring + planting a stray caption (T-16).
+            if (/svg/i.test(resolved.mime)) {
+              sendResponse({ blocks: [] });
+              break;
+            }
+
+            // T-16-06: captureVisibleTab bytes are in screenshot space — boxes
+            // cannot be mapped back to the <img>. Reply with captureFallback flag
+            // so the content script skips overlay (RESEARCH Pitfall 2).
+            if (resolved.viaCaptureFallback) {
+              sendResponse({ captureFallback: true });
+              break;
+            }
+
+            // Downscale to Vision long-edge cap + re-encode exotic MIMEs.
+            // The widened return now carries submitted {width,height} (Plan 02 Task 2).
+            const guarded = await downscaleAndGuard(resolved.base64, resolved.mime);
+
+            // OCR the image — result now carries blocks[] (Plan 02 Task 1).
+            const ocrResult = await visionProvider.ocr(guarded.base64, guarded.mime, googleKey, {
+              w: guarded.width,
+              h: guarded.height,
+            });
+            if (ocrResult?.usage) await recordUsage('google-vision', ocrResult.usage);
+
+            // No-text sentinel → empty blocks (image had no OCR-able text).
+            if (!ocrResult) {
+              sendResponse({ blocks: [] });
+              break;
+            }
+
+            const blocks = ocrResult.blocks ?? [];
+            // T-16 RCA diagnostic: log block count + first box so a misplaced cluster
+            // is traceable to the box coordinate space (should be submitted-pixel).
+            console.log(
+              `[hime] image blocks=${blocks.length} submitted=${guarded.width}x${guarded.height} firstBox=${blocks[0] ? JSON.stringify(blocks[0].box) : 'none'}`,
+            );
+            if (blocks.length === 0) {
+              sendResponse({ blocks: [] });
+              break;
+            }
+
+            // Build the keyed-JSON items map (T-15-04 / T-16-04 — no key added here).
+            const inputKeys = blocks.map((_, i) => String(i));
+            const items: Record<string, string> = {};
+            for (let i = 0; i < blocks.length; i++) {
+              items[String(i)] = blocks[i].text;
+            }
+
+            // Translate straight to config.targetLanguage — same direction model
+            // as the page-text path: the popup "X → Y" target is always the
+            // overlay result. Source is model-auto-detected; no JP-detect flip.
+            const batchInstruction = buildPageBatchPrompt(config);
+            const userContent = `${batchInstruction}\n\n${JSON.stringify(items)}`;
+
+            // 45s timeout to match the page-batch path — an 8s cap timed out real
+            // multi-block image translations (T-16 verify defect).
+            const translateResult = await Promise.race([
+              provider.translate(userContent, config, apiKey, s.model),
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(Object.assign(new Error('Translation timed out'), { name: 'AbortError' })),
+                  45000,
+                ),
+              ),
+            ]);
+            if (translateResult.usage) await recordUsage(s.model, translateResult.usage);
+
+            // T-16-04: parsePageBatchReply iterates inputKeys only (key-injection guard).
+            const translations = parsePageBatchReply(translateResult.text, inputKeys);
+
+            // Zip translations onto blocks by index; missing key → original text (page-walk.ts:166).
+            const out = blocks.map((b, i) => ({
+              box: b.box,
+              original: b.text,
+              translated: translations[String(i)] ?? b.text,
+            }));
+
+            // T-16-02: submitted dims (not keys) are the only new data in this reply.
+            sendResponse({
+              blocks: out,
+              submitted: { w: guarded.width, h: guarded.height },
+            });
+          } catch (err) {
+            const kind = (err as { kind?: string })?.kind ?? classifyError(s.provider, err).kind;
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            console.error(`[hime] translateImageBlocks failed — provider=${s.provider} model=${s.model} kind=${kind} message=${errorMessage}`);
             sendResponse({ error: errorMessage, kind });
           }
           break;
@@ -997,15 +1217,31 @@ function ensureContextMenus(): void {
     // Site-independent way to open the image panel from any right-click (the
     // panel can't auto-open without a gesture; this menu click is a gesture).
     //
-    // FLATTEN: contexts deliberately EXCLUDE 'image' so the two hime items never
-    // appear in the same menu at once. Chrome auto-nests an extension's items
-    // under a single parent submenu whenever 2+ are simultaneously visible; by
-    // making translate-image (image only) and open-panel (everything-but-image)
-    // mutually exclusive, each shows at the TOP LEVEL of the right-click menu.
+    // FLATTEN (3-item invariant, A6): Chrome auto-nests an extension's items
+    // under a single "hime" parent submenu whenever 2+ are simultaneously
+    // visible in the same menu. Previously the two items were made mutually
+    // exclusive (translate-image = image only; open-panel = everything-but-image)
+    // so each showed at the TOP LEVEL. Adding a THIRD item ('hime-translate-page',
+    // page-text contexts) that necessarily OVERLAPS open-panel's page contexts
+    // makes a clean top-level partition impossible — any non-image right-click now
+    // shows BOTH open-panel and translate-page. We therefore ACCEPT Chrome's
+    // submenu nesting: on a non-image right-click, "Open hime image panel" and
+    // "Translate page" appear nested under a single auto-generated "hime" submenu.
+    // translate-image (image only) still shows alone, so it stays top-level on
+    // images. This is the documented, future-proof choice (A6 option a).
     chrome.contextMenus.create({
       id: 'hime-open-panel',
       title: 'Open hime image panel',
       contexts: ['page', 'selection', 'link', 'editable', 'video', 'audio', 'frame'],
+    });
+    // PAGE/TRIG-01: right-click manual trigger for in-place page translation.
+    // Shares the non-image page contexts with open-panel (hence the submenu
+    // nesting documented in the FLATTEN comment above). Dispatch is handled in
+    // the contextMenus.onClicked listener, guarded against restricted tabs.
+    chrome.contextMenus.create({
+      id: 'hime-translate-page',
+      title: 'Translate page',
+      contexts: ['page', 'selection', 'link', 'editable', 'frame'],
     });
   });
 }
@@ -1061,5 +1297,15 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'hime-open-panel') {
     // Open the panel only (gesture-first); no image job.
     chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+    return;
+  }
+
+  if (info.menuItemId === 'hime-translate-page') {
+    // TRIG-01: dispatch the in-place page-translation request to the active tab's
+    // content script. No sidePanel.open here (image-specific gesture-first rule does
+    // NOT apply). Pitfall 4 / T-15-06: restricted or content-script-less tabs reject
+    // sendMessage — the .catch swallows it so no uncaught lastError is thrown.
+    chrome.tabs.sendMessage(tab.id, { type: 'translatePage' }).catch(() => {});
+    return;
   }
 });

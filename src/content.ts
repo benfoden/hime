@@ -934,7 +934,7 @@ console.log('hime: Content script loaded');
 const PROG_MIN_LONG_EDGE_PX = 150;    // progressive-guard.ts MIN_LONG_EDGE_PX
 const PROG_ROOT_MARGIN_PX   = 200;    // progressive-guard.ts ROOT_MARGIN_PX
 const PROG_DWELL_MS         = 400;    // progressive-guard.ts DWELL_MS
-const PROG_CONCURRENCY_CAP  = 2;      // progressive-guard.ts CONCURRENCY_CAP
+const PROG_CONCURRENCY_CAP  = 1;      // 1 image at a time — limits free-tier rate pressure (T-16); was 2
 const PROG_PER_PAGE_BUDGET  = 10;     // progressive-guard.ts PER_PAGE_BUDGET
 
 // --- UI class/id constants ---
@@ -1383,10 +1383,1381 @@ function handleProgressiveActivity(pending: number, done: number): void {
   }
 }
 
+// =====================================================================
+// In-place page-text translation (Phase 15: PAGE-01..03, PAGE-05).
+// =====================================================================
+//
+// Mirrored from page-walk.ts — classic-script law, content.ts cannot import.
+// MUST stay in sync with page-walk.ts (SKIP_TAGS, isTranslatableTag,
+// chunkByBudget, PAGE_CHUNK_MAX_CHARS, PAGE_CONCURRENCY_CAP).
+const PAGE_SKIP_TAGS = new Set([
+  'SCRIPT',
+  'STYLE',
+  'NOSCRIPT',
+  'CODE',
+  'PRE',
+  'TEXTAREA',
+  'TITLE',
+  'TEMPLATE',
+  'SVG',
+  'MATH',
+  'HEAD',
+]);
+
+// MUST stay in sync with page-walk.ts isTranslatableTag.
+function pageIsTranslatableTag(tagName: string): boolean {
+  return !PAGE_SKIP_TAGS.has(tagName.toUpperCase());
+}
+
+// MUST stay in sync with page-walk.ts PAGE_CHUNK_MAX_CHARS / PAGE_CONCURRENCY_CAP.
+const PAGE_CHUNK_MAX_CHARS = 4000;
+// Cap 1 = strict top-to-bottom streaming: chunks dispatch in document order and
+// each applies on arrival, so translated text fills the page top→down as it comes
+// back. It also minimises free-tier rate pressure — concurrent page+image passes
+// at cap 2 each (4 in flight) exhausted the per-minute limit and failed chunks even
+// after retries (T-16). Sequential is slower but reliable and visibly ordered.
+const PAGE_CONCURRENCY_CAP = 1;
+
+// Retry/backoff for batch translate calls — mirrors search.ts (the reliable path).
+// Free-tier providers transiently time out or rate-limit under load; without retry
+// a single hiccup permanently failed that chunk. Backoff also paces requests to
+// ride out the provider's per-minute limit (T-16).
+const BATCH_MAX_ATTEMPTS = 4;
+const BATCH_BACKOFF_BASE_MS = 800;
+const batchSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+// MUST stay in sync with page-walk.ts chunkByBudget — groups node-text indices
+// into chunks under a character budget (oversized lone node gets its own chunk).
+function pageChunkByBudget(texts: string[], maxChars = PAGE_CHUNK_MAX_CHARS): number[][] {
+  const chunks: number[][] = [];
+  let cur: number[] = [];
+  let size = 0;
+  for (let i = 0; i < texts.length; i++) {
+    const len = texts[i].length;
+    if (cur.length && size + len > maxChars) {
+      chunks.push(cur);
+      cur = [];
+      size = 0;
+    }
+    cur.push(i);
+    size += len;
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
+}
+
+// MUST stay in sync with types.ts STORAGE_PAGE_STATE ('himePage') — classic-script
+// law, content.ts cannot import the const. The popup reads this to label its button.
+const PAGE_STORAGE_PAGE_STATE = 'himePage';
+
+// MUST stay in sync with types.ts TranslationConfig — classic-script law, content.ts
+// cannot import the interface. Same { sourceLanguage, targetLanguage, formality } shape
+// the worker's translatePageBatch case expects (mirrors search.ts:359-363).
+type PageTranslationConfig = {
+  sourceLanguage: string;
+  targetLanguage: string;
+  formality: 'auto' | 'casual' | 'polite' | 'formal';
+};
+
+// Cheap visibility test (RESEARCH Pattern 1b). offsetParent === null catches
+// display:none / detached; position:fixed elements are rescued (they ARE visible
+// despite a null offsetParent). Misses visibility:hidden / zero-size — acceptable
+// for D-03 "visible text nodes only" go-fast scope.
+function pageIsVisible(el: HTMLElement): boolean {
+  if (el.offsetParent === null) {
+    const pos = getComputedStyle(el).position;
+    if (pos !== 'fixed') return false;
+  }
+  return true;
+}
+
+// --- Module-scope in-place page-translation state (PAGE-03 toggle store) ---
+// pageStore: live node → {original, translated}; WeakMap is NOT enumerable, so the
+// toggle iterates the strong pageTranslatedNodes array instead (Pitfall 6).
+const pageStore = new WeakMap<Text, { original: string; translated: string }>();
+let pageTranslatedNodes: Text[] = [];
+let pageState: 'original' | 'translated' = 'original';
+// Shared failed-node surface (D-04): snapshot Text nodes whose returned key was
+// absent from a chunk reply. Declared + populated HERE; Plan 04 consumes (reads/clears)
+// it for the retry hook.
+const pageFailedNodes = new Set<Text>();
+
+/**
+ * Single STATIC snapshot of visible, translatable Text nodes in document order
+ * (PAGE-05: no MutationObserver — content added after this call is never seen).
+ *
+ * Uses the browser-native createTreeWalker (SHOW_TEXT). acceptNode walks the
+ * ancestor chain rejecting any element in PAGE_SKIP_TAGS or contenteditable
+ * (Pitfall 2: SHOW_TEXT cannot FILTER_REJECT element subtrees, so we re-check
+ * ancestors per text node), rejects whitespace-only nodes, and rejects nodes whose
+ * parent element is not visible.
+ */
+function pageCollectTextNodes(): Text[] {
+  const out: Text[] = [];
+  if (!document.body) return out;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node: Node): number {
+      if (!(node.nodeValue ?? '').trim()) return NodeFilter.FILTER_REJECT;
+      // Ancestor skip-check: walk up from the text node's parent element.
+      let el: Element | null = node.parentElement;
+      while (el) {
+        if (!pageIsTranslatableTag(el.tagName)) return NodeFilter.FILTER_REJECT;
+        if ((el as HTMLElement).isContentEditable) return NodeFilter.FILTER_REJECT;
+        el = el.parentElement;
+      }
+      const parent = node.parentElement;
+      if (parent && !pageIsVisible(parent)) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  let n: Node | null;
+  while ((n = walker.nextNode())) out.push(n as Text);
+  return out;
+}
+
+// Read the translation config from himeSettings, mirroring search.ts:359-363's
+// { sourceLanguage, targetLanguage, formality } shape and reusing the content.ts
+// storage-read law (chrome.storage.local.get(['himeSettings'])). The BYOK key is
+// NEVER read or sent here — the worker reads it from storage (T-15-08).
+async function pageReadConfig(): Promise<PageTranslationConfig> {
+  const result = await chrome.storage.local.get(['himeSettings']);
+  const s = (result.himeSettings || {}) as Record<string, unknown>;
+  // Mirror DEFAULT_SETTINGS (types.ts) so the overlay path resolves a real
+  // target language exactly like getSettings()→migrateSettings does. Empty-string
+  // fallbacks here produced a prompt "translate to <empty>" → the model picked an
+  // arbitrary script (Japanese target rendered as Chinese). Classic-script law:
+  // these literals MUST stay in sync with DEFAULT_SETTINGS.sourceLanguage/targetLanguage.
+  const sourceLanguage = typeof s.sourceLanguage === 'string' && s.sourceLanguage ? s.sourceLanguage : 'English';
+  const targetLanguage = typeof s.targetLanguage === 'string' && s.targetLanguage ? s.targetLanguage : 'Japanese';
+  const formality: PageTranslationConfig['formality'] =
+    s.formality === 'casual' || s.formality === 'polite' || s.formality === 'formal'
+      ? s.formality
+      : 'auto';
+  const config: PageTranslationConfig = { sourceLanguage, targetLanguage, formality };
+  return config;
+}
+
+/**
+ * Send one keyed chunk to the worker (translatePageBatch) and resolve the
+ * translations map. Mirrors the translateText promise-wrapper (lastError +
+ * response.error guard). The key NEVER appears in the payload (worker owns it).
+ */
+function pageSendChunk(
+  items: Record<string, string>,
+  config: PageTranslationConfig,
+): Promise<Record<string, string>> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: 'translatePageBatch', payload: { items, config } } as Message,
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else if (response?.error) {
+          const e = new Error(response.error);
+          (e as { kind?: string }).kind = response.kind ?? 'unknown';
+          reject(e);
+        } else {
+          resolve((response?.translations ?? {}) as Record<string, string>);
+        }
+      },
+    );
+  });
+}
+
+/**
+ * Retry pageSendChunk up to maxAttempts with exponential backoff on TRANSIENT
+ * failures (network/timeout, rate_limit) — mirrors search.ts translateChunkWithRetry,
+ * the path that made search reliable. Backoff also spaces concurrent chunks to ride
+ * out the provider's per-minute rate limit. Permanent failures (auth/credits) throw
+ * immediately — retrying a bad key just wastes the backoff.
+ */
+async function pageSendChunkWithRetry(
+  items: Record<string, string>,
+  config: PageTranslationConfig,
+  maxAttempts: number,
+): Promise<Record<string, string>> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await pageSendChunk(items, config);
+    } catch (err) {
+      lastErr = err;
+      const kind = (err as { kind?: string })?.kind;
+      if (kind === 'auth' || kind === 'credits') throw err; // permanent — no retry
+      if (attempt < maxAttempts - 1) await batchSleep(BATCH_BACKOFF_BASE_MS * 2 ** attempt);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('page translate failed');
+}
+
+// Worker reply for one image's block translation (translateImageBlocks).
+interface ImageBlocksResponse {
+  blocks?: { box: { x: number; y: number }[]; original: string; translated: string }[];
+  submitted?: { w: number; h: number };
+  captureFallback?: boolean;
+  error?: string;
+  kind?: string;
+}
+
+/** Send one image to the worker for OCR+translate. Rejects (with .kind) on error. */
+function sendImageBlocks(
+  srcUrl: string,
+  dedupKey: string,
+  config: PageTranslationConfig,
+): Promise<ImageBlocksResponse> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: 'translateImageBlocks', payload: { srcUrl, dedupKey, config } } as Message,
+      (response: ImageBlocksResponse | undefined) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else if (!response) {
+          reject(new Error('No response from worker'));
+        } else if (response.error) {
+          const e = new Error(response.error);
+          (e as { kind?: string }).kind = response.kind ?? 'unknown';
+          reject(e);
+        } else {
+          resolve(response);
+        }
+      },
+    );
+  });
+}
+
+/** Retry sendImageBlocks with backoff on transient failures (same policy as the
+ * page path) so an image isn't permanently dropped by one free-tier hiccup. */
+async function sendImageBlocksWithRetry(
+  srcUrl: string,
+  dedupKey: string,
+  config: PageTranslationConfig,
+  maxAttempts: number,
+): Promise<ImageBlocksResponse> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await sendImageBlocks(srcUrl, dedupKey, config);
+    } catch (err) {
+      lastErr = err;
+      const kind = (err as { kind?: string })?.kind;
+      if (kind === 'auth' || kind === 'credits') throw err; // permanent — no retry
+      if (attempt < maxAttempts - 1) await batchSleep(BATCH_BACKOFF_BASE_MS * 2 ** attempt);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('image translate failed');
+}
+
+// --- Reveal-fade for page text (mirrors search.css serp-reveal-fade) ----------
+// A text node can't be animated directly, so we briefly animate its PARENT element
+// when the translation is actually written — a 320ms opacity fade-in. Because page
+// chunks apply strictly top-to-bottom (cap 1), the fades cascade down the page as a
+// wave. We never show the fade before the swap (no pre-translation shimmer), per the
+// "don't show waves until text is replaced" requirement.
+const HIME_REVEAL_STYLE_ID = 'hime-reveal-style';
+const HIME_REVEAL_CLASS = 'hime-reveal-fade';
+
+/** Inject the keyframes + class into the page once (idempotent by id). */
+function pageEnsureRevealStyle(): void {
+  if (document.getElementById(HIME_REVEAL_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = HIME_REVEAL_STYLE_ID;
+  style.textContent = [
+    `.${HIME_REVEAL_CLASS}{animation:hime-reveal-fade 320ms ease-out;}`,
+    '@keyframes hime-reveal-fade{from{opacity:0}to{opacity:1}}',
+    `@media (prefers-reduced-motion: reduce){.${HIME_REVEAL_CLASS}{animation:none}}`,
+  ].join('');
+  (document.head ?? document.documentElement).appendChild(style);
+}
+
+/** Play the reveal fade on a just-translated node's parent, then strip the class
+ *  on animationend so it can replay on a later swap and never lingers. */
+function pageRevealNode(node: Text): void {
+  const el = node.parentElement;
+  if (!el) return;
+  pageEnsureRevealStyle();
+  el.classList.remove(HIME_REVEAL_CLASS); // restart if mid-animation
+  // Force reflow so re-adding the class re-triggers the animation.
+  void el.offsetWidth;
+  el.classList.add(HIME_REVEAL_CLASS);
+  el.addEventListener(
+    'animationend',
+    () => el.classList.remove(HIME_REVEAL_CLASS),
+    { once: true },
+  );
+}
+
+/**
+ * Apply one chunk's translations to the snapshot (Pattern 3: nodeValue only,
+ * NEVER innerHTML). For each GLOBAL snapshot index covered by this chunk:
+ *  - key present  → capture original ONCE (Pitfall 7), set translated, write nodeValue,
+ *                   record the node in pageTranslatedNodes.
+ *  - key absent   → push the node into the returned `missing` list (per-chunk
+ *                   missing-key nodes the caller accumulates into pageFailedNodes).
+ * RESPECTS Pitfall 5 (read-then-write): the snapshot was collected up-front; this
+ * write phase runs only after the chunk reply returns.
+ */
+function pageApplyChunk(
+  snapshot: Text[],
+  chunk: number[],
+  translations: Record<string, string>,
+): Text[] {
+  const missing: Text[] = [];
+  for (const idx of chunk) {
+    const key = String(idx);
+    const node = snapshot[idx];
+    if (!node) continue;
+    const value = translations[key];
+    if (typeof value === 'string') {
+      if (!document.contains(node)) continue; // node detached since snapshot
+      if (!pageStore.has(node)) {
+        pageStore.set(node, { original: node.nodeValue ?? '', translated: '' });
+      }
+      const rec = pageStore.get(node);
+      if (rec) rec.translated = value;
+      pageTranslatedNodes.push(node);
+      node.nodeValue = value; // in-place, plain text — never innerHTML (Pattern 3 / T-15-07)
+      pageRevealNode(node); // wave the translated text in (only now that it's replaced)
+    } else {
+      // Key absent for a node that WAS in this chunk → failed node (D-04).
+      missing.push(node);
+    }
+  }
+  return missing;
+}
+
+/**
+ * Cursor-driven promise-pool dispatch of translatePageBatch chunks under the
+ * SYNCHRONOUS concurrency gate (progCreateConcurrencyGate). The gate has no
+ * internal queue/await: tryAcquire() returns false when full and the dispatch loop
+ * owns scheduling. Each chunk is dispatched EXACTLY once:
+ *  - launch(): while the cursor has remaining chunks AND a slot is free, take the
+ *    chunk at the cursor, increment the cursor, send it, and on reply apply it,
+ *    release the slot, and RE-ENTER launch() (the ONLY re-entry trigger — no
+ *    polling/busy-spin on tryAcquire). A false tryAcquire never drops a chunk: the
+ *    chunk simply waits on the cursor until a reply frees a slot.
+ *  - the returned promise resolves only once every chunk has been dispatched and
+ *    settled (cursor exhausted AND zero in-flight).
+ *
+ * Callable with a node subset so Plan 04's retry can reuse it.
+ */
+async function pageTranslate(nodes?: Text[]): Promise<void> {
+  const snapshot = nodes ?? pageCollectTextNodes();
+  if (snapshot.length === 0) return;
+  const config = await pageReadConfig();
+  const texts = snapshot.map((n) => n.nodeValue ?? '');
+  const chunks = pageChunkByBudget(texts);
+  progressAdd(chunks.length); // page-text units for the shared progress tab
+  const gate = progCreateConcurrencyGate(PAGE_CONCURRENCY_CAP);
+
+  let cursor = 0;
+  let lastKind: string | undefined; // remembered from the most recent whole-chunk failure
+  let lastMessage: string | undefined; // the worker's real error text (surfaced in the toast)
+  const inFlight = new Set<Promise<void>>();
+
+  return await new Promise<void>((resolveAll, rejectAll) => {
+    const settle = (): void => {
+      if (cursor >= chunks.length && inFlight.size === 0) resolveAll();
+    };
+
+    const launch = (): void => {
+      // Start as many chunks as the gate allows, advancing the cursor each time.
+      while (cursor < chunks.length && gate.tryAcquire()) {
+        const chunk = chunks[cursor];
+        cursor++;
+        const items: Record<string, string> = {};
+        for (const idx of chunk) items[String(idx)] = texts[idx]; // GLOBAL snapshot index keys
+
+        const p = pageSendChunkWithRetry(items, config, BATCH_MAX_ATTEMPTS)
+          .then((translations) => {
+            const missing = pageApplyChunk(snapshot, chunk, translations);
+            for (const node of missing) pageFailedNodes.add(node);
+          })
+          .catch((err) => {
+            // Whole-chunk failure: every node in this chunk is a failed node (D-04).
+            // pageRecordChunkFailure adds the chunk's nodes to the shared pageFailedNodes
+            // Set; the toast/badge fire after all chunks settle (below).
+            const chunkNodes: Text[] = [];
+            for (const idx of chunk) {
+              const node = snapshot[idx];
+              if (node) chunkNodes.push(node);
+            }
+            pageRecordChunkFailure(chunkNodes);
+            lastKind = (err as { kind?: string })?.kind ?? lastKind;
+            lastMessage = err instanceof Error ? err.message : lastMessage;
+          })
+          .finally(() => {
+            gate.release();
+            inFlight.delete(p);
+            progressTick(); // one page chunk settled (success or fail)
+            // Re-enter the launch loop from inside the reply (no busy-spin).
+            launch();
+            settle();
+          });
+        inFlight.add(p);
+      }
+      // If nothing is in flight and the cursor is exhausted, resolve.
+      settle();
+    };
+
+    try {
+      launch();
+    } catch (err) {
+      rejectAll(err instanceof Error ? err : new Error(String(err)));
+    }
+  }).then(() => {
+    pageState = 'translated';
+    pageCreatePill();
+    pageUpdatePill();
+    pageWriteStateMirror('translated');
+    // D-04: successes are already applied (page stays usable). If any nodes failed
+    // (whole-chunk path here + Plan 03's per-key missing-key path), surface ONE toast.
+    if (pageFailedNodes.size > 0) pageShowErrorToast(lastKind, lastMessage);
+  });
+}
+
+// --- Translate progress indicator (reuses the auto-offer tab's pinned position
+// + dark rounded-tab style, but shows a live % instead of the icon). One shared
+// counter spans BOTH passes (page-text chunks + image overlays) so the user sees
+// a single combined progress while a manual "Translate page" runs. ---
+
+const HIME_PAGE_PROGRESS_ID = 'hime-page-progress';
+let progressTotal = 0;
+let progressDone = 0;
+let progressHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Reset the shared counter at the start of a manual translate run. */
+function progressReset(): void {
+  progressTotal = 0;
+  progressDone = 0;
+  if (progressHideTimer) {
+    clearTimeout(progressHideTimer);
+    progressHideTimer = null;
+  }
+  document.getElementById(HIME_PAGE_PROGRESS_ID)?.remove();
+}
+
+/** Add N units of work (page chunks or images) to the run. */
+function progressAdd(n: number): void {
+  if (n <= 0) return;
+  progressTotal += n;
+  progressRender();
+}
+
+/** Mark one unit done (succeeded OR failed — progress reflects work completed). */
+function progressTick(): void {
+  progressDone += 1;
+  progressRender();
+}
+
+/** Render/update the pinned % tab; auto-hide shortly after reaching 100%. */
+function progressRender(): void {
+  if (!document.body || progressTotal === 0) return;
+  const pct = Math.min(100, Math.round((progressDone / progressTotal) * 100));
+
+  let el = document.getElementById(HIME_PAGE_PROGRESS_ID);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = HIME_PAGE_PROGRESS_ID;
+    el.style.cssText = [
+      'position: fixed',
+      'top: 14px',
+      'right: 0',
+      'height: 26px',
+      'min-width: 30px',
+      'padding: 0 12px',
+      'display: flex',
+      'align-items: center',
+      'justify-content: center',
+      'color: #fff',
+      'font-family: sans-serif',
+      'font-size: 13px',
+      'font-weight: 600',
+      'background-color: rgba(0,0,0,0.72)',
+      'border-radius: 19px 0 0 19px', // rounded tab flush to the right edge (matches offer tab)
+      'box-shadow: 0 1px 4px rgba(0,0,0,0.3)',
+      'z-index: 2147483646',
+      'pointer-events: none',
+      'transition: opacity .3s ease',
+    ].join(';');
+    document.body.appendChild(el);
+  }
+  el.textContent = `${pct}%`;
+
+  if (progressDone >= progressTotal) {
+    // Briefly show 100%, then fade out.
+    if (progressHideTimer) clearTimeout(progressHideTimer);
+    progressHideTimer = setTimeout(() => {
+      const node = document.getElementById(HIME_PAGE_PROGRESS_ID);
+      if (node) {
+        node.style.opacity = '0';
+        setTimeout(() => node.remove(), 300);
+      }
+      progressHideTimer = null;
+    }, 700);
+  }
+}
+
+// --- Floating toggle pill + state mirror (Phase 15: PAGE-03, D-01) ---
+
+const HIME_PAGE_PILL_ID = 'hime-page-pill';
+
+/**
+ * Flip every translated node between original and translation (PAGE-03 toggle, no
+ * reload). Iterates the STRONG pageTranslatedNodes array — the WeakMap is not
+ * enumerable (Pitfall 6) — and writes nodeValue only (never innerHTML). Updates the
+ * pill label and mirrors the new state into chrome.storage.session for the popup.
+ */
+function pageApplyState(state: 'original' | 'translated'): void {
+  for (const node of pageTranslatedNodes) {
+    const rec = pageStore.get(node);
+    if (!rec || !document.contains(node)) continue;
+    node.nodeValue = state === 'translated' ? rec.translated : rec.original; // nodeValue only
+  }
+  pageState = state;
+  pageUpdatePill();
+  pageWriteStateMirror(state);
+  // D-01: global page pill also drives overlay visibility in lockstep (OVL-03).
+  overlayApplyGlobal(state === 'translated');
+}
+
+/**
+ * Mirror the page state into chrome.storage.session so the popup can label its
+ * button (Plan 02 Task 3). The mirror is a single GLOBAL record carrying the origin
+ * so the popup can origin-check before relabeling.
+ */
+function pageWriteStateMirror(state: 'original' | 'translated'): void {
+  // session storage may be unavailable to this content script (worker hasn't yet
+  // run setAccessLevel, or older Chrome) → swallow rather than throw an uncaught
+  // rejection. The popup just won't get the live mirror; not worth surfacing.
+  void chrome.storage.session
+    .set({
+      [PAGE_STORAGE_PAGE_STATE]: {
+        origin: location.origin,
+        state: state === 'translated' ? 'translated' : 'original-shown',
+      },
+    })
+    .catch(() => {});
+}
+
+/**
+ * Floating corner pill that flips original ↔ translation in one tap (D-01).
+ * Mirrors progCreateIndicator conventions (fixed position, textContent-only,
+ * idempotent-by-id, high z-index) but is CLICKABLE (cursor:pointer, pointer-events:auto).
+ */
+function pageCreatePill(): void {
+  if (document.getElementById(HIME_PAGE_PILL_ID)) return; // idempotent
+  const el = document.createElement('div');
+  el.id = HIME_PAGE_PILL_ID;
+  el.style.cssText = [
+    'position: fixed',
+    'bottom: 8px',
+    'left: 8px',
+    'font-family: sans-serif',
+    'font-size: 12px',
+    'color: #fff',
+    'background: rgba(74,144,217,0.92)',
+    'padding: 4px 10px',
+    'border-radius: 4px',
+    'z-index: 2147483646',
+    'cursor: pointer',
+    'pointer-events: auto',
+    'user-select: none',
+    'white-space: nowrap',
+  ].join(';');
+  el.textContent = 'Show original'; // textContent only — never innerHTML
+  el.addEventListener('click', () => {
+    pageApplyState(pageState === 'translated' ? 'original' : 'translated');
+  });
+  document.body.appendChild(el);
+}
+
+function pageUpdatePill(): void {
+  const el = document.getElementById(HIME_PAGE_PILL_ID);
+  if (el) {
+    el.textContent = pageState === 'translated' ? 'Show original' : 'Show translation'; // D-01 label
+  }
+}
+
+function pageRemovePill(): void {
+  document.getElementById(HIME_PAGE_PILL_ID)?.remove();
+}
+
+// --- Auto-offer banner (Phase 15: TRIG-02, TRIG-03) ---
+
+// MUST stay in sync with types.ts STORAGE_BANNER_DISMISSED. content.ts is a classic
+// script and cannot import — the per-origin dismissed-set key is mirrored verbatim.
+const STORAGE_BANNER_DISMISSED = 'himeBannerDismissed';
+
+const HIME_PAGE_BANNER_ID = 'hime-page-banner';
+
+/**
+ * Slim dismissible top banner offering page translation (TRIG-03: unobtrusive +
+ * dismissible). Mirrors progCreateIndicator conventions (fixed position,
+ * textContent-only, idempotent-by-id, high z-index) but is CLICKABLE
+ * (pointer-events:auto). Only shown by the boot gate on foreign-language,
+ * non-dismissed origins (TRIG-02). The "Translate this page" button runs the SAME
+ * path as the translatePage message (pageTranslate, Plan 03).
+ */
+// Minimalist auto-offer affordance (TRIG-03): a single translation-icon tab pinned
+// to the top-right edge — a rounded, semitransparent-black tab. Click translates the
+// page; a small dismiss ✕ fades in on hover (so the resting state is just the icon).
+// Icon is a Material "translate" glyph drawn via a CSS background data-URI SVG — no
+// innerHTML (XSS law: every element built with style/textContent only).
+const HIME_TRANSLATE_ICON_SVG =
+  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='#fff'>" +
+  "<path d='M12.87 15.07l-2.54-2.51.03-.03c1.74-1.94 2.98-4.17 3.71-6.53H17V4h-7V2H8v2H1v1.99h11.17" +
+  'C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02' +
+  "L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z'/></svg>";
+
+function pageShowOfferBanner(origin: string): void {
+  if (document.getElementById(HIME_PAGE_BANNER_ID)) return; // idempotent
+  if (!document.body) return;
+
+  const el = document.createElement('div');
+  el.id = HIME_PAGE_BANNER_ID;
+  el.setAttribute('role', 'button');
+  el.setAttribute('aria-label', 'Translate this page');
+  el.title = 'Translate this page';
+  el.style.cssText = [
+    'position: fixed',
+    'top: 14px',
+    'right: 0',
+    'width: 34px',
+    'height: 38px',
+    'background-color: rgba(0,0,0,0.55)',
+    'border-radius: 19px 0 0 19px', // rounded tab flush to the right edge
+    'background-repeat: no-repeat',
+    'background-position: 8px center',
+    'background-size: 19px 19px',
+    'cursor: pointer',
+    'z-index: 2147483646',
+    'pointer-events: auto',
+    'box-shadow: 0 1px 5px rgba(0,0,0,0.28)',
+    'transition: background-color .15s ease',
+  ].join(';');
+  el.style.backgroundImage = `url("data:image/svg+xml,${encodeURIComponent(HIME_TRANSLATE_ICON_SVG)}")`;
+  el.addEventListener('click', () => {
+    progressReset(); // fresh % counter; the progress tab takes this tab's spot
+    void pageTranslate(); // same path as the translatePage message (Plan 03)
+    void overlayTranslateImages(); // honor the include-images setting from the tab path too
+    pageDismissBanner(origin);
+  });
+
+  // Hover-revealed dismiss ✕ (stays hidden so the resting UI is a single icon).
+  const dismiss = document.createElement('span');
+  dismiss.textContent = '×'; // textContent only — never innerHTML
+  dismiss.setAttribute('aria-label', 'Dismiss');
+  dismiss.style.cssText = [
+    'position: absolute',
+    'top: -6px',
+    'left: -6px',
+    'width: 16px',
+    'height: 16px',
+    'line-height: 15px',
+    'text-align: center',
+    'font-family: sans-serif',
+    'font-size: 13px',
+    'color: #fff',
+    'background: rgba(0,0,0,0.8)',
+    'border-radius: 50%',
+    'cursor: pointer',
+    'opacity: 0',
+    'transition: opacity .12s ease',
+    'pointer-events: auto',
+  ].join(';');
+  dismiss.addEventListener('click', (e) => {
+    e.stopPropagation(); // don't trigger the translate click
+    void pageDismissBanner(origin);
+  });
+  el.appendChild(dismiss);
+
+  el.addEventListener('mouseenter', () => {
+    dismiss.style.opacity = '1';
+    el.style.backgroundColor = 'rgba(0,0,0,0.72)';
+  });
+  el.addEventListener('mouseleave', () => {
+    dismiss.style.opacity = '0';
+    el.style.backgroundColor = 'rgba(0,0,0,0.55)';
+  });
+
+  document.body.appendChild(el);
+}
+
+/**
+ * Remove the banner element and append the origin to the chrome.storage.session
+ * dismissed-set so the banner stays gone for this origin for the rest of the
+ * browser session (D-02 stickiness, A7 origin granularity). The manual trigger
+ * (popup / right-click / pill) stays available after dismissal.
+ */
+async function pageDismissBanner(origin: string): Promise<void> {
+  document.getElementById(HIME_PAGE_BANNER_ID)?.remove();
+  // session storage may be unavailable to this content script (see pageWriteStateMirror).
+  // The banner is already removed from the DOM above; if persistence fails it simply
+  // re-offers on the next load rather than throwing an uncaught rejection.
+  try {
+    const stored = await chrome.storage.session.get(STORAGE_BANNER_DISMISSED);
+    const current = (stored[STORAGE_BANNER_DISMISSED] as string[] | undefined) ?? [];
+    if (current.includes(origin)) return; // dedup
+    await chrome.storage.session.set({
+      [STORAGE_BANNER_DISMISSED]: [...current, origin],
+    });
+  } catch {
+    /* session storage not accessible here — dismissal just isn't persisted */
+  }
+}
+
+// --- Partial-failure resilience (Phase 15: PAGE-04, D-04) ---
+
+const HIME_PAGE_TOAST_ID = 'hime-page-toast';
+
+/**
+ * Whole-chunk failure path: add every node in a failed chunk to the SHARED
+ * pageFailedNodes Set (declared + per-key populated by Plan 03). This task only
+ * ADDS the whole-chunk path — it never re-declares the Set nor reaches into Plan
+ * 03's apply internals.
+ */
+function pageRecordChunkFailure(nodes: Text[]): void {
+  for (const node of nodes) pageFailedNodes.add(node);
+}
+
+/**
+ * SINGLETON dismissible error toast (re-fire updates text + count, never stacks —
+ * idempotent-by-id like progCreateIndicator). Shows pageFailedNodes.size as the
+ * failed-region count, a "Retry failed sections" action (→ pageRetryFailed) and a
+ * dismiss ✕. Also sets the red error badge via badgeForKind/setBadge (D-04).
+ * textContent-only — never innerHTML.
+ */
+function pageShowErrorToast(kind?: string, detail?: string): void {
+  if (!document.body) return;
+  const badge = badgeForKind(kind);
+  void setBadge(badge.text, badge.color); // red error badge (content.ts:515-535)
+
+  const count = pageFailedNodes.size;
+  // Surface the worker's REAL error (kind + message) so failures are diagnosable —
+  // an opaque "failed for N sections" hid the actual cause (T-16 verify defect).
+  const reason = detail ? ` ${kind ? `[${kind}] ` : ''}${detail}` : kind ? ` [${kind}]` : '';
+  const message = `Translation failed for ${count} section${count === 1 ? '' : 's'}.${reason}`;
+
+  let el = document.getElementById(HIME_PAGE_TOAST_ID);
+  if (el) {
+    // Re-fire: update the existing toast's label only — do NOT append a second toast.
+    const existingLabel = el.querySelector('[data-hime-toast-label]');
+    if (existingLabel) existingLabel.textContent = message; // textContent only
+    return;
+  }
+
+  el = document.createElement('div');
+  el.id = HIME_PAGE_TOAST_ID;
+  el.style.cssText = [
+    'position: fixed',
+    'bottom: 8px',
+    'right: 8px',
+    'display: flex',
+    'align-items: center',
+    'gap: 10px',
+    'font-family: sans-serif',
+    'font-size: 13px',
+    'color: #fff',
+    'background: rgba(176,0,32,0.96)',
+    'padding: 8px 12px',
+    'border-radius: 4px',
+    'z-index: 2147483646',
+    'pointer-events: auto',
+    'max-width: 360px',
+  ].join(';');
+
+  const label = document.createElement('span');
+  label.setAttribute('data-hime-toast-label', '');
+  label.textContent = message; // textContent only — never innerHTML
+
+  const retryBtn = document.createElement('button');
+  retryBtn.textContent = 'Retry failed sections'; // textContent only
+  retryBtn.style.cssText = [
+    'font-family: sans-serif',
+    'font-size: 13px',
+    'color: #B00020',
+    'background: #fff',
+    'border: none',
+    'border-radius: 4px',
+    'padding: 4px 10px',
+    'cursor: pointer',
+    'white-space: nowrap',
+  ].join(';');
+  retryBtn.addEventListener('click', () => {
+    document.getElementById(HIME_PAGE_TOAST_ID)?.remove();
+    void pageRetryFailed();
+  });
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.textContent = '✕'; // textContent only
+  dismissBtn.setAttribute('aria-label', 'Dismiss');
+  dismissBtn.style.cssText = [
+    'font-family: sans-serif',
+    'font-size: 15px',
+    'line-height: 1',
+    'color: #fff',
+    'background: transparent',
+    'border: none',
+    'cursor: pointer',
+    'padding: 2px 6px',
+  ].join(';');
+  dismissBtn.addEventListener('click', () => {
+    document.getElementById(HIME_PAGE_TOAST_ID)?.remove();
+  });
+
+  el.appendChild(label);
+  el.appendChild(retryBtn);
+  el.appendChild(dismissBtn);
+  document.body.appendChild(el);
+}
+
+/**
+ * Re-batch ONLY the tracked failed nodes (T-15-14: never the whole page). Snapshots
+ * [...pageFailedNodes], CLEARS the shared Set, and calls pageTranslate(nodes) (Plan
+ * 03) scoped to just those nodes — pageTranslate re-keys by snapshot index over the
+ * array it receives, so fresh re-keying from 0 is correct. Nodes that succeed are
+ * applied and simply not re-added to the cleared Set; nodes that fail again
+ * repopulate pageFailedNodes (Plan 03's per-key path + this task's whole-chunk path)
+ * and re-fire the singleton toast.
+ */
+async function pageRetryFailed(): Promise<void> {
+  const nodes = [...pageFailedNodes];
+  pageFailedNodes.clear();
+  if (nodes.length === 0) return;
+  await pageTranslate(nodes);
+}
+
+// =====================================================================
+// In-place image overlay layer (Phase 16: OVL-01..05, D-01..03).
+// =====================================================================
+//
+// Mirrored pure math from overlay-geometry.ts + overlay-fit.ts — classic-script
+// law, content.ts cannot import.  MUST stay in sync with those modules.
+// Keep mirrors tiny so drift is obvious (Pitfall 5 / RESEARCH §"Classic-script law").
+// =====================================================================
+
+// --- MIRRORED from src/overlay-geometry.ts — classic-script law (cannot import) ---
+// MUST stay in sync with src/overlay-geometry.ts — classic-script law (cannot import)
+type OverlayObjectFit = 'fill' | 'contain' | 'cover' | 'none' | 'scale-down';
+
+function overlayObjectFitTransform(
+  natural: { w: number; h: number },
+  rendered: { w: number; h: number },
+  objectFit: OverlayObjectFit,
+): { scaleX: number; scaleY: number; offX: number; offY: number } {
+  const nW = natural.w;
+  const nH = natural.h;
+  const rW = rendered.w;
+  const rH = rendered.h;
+  if (objectFit === 'fill') {
+    return { scaleX: rW / nW, scaleY: rH / nH, offX: 0, offY: 0 };
+  }
+  let scale: number;
+  if (objectFit === 'contain') {
+    scale = Math.min(rW / nW, rH / nH);
+  } else if (objectFit === 'cover') {
+    scale = Math.max(rW / nW, rH / nH);
+  } else if (objectFit === 'none') {
+    scale = 1;
+  } else {
+    // 'scale-down'
+    scale = Math.min(1, Math.min(rW / nW, rH / nH));
+  }
+  const offX = (rW - nW * scale) / 2;
+  const offY = (rH - nH * scale) / 2;
+  return { scaleX: scale, scaleY: scale, offX, offY };
+}
+
+// MUST stay in sync with src/overlay-geometry.ts — classic-script law (cannot import)
+function overlayMapBox(
+  box: { x: number; y: number }[],
+  submitted: { w: number; h: number },
+  natural: { w: number; h: number },
+  rendered: { w: number; h: number },
+  objectFit: OverlayObjectFit,
+): { left: number; top: number; width: number; height: number } {
+  if (submitted.w <= 0 || submitted.h <= 0) {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+  const upX = natural.w / submitted.w;
+  const upY = natural.h / submitted.h;
+  const xs = box.map((v) => v.x * upX);
+  const ys = box.map((v) => v.y * upY);
+  const nLeft = Math.min(...xs);
+  const nTop  = Math.min(...ys);
+  const nW    = Math.max(...xs) - nLeft;
+  const nH    = Math.max(...ys) - nTop;
+  const { scaleX, scaleY, offX, offY } = overlayObjectFitTransform(natural, rendered, objectFit);
+  return {
+    left:   nLeft * scaleX + offX,
+    top:    nTop  * scaleY + offY,
+    width:  nW    * scaleX,
+    height: nH    * scaleY,
+  };
+}
+
+// --- MIRRORED from src/overlay-fit.ts — classic-script law (cannot import) ---
+// MUST stay in sync with src/overlay-fit.ts — classic-script law (cannot import)
+function overlayWrapLines(
+  text: string,
+  fontPx: number,
+  maxWidth: number,
+  measure: (text: string, fontPx: number) => number,
+  cjk: boolean,
+): string[] {
+  const tokens: string[] = cjk
+    ? Array.from(text)
+    : text.split(/\s+/).filter((w) => w.length > 0);
+  const lines: string[] = [];
+  let current = '';
+  for (const token of tokens) {
+    const candidate = current.length === 0 ? token : (cjk ? current + token : current + ' ' + token);
+    if (measure(candidate, fontPx) <= maxWidth || current.length === 0) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = token;
+    }
+  }
+  if (current.length > 0) lines.push(current);
+  return lines;
+}
+
+// MUST stay in sync with src/overlay-fit.ts — classic-script law (cannot import)
+function overlayFitText(
+  text: string,
+  boxW: number,
+  boxH: number,
+  measure: (text: string, fontPx: number) => number,
+  opts?: { maxFont?: number; minFont?: number; lineHeight?: number; pad?: number; cjk?: boolean },
+): { fontPx: number; clamped: boolean; lines: string[] } {
+  const maxFont   = opts?.maxFont   ?? 28;
+  const minFont   = opts?.minFont   ?? 9;
+  const lineHeight = opts?.lineHeight ?? 1.2;
+  const pad       = opts?.pad       ?? 4;
+  const cjk       = opts?.cjk       ?? false;
+  const budgetW = boxW - 2 * pad;
+  const budgetH = boxH - 2 * pad;
+  const tryFont = (fontPx: number): { fits: boolean; lines: string[] } => {
+    const lines = overlayWrapLines(text, fontPx, budgetW, measure, cjk);
+    const totalH = lines.length * fontPx * lineHeight;
+    return { fits: totalH <= budgetH, lines };
+  };
+  let low = minFont;
+  let high = maxFont;
+  let best: { fontPx: number; lines: string[] } | null = null;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const { fits, lines } = tryFont(mid);
+    if (fits) {
+      best = { fontPx: mid, lines };
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  if (best !== null) return { fontPx: best.fontPx, clamped: false, lines: best.lines };
+  const { lines } = tryFont(minFont);
+  return { fontPx: minFont, clamped: true, lines };
+}
+
+// --- Overlay module-scope state ---
+
+// Per-image overlay record: the container + the source image + per-block originals for toggle.
+type OverlayRecord = {
+  container: HTMLElement;
+  img: HTMLImageElement;
+  // Per-block toggle state (for per-image toggle button label tracking).
+  shown: boolean;
+  // ResizeObserver so we can disconnect on teardown.
+  ro: ResizeObserver;
+};
+
+// All live overlay records (keyed by image element for O(1) lookup).
+const overlayRecords = new Map<HTMLImageElement, OverlayRecord>();
+
+// Throttle handle for scroll/resize overlay reposition (mirrors progRepositionHandle).
+let overlayRepositionHandle: ReturnType<typeof setTimeout> | null = null;
+// Flag: global scroll/resize listeners registered once (Pattern 2).
+let overlayListenersRegistered = false;
+
+// --- Overlay container positioning (mirrors progPositionBadge, no +4 offset) ---
+// Pattern 2: the container IS the rendered-rect frame; inner boxes are container-relative.
+function overlayPositionContainer(container: HTMLElement, img: HTMLImageElement): void {
+  const rect = img.getBoundingClientRect();
+  container.style.top    = `${rect.top    + window.scrollY}px`;
+  container.style.left   = `${rect.left   + window.scrollX}px`;
+  container.style.width  = `${rect.width}px`;
+  container.style.height = `${rect.height}px`;
+}
+
+// Throttled reposition of all overlay containers on scroll/resize (100ms, mirrors progRepositionAllBadges).
+function overlayRepositionAll(): void {
+  if (overlayRepositionHandle !== null) return; // already scheduled
+  overlayRepositionHandle = setTimeout(() => {
+    overlayRepositionHandle = null;
+    for (const rec of overlayRecords.values()) {
+      if (document.body.contains(rec.img)) {
+        overlayPositionContainer(rec.container, rec.img);
+      }
+    }
+  }, 100);
+}
+
+// --- Overlay global toggle (D-01: page pill drives all overlays) ---
+function overlayApplyGlobal(show: boolean): void {
+  for (const rec of overlayRecords.values()) {
+    rec.container.style.display = show ? 'block' : 'none';
+    if (show) rec.shown = true;
+  }
+}
+
+// --- Overlay teardown (mirrors progRemoveAllBadges) ---
+function overlayRemoveAll(): void {
+  for (const rec of overlayRecords.values()) {
+    rec.ro.disconnect();
+    rec.container.remove();
+  }
+  overlayRecords.clear();
+}
+
+// --- Task 2: Render per-image overlay container ---
+// OVL-01/02/04 — positioned by overlayMapBox, sized by overlayFitText,
+// anchored via getBoundingClientRect+scrollX/Y, re-anchored on scroll/resize/ResizeObserver.
+function overlayRenderImage(
+  img: HTMLImageElement,
+  reply: {
+    blocks?: { box: { x: number; y: number }[]; original: string; translated: string }[];
+    submitted?: { w: number; h: number };
+  },
+): void {
+  const blocks = reply.blocks;
+  const submitted = reply.submitted;
+  if (!blocks || blocks.length === 0 || !submitted) return;
+
+  // Throwaway canvas for measureText only — NO image drawn (T-16-10: no taint).
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const measure = (text: string, fontPx: number): number => {
+    ctx.font = `${fontPx}px sans-serif`;
+    return ctx.measureText(text).width;
+  };
+
+  const naturalW = img.naturalWidth;
+  const naturalH = img.naturalHeight;
+  // Guard: if natural dims not yet loaded, use rendered rect as a proxy.
+  const effectiveNW = naturalW > 0 ? naturalW : img.getBoundingClientRect().width;
+  const effectiveNH = naturalH > 0 ? naturalH : img.getBoundingClientRect().height;
+
+  const rect = img.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return; // invisible image — skip
+
+  const cs = getComputedStyle(img);
+  const rawFit = cs.objectFit;
+  const objectFit: OverlayObjectFit =
+    rawFit === 'contain' || rawFit === 'cover' || rawFit === 'none' || rawFit === 'scale-down'
+      ? rawFit
+      : 'fill'; // default for <img> with no object-fit set
+
+  // ONE body-appended container per image (NOT a wrapper around <img> — Anti-Pattern).
+  // The container IS the rendered-rect frame; inner boxes use container-relative coords.
+  const container = document.createElement('div');
+  container.style.cssText = [
+    'position:absolute',
+    'pointer-events:none',
+    'z-index:2147483644',
+    'overflow:hidden',
+    'box-sizing:border-box',
+  ].join(';');
+  overlayPositionContainer(container, img);
+
+  for (const blk of blocks) {
+    if (!blk.box || blk.box.length !== 4) continue;
+    const r = overlayMapBox(
+      blk.box,
+      submitted,
+      { w: effectiveNW, h: effectiveNH },
+      { w: rect.width,  h: rect.height  },
+      objectFit,
+    );
+    if (r.width <= 0 || r.height <= 0) continue;
+
+    const { fontPx, clamped } = overlayFitText(
+      blk.translated,
+      r.width,
+      r.height,
+      measure,
+    );
+
+    const box = document.createElement('div');
+    box.textContent = blk.translated; // textContent ONLY — never innerHTML (T-16-09 / XSS law)
+    box.style.cssText = [
+      'position:absolute',
+      `left:${r.left}px`,
+      `top:${r.top}px`,
+      `width:${r.width}px`,
+      `height:${r.height}px`,
+      'background:rgba(0,0,0,0.78)',  // D-03 fixed palette, WCAG-AA OVL-02
+      'color:#fff',
+      `font:${fontPx}px/1.2 sans-serif`,
+      'border-radius:3px',
+      'box-sizing:border-box',
+      'padding:2px 4px',
+      'overflow:hidden',
+      'display:flex',
+      'align-items:center',
+      'pointer-events:none',
+      ...(clamped ? ['text-overflow:ellipsis', 'white-space:nowrap'] : []),
+    ].join(';');
+    container.appendChild(box);
+  }
+
+  // --- Task 3: Per-image corner toggle button (D-02) ---
+  const toggleBtn = document.createElement('button');
+  toggleBtn.textContent = 'Show original'; // textContent only — never innerHTML (T-16-09)
+  toggleBtn.style.cssText = [
+    'position:absolute',
+    'top:4px',
+    'right:4px',
+    'font-family:sans-serif',
+    'font-size:11px',
+    'color:#fff',
+    'background:rgba(0,0,0,0.72)',
+    'border:none',
+    'border-radius:3px',
+    'padding:2px 6px',
+    'cursor:pointer',
+    'pointer-events:auto',
+    'user-select:none',
+    'z-index:1',
+    'white-space:nowrap',
+  ].join(';');
+
+  let perImageShown = true; // starts in "translation shown" state
+  toggleBtn.addEventListener('click', () => {
+    perImageShown = !perImageShown;
+    // Toggle visibility of all box divs (not the button itself).
+    Array.from(container.children).forEach((child) => {
+      if (child !== toggleBtn) {
+        (child as HTMLElement).style.display = perImageShown ? '' : 'none';
+      }
+    });
+    toggleBtn.textContent = perImageShown ? 'Show original' : 'Show translation'; // textContent only
+    const rec = overlayRecords.get(img);
+    if (rec) rec.shown = perImageShown;
+  });
+  container.appendChild(toggleBtn);
+
+  document.body.appendChild(container);
+
+  // OVL-04: re-anchor on scroll/resize/ResizeObserver (Pattern 2).
+  // Register window scroll/resize listeners once (shared across all overlays).
+  if (!overlayListenersRegistered) {
+    overlayListenersRegistered = true;
+    window.addEventListener('scroll', overlayRepositionAll, { passive: true });
+    window.addEventListener('resize', overlayRepositionAll, { passive: true });
+  }
+  const ro = new ResizeObserver(() => overlayRepositionAll());
+  ro.observe(img);
+
+  const rec: OverlayRecord = { container, img, shown: true, ro };
+  overlayRecords.set(img, rec);
+}
+
+// --- Task 1: Collect + dispatch translateImageBlocks per in-view image ---
+// Gate: reads includeImages from himeSettings before doing anything (D-01).
+// Bounds: reuses progCreateBudget + progCreateConcurrencyGate (D-01 cost gates, T-16-11).
+// Dedup: reuses progSrcDedupKey (cheap per-srcUrl first filter).
+// Capture-fallback: skip images flagged by the worker (T-16-06 / Pitfall 2).
+async function overlayTranslateImages(): Promise<void> {
+  // D-01 gate: only run when the user has opted in to image overlays.
+  const stored = await chrome.storage.local.get(['himeSettings']);
+  const settings = (stored.himeSettings || {}) as Record<string, unknown>;
+  if (settings.includeImages !== true) return;
+
+  // Read translation config (reuse pageReadConfig for the config shape).
+  const config = await pageReadConfig();
+
+  // Overlay only images that are LOADED and actually VISIBLE on screen. Off-screen
+  // or not-yet-decoded images have naturalWidth 0 / bogus rects, so the downscale→
+  // rect mapping collapses every box into a misplaced cluster (T-16: "cluster of
+  // overlays over nothing"). Visible-and-loaded is the only set we can map correctly;
+  // scroll-triggered overlay for below-fold images is a separate follow-up.
+  const allImgs = Array.from(document.querySelectorAll('img')) as HTMLImageElement[];
+  const eligible = allImgs.filter((img) => {
+    if (!img.src) return false;
+    if (/\.svg(\?|#|$)/i.test(img.src) || img.src.startsWith('data:image/svg')) return false; // vector — not OCR-able
+    if (!progIsEligible(img)) return false;          // min-size gate (reuse D-02)
+    if (!img.complete || img.naturalWidth === 0) return false; // must be decoded (valid natural dims)
+    const rect = img.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;      // rendered, non-collapsed
+    // At least partially within the viewport (mappable coords).
+    return (
+      rect.top < window.innerHeight &&
+      rect.left < window.innerWidth &&
+      rect.bottom > 0 &&
+      rect.right > 0
+    );
+  });
+
+  if (eligible.length === 0) return;
+
+  // Per-pass budget + concurrency (reuse phase-13 cost gates, T-16-11).
+  const budget = progCreateBudget(PROG_PER_PAGE_BUDGET);
+  const gate   = progCreateConcurrencyGate(PROG_CONCURRENCY_CAP);
+
+  // Per-pass dedup: skip already-seen srcUrl keys.
+  const seenThisPass = new Set<string>();
+
+  // Accumulate errors for a single partial-failure toast (mirrors pageTranslate).
+  let errorCount = 0;
+  let lastErrorKind: string | undefined;
+
+  const inFlight = new Set<Promise<void>>();
+  let cursor = 0;
+
+  await new Promise<void>((resolveAll) => {
+    const settle = (): void => {
+      if (cursor >= eligible.length && inFlight.size === 0) resolveAll();
+    };
+
+    const launch = (): void => {
+      while (cursor < eligible.length && gate.tryAcquire()) {
+        if (budget.isExhausted) {
+          // Nothing further to schedule — resolve when in-flight drains.
+          settle();
+          break;
+        }
+
+        const img = eligible[cursor];
+        cursor++;
+
+        if (!img) { gate.release(); continue; }
+
+        const srcKey = progSrcDedupKey(img.src);
+        if (seenThisPass.has(srcKey)) { gate.release(); continue; }
+        if (!budget.tryConsume()) { gate.release(); settle(); break; }
+        seenThisPass.add(srcKey);
+        progressAdd(1); // count this image once it's actually dispatched
+
+        const p = sendImageBlocksWithRetry(img.src, srcKey, config, BATCH_MAX_ATTEMPTS)
+          .then((response) => {
+            // T-16-06 / Pitfall 2: skip capture-fallback images — boxes are in screenshot space.
+            if (response.captureFallback) return;
+            // Render the overlay for this image (Task 2). Empty blocks → no-op.
+            if (response.blocks && response.blocks.length > 0) {
+              overlayRenderImage(img, {
+                blocks: response.blocks,
+                submitted: response.submitted,
+              });
+            }
+          })
+          .catch((err: unknown) => {
+            // All retries exhausted (or permanent auth/credits) → count one failure.
+            errorCount++;
+            lastErrorKind = (err as { kind?: string })?.kind ?? lastErrorKind;
+          })
+          .finally(() => {
+          gate.release();
+          inFlight.delete(p);
+          progressTick(); // one image settled (rendered, skipped, or failed)
+          launch();
+          settle();
+        });
+        inFlight.add(p);
+      }
+      settle();
+    };
+
+    launch();
+  });
+
+  // Surface a single partial-failure toast when any image pass failed (mirrors pageTranslate D-04).
+  if (errorCount > 0) {
+    // Reuse the existing page error toast infrastructure (single toast, idempotent).
+    // We inject the image error count into the shared pageFailedNodes size equivalent
+    // by showing a simplified toast directly (image errors don't have Text nodes).
+    // Use pageShowErrorToast's sibling: fire a one-off fixed notification.
+    overlayShowErrorToast(errorCount, lastErrorKind);
+  }
+}
+
+// Slim image-pass error toast (separate from the page-text toast to avoid clobbering it).
+const HIME_OVERLAY_TOAST_ID = 'hime-overlay-toast';
+function overlayShowErrorToast(count: number, kind?: string): void {
+  if (!document.body) return;
+  const existing = document.getElementById(HIME_OVERLAY_TOAST_ID);
+  if (existing) {
+    const label = existing.querySelector('[data-hime-overlay-label]');
+    if (label) label.textContent = `Image overlay failed for ${count} image${count === 1 ? '' : 's'}.`; // textContent only
+    return;
+  }
+  const el = document.createElement('div');
+  el.id = HIME_OVERLAY_TOAST_ID;
+  el.style.cssText = [
+    'position:fixed',
+    'bottom:40px',
+    'right:8px',
+    'display:flex',
+    'align-items:center',
+    'gap:10px',
+    'font-family:sans-serif',
+    'font-size:13px',
+    'color:#fff',
+    'background:rgba(176,0,32,0.96)',
+    'padding:8px 12px',
+    'border-radius:4px',
+    'z-index:2147483646',
+    'pointer-events:auto',
+    'max-width:360px',
+  ].join(';');
+  const label = document.createElement('span');
+  label.setAttribute('data-hime-overlay-label', '');
+  label.textContent = `Image overlay failed for ${count} image${count === 1 ? '' : 's'}.`; // textContent only
+  void kind; // logged via console by the worker; no additional action needed here
+  const dismissBtn = document.createElement('button');
+  dismissBtn.textContent = '✕'; // textContent only
+  dismissBtn.setAttribute('aria-label', 'Dismiss');
+  dismissBtn.style.cssText = [
+    'font-family:sans-serif',
+    'font-size:15px',
+    'line-height:1',
+    'color:#fff',
+    'background:transparent',
+    'border:none',
+    'cursor:pointer',
+    'padding:2px 6px',
+  ].join(';');
+  dismissBtn.addEventListener('click', () => {
+    document.getElementById(HIME_OVERLAY_TOAST_ID)?.remove();
+  });
+  el.appendChild(label);
+  el.appendChild(dismissBtn);
+  document.body.appendChild(el);
+}
+
 // Extend the existing chrome.runtime.onMessage handler to deal with progressive
 // messages sent FROM the worker to this content script.
 // (Worker-to-content messages for badge placement and activity counts.)
 chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
+  if (message.type === 'translatePage') {
+    // Tear down any existing image overlays before a fresh translation run,
+    // so overlays don't outlive a reset (overlayRemoveAll mirrors progRemoveAllBadges).
+    overlayRemoveAll();
+    progressReset(); // fresh shared % counter for this run (page + images)
+    void pageTranslate();
+    void overlayTranslateImages(); // Phase 16: image overlay pass (includeImages gate)
+    sendResponse({ success: true });
+    return false; // synchronous ack — translation runs async in the background
+  }
+
+  if (message.type === 'togglePage') {
+    pageApplyState(pageState === 'translated' ? 'original' : 'translated');
+    sendResponse({ success: true });
+    return false;
+  }
+
   if (message.type === 'progressiveActivity') {
     const p = message.payload as { pending: number; done: number };
     handleProgressiveActivity(p.pending ?? 0, p.done ?? 0);
@@ -1414,6 +2785,23 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
   return false;
 });
 
+// --- Boot: clear a stale page-state mirror left over from before a reload ---
+// chrome.storage.session SURVIVES a page reload, but the reloaded DOM is always
+// untranslated. A leftover {state:'translated'|'original-shown'} record makes the
+// popup route "Translate page" to togglePage — a silent no-op on the fresh DOM
+// ("reload + translate doesn't work", T-16 verify defect). Remove this origin's
+// record on load so a freshly loaded page always starts as not-yet-translated.
+// Only this origin's record is touched (the mirror is one global cross-tab record).
+void chrome.storage.session
+  .get(PAGE_STORAGE_PAGE_STATE)
+  .then((stored) => {
+    const mirror = stored[PAGE_STORAGE_PAGE_STATE] as { origin?: string } | undefined;
+    if (mirror?.origin === location.origin) {
+      return chrome.storage.session.remove(PAGE_STORAGE_PAGE_STATE);
+    }
+  })
+  .catch(() => {}); // session storage not yet accessible → nothing to clear
+
 // --- Boot: read storage and start/stop accordingly ---
 
 chrome.storage.local.get(['himeSettings'], (result) => {
@@ -1429,6 +2817,33 @@ chrome.storage.local.get(['himeSettings'], (result) => {
       startProgressive();
     }
   }
+});
+
+// --- Boot: auto-offer page-translation banner (Phase 15: TRIG-02, TRIG-03) ---
+// Mirrors the progressive boot gate above: read himeSettings + document.documentElement.lang,
+// reuse the ALREADY-MIRRORED progShouldGateByLanguage so same-language/unknown pages show
+// NO banner and incur NO spend (TRIG-02 cost guarantee). Then check the per-origin
+// chrome.storage.session dismissed-set (D-02 stickiness) before offering the banner.
+chrome.storage.local.get(['himeSettings'], async (result) => {
+  const s = (result.himeSettings || {}) as Record<string, unknown>;
+  const pageLang = document.documentElement.lang ?? '';
+  const target = typeof s.targetLanguage === 'string' ? s.targetLanguage : '';
+  // Gate BEFORE any banner creation: same-language/unknown → no banner, no spend.
+  if (progShouldGateByLanguage(pageLang, target)) return;
+  const origin = location.origin;
+  // The per-origin dismissed-set lives in session storage, which may be
+  // inaccessible to this content script (worker hasn't run setAccessLevel yet, or
+  // older Chrome). Guard so a foreign-language page (e.g. Amazon JP) never throws
+  // "Access to storage is not allowed from this context" as an uncaught rejection.
+  let dismissed: string[] | undefined;
+  try {
+    const stored = await chrome.storage.session.get(STORAGE_BANNER_DISMISSED);
+    dismissed = stored[STORAGE_BANNER_DISMISSED] as string[] | undefined;
+  } catch {
+    dismissed = undefined; // can't read dismissals → fall through and offer the banner
+  }
+  if (dismissed?.includes(origin)) return; // dismissed this session (A7 origin granularity)
+  pageShowOfferBanner(origin);
 });
 
 // Live toggle via storage.onChanged (PROG-01 — no extension reload needed).

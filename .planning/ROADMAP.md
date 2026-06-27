@@ -6,6 +6,7 @@
 - ⏸ v1.1 Inline Predictions — Phases 5-7 (PAUSED 2026-06-02; phase 5 shelved behind flag, phases 6-7 unbuilt)
 - ✅ v1.2 Translated Search — Phases 8-11 (shipped 2026-06-20)
 - ✅ v1.3 Image Translation — Phases 12-14 (shipped 2026-06-22)
+- 🚧 v1.4 In-Place Page Translation — Phases 15-16 (in progress; started 2026-06-22)
 
 ## Phases
 
@@ -51,6 +52,14 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 - [x] **Phase 12: Image OCR Pipeline + Right-Click + Side Panel** - VisionProvider (Google Cloud Vision OCR + LLM translate), worker byte resolver + captureVisibleTab fallback, validate/downscale, context menu, side panel, per-image state contract (completed 2026-06-21)
 - [x] **Phase 13: Progressive Viewport Mode + Cost Control + Privacy Opt-In** - Default-OFF toggle, IntersectionObserver, content-hash dedup + cache, concurrency/budget/debounce/min-size guards, first-enable privacy warning + activity indicator, badge-not-auto-open (completed 2026-06-21)
 - [x] **Phase 14: UX / Quality Hardening + Vision Settings** - Google Cloud key field + Vision connection test, copy original+translation, source-language + no-text/low-confidence polish, `[hime N]` badges, CJK note (completed 2026-06-21)
+
+</details>
+
+<details open>
+<summary>🚧 v1.4 In-Place Page Translation (Phases 15-16) — IN PROGRESS (started 2026-06-22)</summary>
+
+- [ ] **Phase 15: In-Place Page-Text Translation + Triggers** - TreeWalker text-node snapshot, batched BYOK translate, layout-preserving in-place replace, original↔translation toggle, toolbar + right-click trigger, `<html lang>` auto-offer (PAGE-01..05, TRIG-01..03)
+- [ ] **Phase 16: In-Place Image Overlay Translation** - Per-block overlay using reused Vision `boundingPoly` geometry, WCAG-AA legibility box, shrink-to-fit text, swap toggle, scroll/resize re-anchoring (OVL-01..05)
 
 </details>
 
@@ -111,6 +120,51 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 
 > v1.3 phase details (Phases 12–14) archived to `milestones/v1.3-ROADMAP.md`.
 
+### Phase 15: In-Place Page-Text Translation + Triggers
+
+**Goal**: A user on a foreign-language page can translate its visible text in place — the page's own text is swapped for the translation with layout intact — triggered manually or auto-offered when the page language differs from their target, and toggled back to the original at will.
+**Depends on**: Phase 14 (v1.3 background BYOK translate pipeline, batched keyed-JSON translation, `shouldGateByLanguage` page-language gate in `progressive-guard.ts`, `content.ts` classic-script wiring conventions)
+**Requirements**: PAGE-01, PAGE-02, PAGE-03, PAGE-04, PAGE-05, TRIG-01, TRIG-02, TRIG-03
+**Success Criteria** (what must be TRUE):
+
+  1. On a foreign-language page, the user invokes "Translate page" (toolbar action or right-click menu item) and the page's visible text is replaced in place by its translation, with the page's layout and styling preserved.
+  2. Script, style, code, `contenteditable`, and form-input text are left untranslated, and links/buttons/forms remain clickable and functional after translation.
+  3. The user can toggle the translated page back to its exact original text and re-apply the translation, both without reloading the page.
+  4. Translation runs through the existing background BYOK LLM pipeline as batched requests (not one call per text node), and the API key never reaches the page.
+  5. Translation captures a static snapshot of the page text at trigger time — content added to the DOM afterward is not auto-translated — and when `<html lang>` differs from the target language hime shows an unobtrusive, dismissible auto-offer, while same-language pages incur no API spend and the manual trigger stays available regardless of detected language.
+
+**Plans**: 4 plans
+
+- [x] 15-01-PLAN.md — pure page-walk.ts core (skip-set + recursive walk + chunkByBudget + buildPageBatchPrompt + key-injection-guarded parsePageBatchReply + once-only restore + failed-set) + types.ts message contracts + test/page-walk.mjs (PAGE-01..05) [Wave 1]
+- [x] 15-02-PLAN.md — worker translatePageBatch case (BYOK batched) + right-click "Translate page" item + onClicked dispatch + popup button with state mirror (PAGE-04, TRIG-01) [Wave 2]
+- [x] 15-03-PLAN.md — content.ts live createTreeWalker snapshot + chunked dispatch + in-place nodeValue replace + WeakMap toggle pill + translatePage/togglePage routing + session state mirror (PAGE-01/02/03/05) [Wave 3] (code complete; live checkpoint batched to phase-end gate)
+- [x] 15-04-PLAN.md — content.ts auto-offer banner gated by progShouldGateByLanguage + per-origin session dismissal + partial-failure toast/red-badge/retry-failed (TRIG-02/03, PAGE-04) [Wave 4] (code complete; live checkpoint batched to phase-end gate)
+
+**UI hint**: yes
+
+### Phase 16: In-Place Image Overlay Translation
+
+**Goal**: A user can overlay translated text directly on the images of the current page — each translated block sitting over its source-text region in a simple legible box — and swap any overlay back to the original, with overlays staying anchored as the page scrolls and resizes.
+**Depends on**: Phase 15 (page-translate trigger + snapshot orchestration), Phase 14 (v1.3 Vision `DOCUMENT_TEXT_DETECTION` pipeline + worker image-byte fetch/`captureVisibleTab` fallback; `boundingPoly` geometry currently discarded is now extracted and reused)
+**Requirements**: OVL-01, OVL-02, OVL-03, OVL-04, OVL-05
+**Success Criteria** (what must be TRUE):
+
+  1. For images on the page, the user sees each translated text block rendered as a DOM overlay positioned over its source-text region, placed using the Vision `boundingPoly` geometry returned per block (no longer discarded), translated per block through the BYOK pipeline.
+  2. Each overlay draws its translated text on a simple semi-transparent background box meeting WCAG AA 4.5:1 contrast for legibility, and the underlying image pixels are never edited (no inpainting).
+  3. The user can swap any individual image overlay between the translation and the original text in place.
+  4. Overlays stay correctly aligned to their source-text regions as the user scrolls and resizes the window, mapping each natural-pixel box to the image's current rendered rect.
+  5. Overlay text auto-fits its box via shrink-to-fit using `CanvasRenderingContext2D.measureText`, and a translation too long for its region is handled gracefully (shrunk/clamped) rather than overflowing or breaking the layout.
+
+**Plans**: 5 plans
+
+- [x] 16-01-PLAN.md — pure seams + contracts: overlay-geometry.ts (mapBox), overlay-fit.ts (fitText), collectParagraphBoxes + OverlayBlock/translateImageBlocks/includeImages types + RED node tests (OVL-01/04/05) [Wave 1]
+- [x] 16-02-PLAN.md — worker + provider: ocr() surfaces paragraph blocks, downscaleAndGuard returns submitted dims, translateImageBlocks keyed-JSON batch case + capture-fallback flag (OVL-01) [Wave 2]
+- [x] 16-03-PLAN.md — popup "Include images" opt-in checkbox (default OFF) persisted to himeSettings, folded into Translate page (OVL-01 / D-01) [Wave 2]
+- [x] 16-04-PLAN.md — content.ts overlay layer: mirrored mapBox/fitText, gated collect+dispatch, render/anchor (ResizeObserver) black/white boxes, per-image + global toggle (OVL-01..05 / D-01/02/03) [Wave 3]
+- [ ] 16-05-PLAN.md — build + full suite green + batched live load-unpacked human-verify of all 5 OVL behaviors (OVL-01..05) [Wave 4]
+
+**UI hint**: yes
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -130,6 +184,8 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 | 12. Image OCR Pipeline + Right-Click + Side Panel | v1.3 | 7/7 | Complete | 2026-06-21 |
 | 13. Progressive Viewport Mode + Cost Control + Privacy Opt-In | v1.3 | 4/4 | Complete | 2026-06-21 |
 | 14. UX / Quality Hardening + Vision Settings | v1.3 | 5/5 | Complete   | 2026-06-21 |
+| 15. In-Place Page-Text Translation + Triggers | v1.4 | 4/4 | Complete   | 2026-06-22 |
+| 16. In-Place Image Overlay Translation | v1.4 | 4/5 | In Progress|  |
 
 ## Backlog
 
@@ -137,7 +193,7 @@ Full phase details archived to `milestones/v1.3-ROADMAP.md`. Audit passed (16/16
 
 **Goal:** [Captured for future planning] Translate all search-result headings in a first pass, then descriptions in a second pass, so the user gets the most useful information (titles) fastest — progressive SERP rendering instead of waiting for the full batch.
 **Requirements:** TBD
-**Plans:** 5/5 plans complete
+**Plans:** 4/5 plans executed
 
 Plans:
 

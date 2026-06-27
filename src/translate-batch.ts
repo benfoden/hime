@@ -29,6 +29,7 @@ export function buildBatchTranslatePrompt(config: TranslationConfig): string {
   const formalityInstruction = getFormalityInstruction(config.formality);
   return [
     `You are a translation engine. Translate each item to ${config.targetLanguage}.`,
+    `Every translated value MUST be written entirely in ${config.targetLanguage} — never any other language or writing system (e.g. for Japanese use Japanese, never Chinese).`,
     `Input shape: {"0":{"t":<title>,"d":<description>}, "1":{...}, ...}`,
     `Return ONLY a valid JSON object with the same keys and shape — no explanation, no markdown, no code fences.`,
     `Translate each t (title) and d (description); preserve the exact same keys; do not add or remove keys.`,

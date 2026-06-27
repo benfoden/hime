@@ -958,6 +958,50 @@ test('BraveSearchClient: request URL contains q, count, result_filter=web params
   assert.equal(u.origin + u.pathname, BRAVE_ENDPOINT);
 });
 
+// SRCH-LOCALE wiring: `country` must actually reach the Brave request URL — the
+// 魔法少女 regression was the locale not being pinned, so Brave picked the wrong one.
+// These prove opts.country → &country=<code>, and that it is OMITTED when not supplied.
+test('BraveSearchClient: opts.country reaches the URL as &country', async () => {
+  const client = new BraveSearchClient();
+  const captured = {};
+  await withFetch(braveOkFetch(SAMPLE_BRAVE_BODY, captured), () =>
+    client.search('魔法少女', 'k', { count: 10, country: 'JP' }),
+  );
+  const u = new URL(captured.url);
+  assert.equal(u.searchParams.get('country'), 'JP', 'country=JP must be on the Brave request');
+});
+
+test('BraveSearchClient: no country → country param is absent (not empty)', async () => {
+  const client = new BraveSearchClient();
+  const captured = {};
+  await withFetch(braveOkFetch(SAMPLE_BRAVE_BODY, captured), () =>
+    client.search('q', 'k', { count: 10 }),
+  );
+  const u = new URL(captured.url);
+  assert.equal(u.searchParams.has('country'), false, 'country must be omitted when not provided');
+});
+
+// SRCH-LOCALE fallback: a rejected country (422/400) must NOT break search — the
+// client retries once without it (locale pinning is strictly additive).
+test('BraveSearchClient: 422 on country retries once WITHOUT country and succeeds', async () => {
+  const client = new BraveSearchClient();
+  const calls = [];
+  const flakyFetch = async (urlStr) => {
+    calls.push(urlStr);
+    const hasCountry = new URL(urlStr).searchParams.has('country');
+    if (hasCountry) {
+      return { ok: false, status: 422, json: async () => ({ error: { detail: 'bad country' } }) };
+    }
+    return { ok: true, status: 200, json: async () => SAMPLE_BRAVE_BODY };
+  };
+  const results = await withFetch(flakyFetch, () =>
+    client.search('q', 'k', { count: 10, country: 'ZZ' }),
+  );
+  assert.equal(results.length, 2, 'should still return results via the country-less retry');
+  assert.equal(calls.length, 2, 'should attempt twice: with then without country');
+  assert.equal(new URL(calls[1]).searchParams.has('country'), false, 'retry must omit country');
+});
+
 test('BraveSearchClient: 429 rejects with .kind === "search_quota"', async () => {
   const client = new BraveSearchClient();
   await withFetch(

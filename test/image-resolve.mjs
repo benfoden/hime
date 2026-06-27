@@ -218,3 +218,111 @@ test('D-04: deriveImageEntry passes through himeNum on all entry kinds and verti
   assert.equal(errEntry.kind, 'error');
   assert.equal(errEntry.himeNum, 2);
 });
+
+// ---------------------------------------------------------------------------
+// OVL-01 / Phase 16: collectParagraphBoxes -- paragraph geometry extraction
+//
+// Tests verify against test/fixtures/fulltextannotation.json, a realistic
+// pages->blocks->paragraphs->words->symbols structure with boundingBox.vertices
+// and detectedBreak fields.
+//
+// The fixture has:
+//   - Para 1: "Hello World" (5-char word + SPACE break + 5-char word) + 4-vertex box
+//   - Para 2: "Foo Bar\n"   (3-char word + SPACE break + 3-char word + LINE_BREAK) + 4-vertex box
+//   - Para 3: whitespace-only (" ") + 4-vertex box  (must be DROPPED)
+// ---------------------------------------------------------------------------
+test('OVL-01: collectParagraphBoxes assembles paragraph text and 4-vertex boxes from fixture', async () => {
+  const { collectParagraphBoxes } = await loadResolve();
+  const { default: fixture } = await import(
+    path.join(__dirname, './fixtures/fulltextannotation.json'), { with: { type: 'json' } }
+  );
+
+  const blocks = collectParagraphBoxes(fixture);
+
+  // Exactly 2 blocks: whitespace-only paragraph must be dropped
+  assert.equal(blocks.length, 2, 'whitespace-only paragraph is dropped; exactly 2 OverlayBlocks');
+
+  // Each block must have exactly 4 vertices
+  assert.equal(blocks[0].box.length, 4, 'para 1 box has 4 vertices');
+  assert.equal(blocks[1].box.length, 4, 'para 2 box has 4 vertices');
+
+  // Para 1: assembled text should contain "Hello World" (space from SPACE detectedBreak)
+  assert.ok(blocks[0].text.includes('Hello'), 'para 1 text contains "Hello"');
+  assert.ok(blocks[0].text.includes('World'), 'para 1 text contains "World"');
+
+  // Para 2: assembled text should contain "Foo" and "Bar"
+  assert.ok(blocks[1].text.includes('Foo'), 'para 2 text contains "Foo"');
+  assert.ok(blocks[1].text.includes('Bar'), 'para 2 text contains "Bar"');
+});
+
+test('OVL-01: collectParagraphBoxes drops paragraphs with whitespace-only assembled text', async () => {
+  const { collectParagraphBoxes } = await loadResolve();
+
+  // Minimal annotation: one paragraph with whitespace-only symbols + valid box
+  const fta = {
+    pages: [{
+      blocks: [{
+        paragraphs: [{
+          boundingBox: {
+            vertices: [
+              { x: 0, y: 0 }, { x: 100, y: 0 },
+              { x: 100, y: 50 }, { x: 0, y: 50 },
+            ],
+          },
+          words: [{
+            symbols: [
+              { text: ' ' },
+              { text: '\t' },
+            ],
+          }],
+        }],
+      }],
+    }],
+  };
+
+  const blocks = collectParagraphBoxes(fta);
+  assert.equal(blocks.length, 0, 'whitespace-only paragraph produces no OverlayBlocks');
+});
+
+test('OVL-01: collectParagraphBoxes converts normalizedVertices to pixels via submitted (real Vision shape)', async () => {
+  const { collectParagraphBoxes } = await loadResolve();
+
+  // Real Google DOCUMENT_TEXT_DETECTION returns paragraph boxes as normalizedVertices
+  // (0–1), NOT pixel vertices — the production shape the original fixture missed (T-16 RCA).
+  const fta = {
+    pages: [{
+      blocks: [{
+        paragraphs: [{
+          boundingBox: {
+            normalizedVertices: [
+              { x: 0.1, y: 0.2 }, { x: 0.5, y: 0.2 },
+              { x: 0.5, y: 0.4 }, { x: 0.1, y: 0.4 },
+            ],
+          },
+          words: [{ symbols: [{ text: 'H' }, { text: 'i' }] }],
+        }],
+      }],
+    }],
+  };
+
+  // Without submitted dims the fallback is dead → box dropped (the bug shipped before the fix).
+  assert.equal(collectParagraphBoxes(fta).length, 0, 'no submitted dims → normalized box dropped');
+
+  // With submitted dims the normalized coords scale to submitted-pixel space.
+  const blocks = collectParagraphBoxes(fta, { w: 1000, h: 500 });
+  assert.equal(blocks.length, 1, 'submitted dims → box recovered');
+  assert.deepEqual(
+    blocks[0].box,
+    [{ x: 100, y: 100 }, { x: 500, y: 100 }, { x: 500, y: 200 }, { x: 100, y: 200 }],
+    'normalizedVertices × submitted dims = pixel coords',
+  );
+});
+
+test('OVL-01: collectParagraphBoxes handles null/undefined gracefully (defensive)', async () => {
+  const { collectParagraphBoxes } = await loadResolve();
+
+  assert.doesNotThrow(() => collectParagraphBoxes(null),      'null input does not throw');
+  assert.doesNotThrow(() => collectParagraphBoxes(undefined), 'undefined input does not throw');
+  assert.deepEqual(collectParagraphBoxes(null),      [], 'null returns []');
+  assert.deepEqual(collectParagraphBoxes(undefined), [], 'undefined returns []');
+});

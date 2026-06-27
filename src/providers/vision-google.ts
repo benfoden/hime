@@ -20,6 +20,7 @@
 
 import type { VisionProvider, OcrResult } from '../types.js';
 import { classifyError } from '../errors.js';
+import { collectParagraphBoxes } from '../image-resolve.js';
 
 // Exported so the test asserts the exact URL (and the worker can reference it).
 export const VISION_ENDPOINT = 'https://vision.googleapis.com/v1/images:annotate';
@@ -41,9 +42,17 @@ type OcrOnlyResult = OcrResult | null;
 
 interface VisionWord {
   confidence?: number;
-  symbols?: { confidence?: number }[];
+  symbols?: {
+    text?: string;
+    confidence?: number;
+    property?: { detectedBreak?: { type?: string } };
+  }[];
 }
 interface VisionParagraph {
+  boundingBox?: {
+    vertices?: { x?: number; y?: number }[];
+    normalizedVertices?: { x?: number; y?: number }[];
+  };
   words?: VisionWord[];
 }
 interface VisionBlock {
@@ -72,7 +81,12 @@ export class GoogleVisionProvider implements VisionProvider {
    * returns the no-text sentinel `null` (no throw, Pitfall 4). The key needs
    * only the Cloud Vision API enabled.
    */
-  async ocr(imageBase64: string, _mime: string, apiKey: string): Promise<OcrOnlyResult> {
+  async ocr(
+    imageBase64: string,
+    _mime: string,
+    apiKey: string,
+    submitted?: { w: number; h: number },
+  ): Promise<OcrOnlyResult> {
     const visionUrl = new URL(VISION_ENDPOINT);
     visionUrl.searchParams.set('key', apiKey); // encoded; never interpolated/logged.
 
@@ -101,12 +115,27 @@ export class GoogleVisionProvider implements VisionProvider {
     const confidence = meanWordConfidence(annotation);
     const detectedLang = annotation.pages?.[0]?.property?.detectedLanguages?.[0]?.languageCode ?? '';
 
+    // Phase 16 OVL-01: extract per-paragraph overlay blocks via the Plan 01
+    // pure extractor. annotation is VisionFullTextAnnotation which matches the
+    // FullTextAnnotation shape expected by collectParagraphBoxes (same tree:
+    // pages → blocks → paragraphs → words → symbols). The result is added to
+    // OcrResult.blocks; the v1.3 side-panel path ignores it (D-04).
+    // Pass `submitted` so the normalizedVertices→pixel fallback works: real Google
+    // DOCUMENT_TEXT_DETECTION returns paragraph boxes as normalizedVertices (0–1),
+    // not pixel vertices. Without the dims the boxes collapsed to a corner cluster
+    // (T-16 RCA). The test fixture used pixel vertices, hiding this divergence.
+    const blocks = collectParagraphBoxes(
+      annotation as Parameters<typeof collectParagraphBoxes>[0],
+      submitted,
+    );
+
     return {
       originalText,
       detectedLang,
       confidence,
       // Char-count OCR usage so the worker's recordUsage('google-vision', ...) has data.
       usage: { inputTokens: originalText.length, outputTokens: 0 },
+      blocks,
     };
   }
 

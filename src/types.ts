@@ -31,6 +31,12 @@ export interface Settings extends TranslationConfig, ProviderConfig {
   // Default OFF (D-01) — silent auto-upload must be explicitly consented to by the user.
   // Takes effect immediately via storage.onChanged without an extension reload (PROG-01).
   progressiveEnabled: boolean;
+  // Phase 16 / D-01: opt-in toggle for in-place image overlay translation.
+  // Default OFF (D-01 cost philosophy: paid Vision call is silent auto-spend).
+  // When ON, the "Translate page" action OCRs + overlays in-view images.
+  // Safe to omit in persisted settings: migrateSettings spreads DEFAULT_SETTINGS
+  // first, so a missing field defaults to false without a migration step.
+  includeImages?: boolean;
 }
 
 export interface TranslationRequest {
@@ -84,6 +90,11 @@ export interface OcrResult {
   confidence: number;
   // Optional OCR usage for recordUsage('<provider>-vision', ...) in the worker.
   usage?: { inputTokens: number; outputTokens: number };
+  // Phase 16 OVL-01: per-paragraph overlay blocks (text + 4-vertex bounding box
+  // in submitted-image pixel space). Present when collectParagraphBoxes ran.
+  // Absent for the v1.3 side-panel path (which only uses originalText).
+  // Type mirrors OverlayBlock from image-resolve.ts (avoid circular import).
+  blocks?: { text: string; box: { x: number; y: number }[] }[];
 }
 
 // Normalized OCR+translation result rendered by the side panel.
@@ -150,11 +161,17 @@ export type MessageType =
   | 'testVisionKey'
   | 'translateBatch'
   | 'translateImage'
+  // Phase 15 in-place page-text translation messages:
+  | 'translatePage'        // worker/popup → content: snapshot-walk + translate the page in place (TRIG-01)
+  | 'togglePage'           // worker/popup → content: flip original ↔ translation on an already-translated page (PAGE-03)
+  | 'translatePageBatch'   // content → worker: translate one keyed chunk of page text (BYOK in worker, PAGE-04)
   // Phase 13 progressive viewport mode messages:
   | 'progressiveTranslate'  // content → worker: enqueue a progressive image job (gated, content-hash dedupKey)
   | 'openImagePanel'        // content → worker: badge-click gesture asks worker to sidePanel.open + scroll to entry (D-04, PROG-06)
   | 'progressiveActivity'   // worker → content (and toolbar): activity count update (pending+done, D-04a)
-  | 'progressiveBadge';     // worker → content: a progressive job landed → add the on-image badge (D-04)
+  | 'progressiveBadge'      // worker → content: a progressive job landed → add the on-image badge (D-04)
+  // Phase 16 in-place image overlay translation messages:
+  | 'translateImageBlocks';  // content → worker: OCR + translate one image, return per-paragraph blocks + submitted dims (OVL-01)
 
 export interface Message {
   type: MessageType;
@@ -322,6 +339,53 @@ export interface ProgressiveBadgeMessage extends Message {
 // Per-page budget counter lives in storage.session (ephemeral, per 13-CONTEXT).
 export const STORAGE_PROGRESSIVE_ACK = 'progressiveAck' as const;
 
+// --- Phase 16: In-place image overlay translation message interfaces ---
+//
+// Security law (T-12-01 / T-16-02): BYOK API keys are NEVER carried in ANY message
+// payload. The worker reads apiKeys and googleApiKey from storage.local exclusively.
+// translateImageBlocks payload carries only geometry/identity data: {srcUrl, dedupKey,
+// tabId?, config}. NO key field.
+
+// content → worker: OCR + translate one image and return per-paragraph overlay blocks.
+// The worker resolves image bytes, calls Vision, extracts paragraph boxes via
+// collectParagraphBoxes, batch-translates the block text, and replies with blocks +
+// the submitted image dimensions (required for mapBox coordinate mapping, OVL-04).
+// Security: apiKey is read from storage in the worker ONLY (T-12-01, T-16-02).
+export interface TranslateImageBlocksMessage extends Message {
+  type: 'translateImageBlocks';
+  payload: {
+    // The image source URL (may be cross-origin; resolved to bytes in the worker).
+    srcUrl: string;
+    // Originating tab — needed for captureVisibleTab fallback (IMG-04 precedent).
+    tabId?: number;
+    // Content-hash dedup key (djb2 of srcUrl). Prevents re-processing a seen image.
+    dedupKey: string;
+    // Translation config (source/target language, formality, model). Keys are NOT here.
+    config: TranslationConfig;
+  };
+}
+
+// Worker → content reply for a translateImageBlocks request.
+// Success → { blocks, submitted }; capture fallback → { captureFallback: true } (Pitfall 2);
+// failure → { error, kind } (T-12-01 / D-02 error contract).
+export interface TranslateImageBlocksResponse {
+  // Per-paragraph overlay blocks: position (box in submitted-px), original text,
+  // translated text. Empty array when Vision found no paragraphs.
+  blocks?: {
+    box: { x: number; y: number }[];
+    original: string;
+    translated: string;
+  }[];
+  // Submitted image dimensions (post-downscale) — mandatory for mapBox step (a).
+  // Absent when captureFallback is true (screenshot geometry can't be mapped, Pitfall 2).
+  submitted?: { w: number; h: number };
+  // True when image bytes came from captureVisibleTab (screenshot space, NOT image space).
+  // Content must skip overlay for this image — boxes can't be positioned (Pitfall 2).
+  captureFallback?: boolean;
+  error?: string;
+  kind?: import('./errors.js').ErrorKind;
+}
+
 export interface TranslateBatchMessage extends Message {
   type: 'translateBatch';
   payload: {
@@ -337,6 +401,40 @@ export interface TranslateBatchResponse {
   error?: string;
   kind?: import('./errors.js').ErrorKind;
 }
+
+// content → worker: translate one keyed chunk of page text in place (PAGE-04).
+// Mirrors TranslateBatchMessage, but items are PLAIN STRINGS (key → source text),
+// not { t, d } — a page text node is a single string with no title/description split.
+// Security law (T-15-03 / T-12-01): the BYOK key is NEVER carried here — the worker
+// reads s.apiKeys[s.provider] from storage. The payload holds source text + config only.
+export interface TranslatePageBatchMessage extends Message {
+  type: 'translatePageBatch';
+  payload: {
+    items: Record<string, string>;
+    config: TranslationConfig;
+  };
+}
+
+// Worker → page reply for a translatePageBatch request.
+// Success → { translations } (key → translated text); failure → { error, kind } (D-02).
+export interface TranslatePageBatchResponse {
+  translations?: Record<string, string>;
+  error?: string;
+  kind?: import('./errors.js').ErrorKind;
+}
+
+// storage.session keys for Phase 15 in-place page translation (D-02).
+// Both live in chrome.storage.session — ephemeral by design: they reset when the
+// browser session ends so a fresh session re-offers the banner and starts each page
+// untranslated. (Contrast STORAGE_PROGRESSIVE_ACK above, which is persisted in
+// storage.local because re-prompting consent every session would be hostile UX.)
+//
+// STORAGE_BANNER_DISMISSED: a per-origin dismissed-set (string[] of origins) so a
+//   dismissed auto-offer banner stays gone for that origin for the rest of the session.
+export const STORAGE_BANNER_DISMISSED = 'himeBannerDismissed' as const;
+// STORAGE_PAGE_STATE: the page-state mirror the popup reads to label its button
+//   ("Translate page" / "Show original" / "Show translation").
+export const STORAGE_PAGE_STATE = 'himePage' as const;
 
 export interface SetBadgeMessage extends Message {
   type: 'setBadge';
@@ -410,6 +508,44 @@ export function languageToIso(displayName: string): string {
   return fallback || 'en';
 }
 
+// Display-name → Brave Search `country` code (ISO 3166-1 alpha-2). This — NOT
+// `search_lang` — is the lever that actually pins Brave's result locale. Verified
+// empirically (scripts/brave-lang-probe.mjs against the live API): the pure-kanji query
+// 魔法少女 ("magical girl") is valid Japanese AND Chinese, so with no targeting Brave
+// returned zh.wikipedia.org. `search_lang=jp` alone did NOT fix it (still Chinese),
+// and `search_lang=ja` is a 422 (Brave's enum wants `jp`, contradicting the "ISO
+// 639-1" docs). `country=JP` returned ja.wikipedia.org / pixiv etc. — so we target by
+// country. Each language maps to its primary country; absent ones (none currently)
+// would return undefined → Brave's default (US). NOTE: codes are ISO 3166-1 alpha-2
+// (uppercase), distinct from the lowercase language codes in LANGUAGE_ISO.
+const LANGUAGE_COUNTRY: Readonly<Record<string, string>> = {
+  English: 'US',
+  Japanese: 'JP',
+  Korean: 'KR',
+  'Chinese (Simplified)': 'CN',
+  'Chinese (Traditional)': 'TW',
+  Spanish: 'ES',
+  French: 'FR',
+  German: 'DE',
+  Italian: 'IT',
+  Portuguese: 'BR',
+  Dutch: 'NL',
+  Russian: 'RU',
+  Polish: 'PL',
+  Turkish: 'TR',
+  Arabic: 'SA',
+  Hindi: 'IN',
+  Vietnamese: 'VN',
+  Thai: 'TH',
+  Indonesian: 'ID',
+};
+
+// Resolve a display name to a Brave `country` code (ISO 3166-1 alpha-2), or
+// undefined when there's no mapping (caller omits the param → Brave's default US).
+export function languageToBraveCountry(displayName: string): string | undefined {
+  return LANGUAGE_COUNTRY[displayName];
+}
+
 // Default settings
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'openai',
@@ -429,6 +565,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // PROG-01: progressive mode is OFF by default — auto-upload is privacy-sensitive
   // and requires an explicit first-enable consent (D-03 / PROG-05).
   progressiveEnabled: false,
+  // Phase 16 D-01: image overlay is OFF by default — paid Vision call requires
+  // explicit opt-in. migrateSettings spreads DEFAULT_SETTINGS, so this defaults
+  // safely to false for users upgrading from earlier versions.
+  includeImages: false,
 };
 
 // Migrate legacy single apiKey to per-provider apiKeys
@@ -489,7 +629,11 @@ function metaLabel(id: string): string {
   if (!m) return id;
   const avgPrice = (m.inPrice + m.outPrice) / 2;
   const priceStr = avgPrice < 1 ? `$${avgPrice.toFixed(2)}` : `$${avgPrice.toFixed(2)}`;
-  return `${id}  ·  ${m.tokPerSec} tok/s  ·  jp↔en ${m.jpEn.toFixed(1)}  ·  ${priceStr}/1M`;
+  // jpEn is a FLORES-200 ja↔en translation-QUALITY score (0-5), shown to help model
+  // choice — it does NOT set or constrain the translation direction (source/target
+  // come from the user's language settings). Labelled "qual …/5" so it doesn't read
+  // as a hardcoded language pair.
+  return `${id}  ·  ${m.tokPerSec} tok/s  ·  ja↔en qual ${m.jpEn.toFixed(1)}/5  ·  ${priceStr}/1M`;
 }
 
 export { metaLabel };

@@ -86,6 +86,17 @@ test('XLT-02: buildBatchTranslatePrompt contains JSON instruction and target lan
   assert.ok(!prompt.includes('Output ONLY the translated text'), 'prompt must NOT contain the single-output instruction');
 });
 
+test('XLT-05: buildBatchTranslatePrompt pins the output language (no Chinese-for-Japanese drift)', () => {
+  const prompt = buildBatchTranslatePrompt(CONFIG);
+  // The pin must name the target language and forbid other scripts so CJK targets
+  // don't drift (target Japanese, output Chinese — the reported defect).
+  assert.ok(
+    /MUST be written entirely in Japanese/.test(prompt),
+    'prompt should hard-pin the target language',
+  );
+  assert.ok(/never any other language/i.test(prompt), 'prompt should forbid other languages/scripts');
+});
+
 // ---------------------------------------------------------------------------
 // XLT-04: URL/hostname never sent in payload
 // ---------------------------------------------------------------------------
