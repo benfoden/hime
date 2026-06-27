@@ -849,7 +849,10 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             const guarded = await downscaleAndGuard(resolved.base64, resolved.mime);
 
             // OCR the image — result now carries blocks[] (Plan 02 Task 1).
-            const ocrResult = await visionProvider.ocr(guarded.base64, guarded.mime, googleKey);
+            const ocrResult = await visionProvider.ocr(guarded.base64, guarded.mime, googleKey, {
+              w: guarded.width,
+              h: guarded.height,
+            });
             if (ocrResult?.usage) await recordUsage('google-vision', ocrResult.usage);
 
             // No-text sentinel → empty blocks (image had no OCR-able text).
@@ -859,6 +862,11 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             }
 
             const blocks = ocrResult.blocks ?? [];
+            // T-16 RCA diagnostic: log block count + first box so a misplaced cluster
+            // is traceable to the box coordinate space (should be submitted-pixel).
+            console.log(
+              `[hime] image blocks=${blocks.length} submitted=${guarded.width}x${guarded.height} firstBox=${blocks[0] ? JSON.stringify(blocks[0].box) : 'none'}`,
+            );
             if (blocks.length === 0) {
               sendResponse({ blocks: [] });
               break;

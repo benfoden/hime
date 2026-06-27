@@ -81,7 +81,12 @@ export class GoogleVisionProvider implements VisionProvider {
    * returns the no-text sentinel `null` (no throw, Pitfall 4). The key needs
    * only the Cloud Vision API enabled.
    */
-  async ocr(imageBase64: string, _mime: string, apiKey: string): Promise<OcrOnlyResult> {
+  async ocr(
+    imageBase64: string,
+    _mime: string,
+    apiKey: string,
+    submitted?: { w: number; h: number },
+  ): Promise<OcrOnlyResult> {
     const visionUrl = new URL(VISION_ENDPOINT);
     visionUrl.searchParams.set('key', apiKey); // encoded; never interpolated/logged.
 
@@ -115,7 +120,14 @@ export class GoogleVisionProvider implements VisionProvider {
     // FullTextAnnotation shape expected by collectParagraphBoxes (same tree:
     // pages → blocks → paragraphs → words → symbols). The result is added to
     // OcrResult.blocks; the v1.3 side-panel path ignores it (D-04).
-    const blocks = collectParagraphBoxes(annotation as Parameters<typeof collectParagraphBoxes>[0]);
+    // Pass `submitted` so the normalizedVertices→pixel fallback works: real Google
+    // DOCUMENT_TEXT_DETECTION returns paragraph boxes as normalizedVertices (0–1),
+    // not pixel vertices. Without the dims the boxes collapsed to a corner cluster
+    // (T-16 RCA). The test fixture used pixel vertices, hiding this divergence.
+    const blocks = collectParagraphBoxes(
+      annotation as Parameters<typeof collectParagraphBoxes>[0],
+      submitted,
+    );
 
     return {
       originalText,
