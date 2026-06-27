@@ -836,6 +836,14 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
             // Resolve image bytes via the data:/fetch/captureVisibleTab ladder.
             const resolved = await resolveImageBytes(srcUrl, tabId ?? 0);
 
+            // SVG is vector (icons/logos/diagrams) — Vision can't OCR it and the
+            // canvas decode rejects it ("Unsupported image format: image/svg+xml").
+            // Skip silently rather than erroring + planting a stray caption (T-16).
+            if (/svg/i.test(resolved.mime)) {
+              sendResponse({ blocks: [] });
+              break;
+            }
+
             // T-16-06: captureVisibleTab bytes are in screenshot space — boxes
             // cannot be mapped back to the <img>. Reply with captureFallback flag
             // so the content script skips overlay (RESEARCH Pitfall 2).

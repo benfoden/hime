@@ -2587,6 +2587,7 @@ async function overlayTranslateImages(): Promise<void> {
   const allImgs = Array.from(document.querySelectorAll('img')) as HTMLImageElement[];
   const eligible = allImgs.filter((img) => {
     if (!img.src) return false;
+    if (/\.svg(\?|#|$)/i.test(img.src) || img.src.startsWith('data:image/svg')) return false; // vector — not OCR-able
     if (!progIsEligible(img)) return false;          // min-size gate (reuse D-02)
     if (!img.complete || img.naturalWidth === 0) return false; // must be decoded (valid natural dims)
     const rect = img.getBoundingClientRect();
