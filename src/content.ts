@@ -1702,6 +1702,7 @@ async function pageTranslate(nodes?: Text[]): Promise<void> {
   const config = await pageReadConfig();
   const texts = snapshot.map((n) => n.nodeValue ?? '');
   const chunks = pageChunkByBudget(texts);
+  progressAdd(chunks.length); // page-text units for the shared progress tab
   const gate = progCreateConcurrencyGate(PAGE_CONCURRENCY_CAP);
 
   let cursor = 0;
@@ -1743,6 +1744,7 @@ async function pageTranslate(nodes?: Text[]): Promise<void> {
           .finally(() => {
             gate.release();
             inFlight.delete(p);
+            progressTick(); // one page chunk settled (success or fail)
             // Re-enter the launch loop from inside the reply (no busy-spin).
             launch();
             settle();
@@ -1767,6 +1769,88 @@ async function pageTranslate(nodes?: Text[]): Promise<void> {
     // (whole-chunk path here + Plan 03's per-key missing-key path), surface ONE toast.
     if (pageFailedNodes.size > 0) pageShowErrorToast(lastKind, lastMessage);
   });
+}
+
+// --- Translate progress indicator (reuses the auto-offer tab's pinned position
+// + dark rounded-tab style, but shows a live % instead of the icon). One shared
+// counter spans BOTH passes (page-text chunks + image overlays) so the user sees
+// a single combined progress while a manual "Translate page" runs. ---
+
+const HIME_PAGE_PROGRESS_ID = 'hime-page-progress';
+let progressTotal = 0;
+let progressDone = 0;
+let progressHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Reset the shared counter at the start of a manual translate run. */
+function progressReset(): void {
+  progressTotal = 0;
+  progressDone = 0;
+  if (progressHideTimer) {
+    clearTimeout(progressHideTimer);
+    progressHideTimer = null;
+  }
+  document.getElementById(HIME_PAGE_PROGRESS_ID)?.remove();
+}
+
+/** Add N units of work (page chunks or images) to the run. */
+function progressAdd(n: number): void {
+  if (n <= 0) return;
+  progressTotal += n;
+  progressRender();
+}
+
+/** Mark one unit done (succeeded OR failed — progress reflects work completed). */
+function progressTick(): void {
+  progressDone += 1;
+  progressRender();
+}
+
+/** Render/update the pinned % tab; auto-hide shortly after reaching 100%. */
+function progressRender(): void {
+  if (!document.body || progressTotal === 0) return;
+  const pct = Math.min(100, Math.round((progressDone / progressTotal) * 100));
+
+  let el = document.getElementById(HIME_PAGE_PROGRESS_ID);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = HIME_PAGE_PROGRESS_ID;
+    el.style.cssText = [
+      'position: fixed',
+      'top: 14px',
+      'right: 0',
+      'height: 26px',
+      'min-width: 30px',
+      'padding: 0 12px',
+      'display: flex',
+      'align-items: center',
+      'justify-content: center',
+      'color: #fff',
+      'font-family: sans-serif',
+      'font-size: 13px',
+      'font-weight: 600',
+      'background-color: rgba(0,0,0,0.72)',
+      'border-radius: 19px 0 0 19px', // rounded tab flush to the right edge (matches offer tab)
+      'box-shadow: 0 1px 4px rgba(0,0,0,0.3)',
+      'z-index: 2147483646',
+      'pointer-events: none',
+      'transition: opacity .3s ease',
+    ].join(';');
+    document.body.appendChild(el);
+  }
+  el.textContent = `${pct}%`;
+
+  if (progressDone >= progressTotal) {
+    // Briefly show 100%, then fade out.
+    if (progressHideTimer) clearTimeout(progressHideTimer);
+    progressHideTimer = setTimeout(() => {
+      const node = document.getElementById(HIME_PAGE_PROGRESS_ID);
+      if (node) {
+        node.style.opacity = '0';
+        setTimeout(() => node.remove(), 300);
+      }
+      progressHideTimer = null;
+    }, 700);
+  }
 }
 
 // --- Floating toggle pill + state mirror (Phase 15: PAGE-03, D-01) ---
@@ -1909,7 +1993,9 @@ function pageShowOfferBanner(origin: string): void {
   ].join(';');
   el.style.backgroundImage = `url("data:image/svg+xml,${encodeURIComponent(HIME_TRANSLATE_ICON_SVG)}")`;
   el.addEventListener('click', () => {
+    progressReset(); // fresh % counter; the progress tab takes this tab's spot
     void pageTranslate(); // same path as the translatePage message (Plan 03)
+    void overlayTranslateImages(); // honor the include-images setting from the tab path too
     pageDismissBanner(origin);
   });
 
@@ -2449,22 +2535,18 @@ async function overlayTranslateImages(): Promise<void> {
   // Read translation config (reuse pageReadConfig for the config shape).
   const config = await pageReadConfig();
 
-  // Static snapshot of in-view images (PAGE-05 pattern: no MutationObserver).
+  // Explicit "Translate page" → overlay ALL eligible images, in document order
+  // (top-down), not just the initial viewport: a manual translate should cover the
+  // whole page, and below-fold images silently getting nothing read as "images do
+  // nothing" (T-16 verify defect). The per-page budget (PROG_PER_PAGE_BUDGET) still
+  // caps Vision/LLM spend, so this translates the top N images, not unbounded.
   const allImgs = Array.from(document.querySelectorAll('img')) as HTMLImageElement[];
-  const inViewport = allImgs.filter((img) => {
+  const eligible = allImgs.filter((img) => {
     if (!img.src) return false;
-    if (!progIsEligible(img)) return false; // min-size gate (reuse D-02)
-    const rect = img.getBoundingClientRect();
-    // Viewport intersection: at least partially visible.
-    return (
-      rect.top  < window.innerHeight &&
-      rect.left < window.innerWidth  &&
-      rect.bottom > 0 &&
-      rect.right  > 0
-    );
+    return progIsEligible(img); // min-size gate (reuse D-02)
   });
 
-  if (inViewport.length === 0) return;
+  if (eligible.length === 0) return;
 
   // Per-pass budget + concurrency (reuse phase-13 cost gates, T-16-11).
   const budget = progCreateBudget(PROG_PER_PAGE_BUDGET);
@@ -2482,18 +2564,18 @@ async function overlayTranslateImages(): Promise<void> {
 
   await new Promise<void>((resolveAll) => {
     const settle = (): void => {
-      if (cursor >= inViewport.length && inFlight.size === 0) resolveAll();
+      if (cursor >= eligible.length && inFlight.size === 0) resolveAll();
     };
 
     const launch = (): void => {
-      while (cursor < inViewport.length && gate.tryAcquire()) {
+      while (cursor < eligible.length && gate.tryAcquire()) {
         if (budget.isExhausted) {
           // Nothing further to schedule — resolve when in-flight drains.
           settle();
           break;
         }
 
-        const img = inViewport[cursor];
+        const img = eligible[cursor];
         cursor++;
 
         if (!img) { gate.release(); continue; }
@@ -2502,6 +2584,7 @@ async function overlayTranslateImages(): Promise<void> {
         if (seenThisPass.has(srcKey)) { gate.release(); continue; }
         if (!budget.tryConsume()) { gate.release(); settle(); break; }
         seenThisPass.add(srcKey);
+        progressAdd(1); // count this image once it's actually dispatched
 
         const p = sendImageBlocksWithRetry(img.src, srcKey, config, BATCH_MAX_ATTEMPTS)
           .then((response) => {
@@ -2523,6 +2606,7 @@ async function overlayTranslateImages(): Promise<void> {
           .finally(() => {
           gate.release();
           inFlight.delete(p);
+          progressTick(); // one image settled (rendered, skipped, or failed)
           launch();
           settle();
         });
@@ -2606,6 +2690,7 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
     // Tear down any existing image overlays before a fresh translation run,
     // so overlays don't outlive a reset (overlayRemoveAll mirrors progRemoveAllBadges).
     overlayRemoveAll();
+    progressReset(); // fresh shared % counter for this run (page + images)
     void pageTranslate();
     void overlayTranslateImages(); // Phase 16: image overlay pass (includeImages gate)
     sendResponse({ success: true });
