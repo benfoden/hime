@@ -1647,6 +1647,45 @@ async function sendImageBlocksWithRetry(
   throw lastErr instanceof Error ? lastErr : new Error('image translate failed');
 }
 
+// --- Reveal-fade for page text (mirrors search.css serp-reveal-fade) ----------
+// A text node can't be animated directly, so we briefly animate its PARENT element
+// when the translation is actually written — a 320ms opacity fade-in. Because page
+// chunks apply strictly top-to-bottom (cap 1), the fades cascade down the page as a
+// wave. We never show the fade before the swap (no pre-translation shimmer), per the
+// "don't show waves until text is replaced" requirement.
+const HIME_REVEAL_STYLE_ID = 'hime-reveal-style';
+const HIME_REVEAL_CLASS = 'hime-reveal-fade';
+
+/** Inject the keyframes + class into the page once (idempotent by id). */
+function pageEnsureRevealStyle(): void {
+  if (document.getElementById(HIME_REVEAL_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = HIME_REVEAL_STYLE_ID;
+  style.textContent = [
+    `.${HIME_REVEAL_CLASS}{animation:hime-reveal-fade 320ms ease-out;}`,
+    '@keyframes hime-reveal-fade{from{opacity:0}to{opacity:1}}',
+    `@media (prefers-reduced-motion: reduce){.${HIME_REVEAL_CLASS}{animation:none}}`,
+  ].join('');
+  (document.head ?? document.documentElement).appendChild(style);
+}
+
+/** Play the reveal fade on a just-translated node's parent, then strip the class
+ *  on animationend so it can replay on a later swap and never lingers. */
+function pageRevealNode(node: Text): void {
+  const el = node.parentElement;
+  if (!el) return;
+  pageEnsureRevealStyle();
+  el.classList.remove(HIME_REVEAL_CLASS); // restart if mid-animation
+  // Force reflow so re-adding the class re-triggers the animation.
+  void el.offsetWidth;
+  el.classList.add(HIME_REVEAL_CLASS);
+  el.addEventListener(
+    'animationend',
+    () => el.classList.remove(HIME_REVEAL_CLASS),
+    { once: true },
+  );
+}
+
 /**
  * Apply one chunk's translations to the snapshot (Pattern 3: nodeValue only,
  * NEVER innerHTML). For each GLOBAL snapshot index covered by this chunk:
@@ -1677,6 +1716,7 @@ function pageApplyChunk(
       if (rec) rec.translated = value;
       pageTranslatedNodes.push(node);
       node.nodeValue = value; // in-place, plain text — never innerHTML (Pattern 3 / T-15-07)
+      pageRevealNode(node); // wave the translated text in (only now that it's replaced)
     } else {
       // Key absent for a node that WAS in this chunk → failed node (D-04).
       missing.push(node);
