@@ -908,7 +908,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
           } catch (err) {
             const kind = (err as { kind?: string })?.kind ?? classifyError(s.provider, err).kind;
             const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-            console.error('[hime] translateImageBlocks failed', { provider: s.provider, model: s.model, kind, message: errorMessage });
+            console.error(`[hime] translateImageBlocks failed — provider=${s.provider} model=${s.model} kind=${kind} message=${errorMessage}`);
             sendResponse({ error: errorMessage, kind });
           }
           break;

@@ -2579,15 +2579,25 @@ async function overlayTranslateImages(): Promise<void> {
   // Read translation config (reuse pageReadConfig for the config shape).
   const config = await pageReadConfig();
 
-  // Explicit "Translate page" → overlay ALL eligible images, in document order
-  // (top-down), not just the initial viewport: a manual translate should cover the
-  // whole page, and below-fold images silently getting nothing read as "images do
-  // nothing" (T-16 verify defect). The per-page budget (PROG_PER_PAGE_BUDGET) still
-  // caps Vision/LLM spend, so this translates the top N images, not unbounded.
+  // Overlay only images that are LOADED and actually VISIBLE on screen. Off-screen
+  // or not-yet-decoded images have naturalWidth 0 / bogus rects, so the downscale→
+  // rect mapping collapses every box into a misplaced cluster (T-16: "cluster of
+  // overlays over nothing"). Visible-and-loaded is the only set we can map correctly;
+  // scroll-triggered overlay for below-fold images is a separate follow-up.
   const allImgs = Array.from(document.querySelectorAll('img')) as HTMLImageElement[];
   const eligible = allImgs.filter((img) => {
     if (!img.src) return false;
-    return progIsEligible(img); // min-size gate (reuse D-02)
+    if (!progIsEligible(img)) return false;          // min-size gate (reuse D-02)
+    if (!img.complete || img.naturalWidth === 0) return false; // must be decoded (valid natural dims)
+    const rect = img.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;      // rendered, non-collapsed
+    // At least partially within the viewport (mappable coords).
+    return (
+      rect.top < window.innerHeight &&
+      rect.left < window.innerWidth &&
+      rect.bottom > 0 &&
+      rect.right > 0
+    );
   });
 
   if (eligible.length === 0) return;
