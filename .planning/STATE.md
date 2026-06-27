@@ -1,34 +1,47 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.4
-milestone_name: In-Place Page Translation — Phases 15-16 (in progress; started 2026-06-22)
-status: verifying
-last_updated: "2026-06-22T20:57:31.127Z"
-last_activity: "2026-06-22 -- Closed out 15-02 (background translatePageBatch worker case + manual triggers): wrote 15-02-SUMMARY, marked plan complete in ROADMAP after human-verify approval"
+milestone_name: In-Place Page Translation — Phases 15-16 (shipped 2026-06-27)
+status: Awaiting next milestone
+last_updated: "2026-06-27T02:46:01.685Z"
+last_activity: 2026-06-27 — Milestone v1.4 completed and archived
 progress:
   total_phases: 10
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 9
-  completed_plans: 8
-  percent: 10
+  completed_plans: 9
+  percent: 20
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-21)
+See: .planning/PROJECT.md (updated 2026-06-27)
 
 **Core value:** Type English, get natural Japanese inline — without breaking your keyboard flow.
-**Last shipped:** v1.3 Image Translation (phases 12-14, 2026-06-21)
-**Current focus:** Phase 15 — in-place-page-text-translation-triggers
+**Last shipped:** v1.4 In-Place Page Translation (phases 15-16, 2026-06-27)
+**Current focus:** Planning next milestone (v1.5 Contextual Hints candidate, or 999.5 default-ON page auto-translate)
+
+## Deferred Items
+
+Items acknowledged and deferred at v1.4 milestone close on 2026-06-27:
+
+| Category | Item | Status |
+|----------|------|--------|
+| context | Phase 15 15-CONTEXT.md open questions (TreeWalker filter/chunking, restore mechanism, failed-node tracking) | resolved in implementation; markers stale |
+| deferred | Below-fold image overlay on scroll (initial-viewport only) | backlog |
+| deferred | Exotic-layout image positioning (transformed/scaled ancestor or srcset) | investigate if recurs |
+| deferred | Unified read-vs-compose direction model (replaces popup-swap reliance) | backlog |
+| backlog | 999.5 default-ON page-text auto-translate (machinery shipped; needs trigger policy) | backlog |
+| backlog | 999.4 per-image numbering in badge + sidebar | backlog |
 
 ## Current Position
 
-Phase: 15 (in-place-page-text-translation-triggers) — EXECUTING (all 4 plans' code committed)
-Plan: 4 of 4 (complete)
-Status: 15-01..15-04 code committed; 15-02 human-verify checkpoint APPROVED (live browser verify passed) and 15-02-SUMMARY written. All four plan summaries now on disk; ROADMAP marks all 4 plans Complete. Next: phase verifier/close.
-Last activity: 2026-06-22 -- Closed out 15-02 (background translatePageBatch worker case + manual triggers): wrote 15-02-SUMMARY, marked plan complete in ROADMAP after human-verify approval
+Phase: Milestone v1.4 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-27 — Milestone v1.4 completed and archived
 
 ## Accumulated Context
 
@@ -70,8 +83,7 @@ None yet.
 
 ## Operator Next Steps
 
-- Roadmap complete: Phase 15 (PAGE+TRIG, 8 reqs) → Phase 16 (OVL, 5 reqs).
-- Next: `/gsd-plan-phase 15` to decompose the in-place page-text + trigger slice.
+- Start the next milestone with /gsd-new-milestone
 
 ## Performance Metrics
 

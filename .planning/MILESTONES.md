@@ -1,5 +1,21 @@
 # Milestones
 
+## v1.4 In-Place Page Translation (Shipped: 2026-06-27)
+
+**Phases completed:** 6 phases, 9 plans, 21 tasks
+
+**Key accomplishments:**
+
+- Pure, node-tested `page-walk.ts` core for in-place page translation — skip-set walk, char-budget chunking, key-injection-guarded batch-reply parse, once-only restore capture, failed-set retry — plus the translatePage message contracts and session-storage keys.
+- A BYOK-batched `translatePageBatch` worker case (key sourced only from storage) plus the two manual triggers — a context-partitioned 'Translate page' right-click item and an origin-checked, state-mirrored popup button — that dispatch translatePage/togglePage to the active tab.
+- The core in-page translate→apply→toggle flow in `content.ts`: a single static `createTreeWalker` snapshot of visible translatable Text nodes, cursor-driven chunked `translatePageBatch` dispatch under a synchronous concurrency cap (every chunk exactly once), nodeValue-only in-place replacement with once-only original capture, a clickable floating corner pill + `togglePage` that flips original↔translation with no reload, and a `chrome.storage.session` state mirror for the popup label.
+- Adds the two remaining Phase 15 surfaces to `content.ts`: a slim dismissible top banner that — on `document_end` — offers page translation ONLY on foreign-language, non-dismissed origins (reusing `progShouldGateByLanguage` so same-language pages incur no spend) with per-origin `chrome.storage.session` stickiness; and the partial-failure UX that populates Plan 03's shared `pageFailedNodes` Set on whole-chunk failures, applies all successes, shows ONE singleton-by-id error toast + red error badge, and offers "Retry failed sections" re-batching only `[...pageFailedNodes]`.
+- mapBox() three-transform coordinate mapping + fitText() binary-search shrink-to-fit + collectParagraphBoxes() paragraph geometry extraction, all TDD RED-first, fully node-tested with no DOM/canvas dependencies.
+- Popup opt-in checkbox for in-place image overlay translation wired to himeSettings with merge-write default-OFF (D-01 / OVL-01)
+- Lens-style translated-text overlays on page images: body-appended absolute containers with mapBox-placed, fitText-sized black/white boxes, per-image corner toggle, global pill integration, and scroll/resize/ResizeObserver re-anchoring wired into content.ts
+
+---
+
 ## v1.3 Image Translation (Shipped: 2026-06-22)
 
 **Phases completed:** 3 phases (12–14), 16 plans

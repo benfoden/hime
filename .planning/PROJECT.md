@@ -8,20 +8,11 @@ A Chrome extension that lets you type in English and get inline Japanese (or any
 
 Type English, get natural Japanese inline — without breaking your keyboard flow.
 
-## Current Milestone: v1.4 In-Place Page Translation
+## Shipped Milestone: v1.4 In-Place Page Translation
 
-**Goal:** Translate the current page in place — swap the page's visible text with its translation (layout-preserving) and overlay translated text directly on images — so a foreign-language page becomes readable without leaving it. Phases 15+.
+**Shipped 2026-06-27** (phases 15–16). Audit: tech_debt — 13/13 reqs satisfied, 10/10 integration wired, 2/2 E2E flows; see `milestones/v1.4-MILESTONE-AUDIT.md`. Translate the current page in place: the page's visible text is swapped for its translation (layout-preserving, script/style/code/editable nodes skipped, toggle restores original), and translated text is overlaid directly on images via reused Vision `boundingPoly` geometry (WCAG-AA legibility box, shrink-to-fit text, per-image + global swap, scroll/resize re-anchoring). Triggered manually (toolbar / right-click "Translate page") or via a dismissible auto-offer when `<html lang>` differs from target (reuses the `shouldGateByLanguage` gate — no spend on same-language pages). All translate/Vision calls through the background worker (no key on page).
 
-**Target features:**
-- **In-place page-text translation** (replace-in-place): walk the page's text nodes, translate via the existing BYOK LLM pipeline (batched), swap each in place preserving layout; skip script/style/code/editable nodes. A toggle restores the original. *(from backlog 999.5)*
-- **In-place image overlay translation**: reuse Vision `DOCUMENT_TEXT_DETECTION` per-block `boundingPoly` boxes (currently discarded) to render absolutely-positioned DOM overlays on top of each `<img>`, with a simple semi-transparent background box and a swap toggle (original ↔ translation). *(from backlog 999.3)*
-- **Trigger:** manual (toolbar/right-click "Translate page") + auto-offer when the page source language (`<html lang>`) differs from target — reusing the D-05 `shouldGateByLanguage` gate from v1.3 progressive mode (no spend on same-language pages).
-
-**Key context:**
-- **Scope guardrails (locked):** REPLACE-in-place (not bilingual); **STATIC snapshot** only (no MutationObserver / SPA live-translate); **simple overlay** — no inpainting, no manga-grade typesetting, **no new OSS dependency**. Translated text fits its box via shrink-to-fit on `CanvasRenderingContext2D.measureText` (own code).
-- Curated research at `.planning/research/SOURCES.md` (Firefox/Bergamot TreeWalker replace + tag-alignment, translate-tools/domtranslator reference impl, W3C contrast for the legibility box). Reuses v1.3 Vision bbox geometry + Translation pipeline.
-- Image-overlay is a per-block translation pipeline change from v1.3's single whole-image call.
-- After v1.4: contextual-hints (deferred). v1.1 inline-predictions stays PAUSED behind `PREDICT_ENABLED`.
+**Scope held (locked):** REPLACE-in-place (not bilingual); STATIC snapshot (no MutationObserver/SPA live-translate); simple overlay — no inpainting, no manga-grade typesetting, no new OSS dependency; shrink-to-fit via own `measureText` code. Default-ON auto-translate (vs today's offer) carried to backlog 999.5; below-fold overlay, exotic-layout positioning, and a unified read-vs-compose direction model deferred.
 
 ## Shipped Milestone: v1.3 Image Translation
 
@@ -68,11 +59,14 @@ An in-extension search page: query translated user→target language, run agains
 - ✓ Three-stage progressive render (skeleton → raw Brave → translated overlay) — v1.2
 - ✓ XSS-safe SERP rendering (textContent-only, verbatim original hrefs) — v1.2
 - ✓ All search/translation network routed through background worker (no key on page) — v1.2
+- ✓ In-place page-text translation — TreeWalker snapshot, batched BYOK translate, layout-preserving replace, toggle to original (PAGE-01..05) — v1.4
+- ✓ Page-translate triggers — toolbar + right-click manual, `<html lang>` dismissible auto-offer via `shouldGateByLanguage` (TRIG-01..03) — v1.4
+- ✓ In-place image overlay translation — reused Vision `boundingPoly` boxes, WCAG-AA legibility box, shrink-to-fit, swap toggle, scroll/resize re-anchoring (OVL-01..05) — v1.4
 
 ### Active
 
-- v1.4 In-Place Page Translation — CURRENT milestone (phases 15+); requirements scoped this cycle
-- v1.5 Contextual Hints — deferred (was v1.4; pushed back for in-place page translation)
+- v1.5 Contextual Hints — next candidate (deferred through v1.3/v1.4)
+- Default-ON page-text auto-translate — backlog 999.5 (machinery shipped in v1.4; needs auto-trigger policy + settings)
 - v1.1 Inline Predictions — PAUSED (phase 5 shelved behind PREDICT_ENABLED flag; phases 6–7 unbuilt)
 
 ### Out of Scope (v1.0)
@@ -89,9 +83,10 @@ An in-extension search page: query translated user→target language, run agains
 
 ## Current State
 
-**Shipped:** v1.0 MVP (2026-05-25); v1.2 Translated Search (2026-06-20, phases 8–11); v1.3 Image Translation (2026-06-21, phases 12–14)
+**Shipped:** v1.0 MVP (2026-05-25); v1.2 Translated Search (2026-06-20, phases 8–11); v1.3 Image Translation (2026-06-21, phases 12–14); v1.4 In-Place Page Translation (2026-06-27, phases 15–16)
 **Paused:** v1.1 Inline Predictions (phase 5 shelved behind `PREDICT_ENABLED=false`; phases 6–7 unbuilt)
-**Codebase:** TypeScript + Chrome MV3; ~159 tests passing / skips
+**Current focus:** Planning next milestone (v1.5 Contextual Hints candidate, or 999.5 default-ON page auto-translate)
+**Codebase:** TypeScript + Chrome MV3; ~229 tests passing / skips
 **Providers:** OpenAI, Gemini, OpenRouter (LLM); Brave Search (search, BYOK); Google Cloud Vision (image OCR, BYOK)
 **Compatibility:** Verified on Gmail, GitHub, Twitter/X, Notion, Slack, Discord; Google Docs graceful degradation
 
@@ -135,6 +130,11 @@ An in-extension search page: query translated user→target language, run agains
 | Three-stage progressive render (skeleton → raw → translated overlay) | A worker timeout or translation failure still leaves usable untranslated results | ✓ Good — v1.2 |
 | XSS-safe SERP via textContent-only + verbatim hrefs | Brave description HTML stripped to text; URLs never mutated/translated (SERP-02/03) | ✓ Good — v1.2 |
 | SRCH-06: in-flight dedup instead of literal ~1s submit debounce | Worker dedup map covers duplicate-call intent; a literal debounce would delay deliberate submits | ✓ Good — v1.2 audit |
+| Page text: nodeValue swap (not execCommand) | execCommand undo-safety matters only for user-editable fields; page text is read-only, so direct nodeValue replace preserves layout with once-only original capture for the toggle | ✓ Good — v1.4 |
+| Static snapshot, no MutationObserver | Translate the page as it is at trigger time; SPA/dynamic live-translate is unbounded cost + complexity, descoped to backlog | ✓ Good — v1.4 |
+| Image overlay: DOM boxes, no inpainting | Absolutely-positioned DOM overlays on top of `<img>` (translucent box) avoid tainted-canvas + manga-grade typesetting; reuses Vision `boundingPoly` already fetched | ✓ Good — v1.4 |
+| Image overlay opt-in default-OFF | Per-block image translation is extra Vision+LLM spend; gate behind an explicit "Include images" checkbox folded into Translate page (D-01) | ✓ Good — v1.4 |
+| Page auto-offer (dismissible) vs default-ON auto-translate | Ship the offer first to avoid surprise auto-spend; default-ON trigger policy deferred to backlog 999.5 now that the machinery exists | — Pending — v1.4 |
 
 ## Evolution
 
@@ -154,4 +154,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-21 — v1.4 In-Place Page Translation milestone started (phases 15+); v1.3 shipped; v1.1 paused; contextual-hints deferred*
+*Last updated: 2026-06-27 — v1.4 In-Place Page Translation shipped (phases 15–16); v1.1 paused; v1.5 Contextual Hints + 999.5 default-ON page auto-translate are next candidates*
