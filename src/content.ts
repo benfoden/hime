@@ -2566,6 +2566,23 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
   return false;
 });
 
+// --- Boot: clear a stale page-state mirror left over from before a reload ---
+// chrome.storage.session SURVIVES a page reload, but the reloaded DOM is always
+// untranslated. A leftover {state:'translated'|'original-shown'} record makes the
+// popup route "Translate page" to togglePage — a silent no-op on the fresh DOM
+// ("reload + translate doesn't work", T-16 verify defect). Remove this origin's
+// record on load so a freshly loaded page always starts as not-yet-translated.
+// Only this origin's record is touched (the mirror is one global cross-tab record).
+void chrome.storage.session
+  .get(PAGE_STORAGE_PAGE_STATE)
+  .then((stored) => {
+    const mirror = stored[PAGE_STORAGE_PAGE_STATE] as { origin?: string } | undefined;
+    if (mirror?.origin === location.origin) {
+      return chrome.storage.session.remove(PAGE_STORAGE_PAGE_STATE);
+    }
+  })
+  .catch(() => {}); // session storage not yet accessible → nothing to clear
+
 // --- Boot: read storage and start/stop accordingly ---
 
 chrome.storage.local.get(['himeSettings'], (result) => {
