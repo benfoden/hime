@@ -284,6 +284,40 @@ test('OVL-01: collectParagraphBoxes drops paragraphs with whitespace-only assemb
   assert.equal(blocks.length, 0, 'whitespace-only paragraph produces no OverlayBlocks');
 });
 
+test('OVL-01: collectParagraphBoxes converts normalizedVertices to pixels via submitted (real Vision shape)', async () => {
+  const { collectParagraphBoxes } = await loadResolve();
+
+  // Real Google DOCUMENT_TEXT_DETECTION returns paragraph boxes as normalizedVertices
+  // (0–1), NOT pixel vertices — the production shape the original fixture missed (T-16 RCA).
+  const fta = {
+    pages: [{
+      blocks: [{
+        paragraphs: [{
+          boundingBox: {
+            normalizedVertices: [
+              { x: 0.1, y: 0.2 }, { x: 0.5, y: 0.2 },
+              { x: 0.5, y: 0.4 }, { x: 0.1, y: 0.4 },
+            ],
+          },
+          words: [{ symbols: [{ text: 'H' }, { text: 'i' }] }],
+        }],
+      }],
+    }],
+  };
+
+  // Without submitted dims the fallback is dead → box dropped (the bug shipped before the fix).
+  assert.equal(collectParagraphBoxes(fta).length, 0, 'no submitted dims → normalized box dropped');
+
+  // With submitted dims the normalized coords scale to submitted-pixel space.
+  const blocks = collectParagraphBoxes(fta, { w: 1000, h: 500 });
+  assert.equal(blocks.length, 1, 'submitted dims → box recovered');
+  assert.deepEqual(
+    blocks[0].box,
+    [{ x: 100, y: 100 }, { x: 500, y: 100 }, { x: 500, y: 200 }, { x: 100, y: 200 }],
+    'normalizedVertices × submitted dims = pixel coords',
+  );
+});
+
 test('OVL-01: collectParagraphBoxes handles null/undefined gracefully (defensive)', async () => {
   const { collectParagraphBoxes } = await loadResolve();
 

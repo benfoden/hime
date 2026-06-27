@@ -131,7 +131,7 @@ test('chunkByBudget: empty input → no chunks', () => {
 
 test('chunkByBudget: default budget is PAGE_CHUNK_MAX_CHARS', () => {
   assert.equal(PAGE_CHUNK_MAX_CHARS, 4000);
-  assert.equal(PAGE_CONCURRENCY_CAP, 2);
+  assert.equal(PAGE_CONCURRENCY_CAP, 1); // sequential top-to-bottom streaming + low free-tier rate pressure (T-16)
   const oneBig = ['y'.repeat(3999), 'z'.repeat(2)];
   // 3999 + 2 = 4001 > 4000 → splits into two chunks under the default budget.
   assert.deepEqual(chunkByBudget(oneBig), [[0], [1]]);
