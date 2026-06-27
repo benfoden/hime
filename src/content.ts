@@ -1413,6 +1413,15 @@ function pageIsTranslatableTag(tagName: string): boolean {
 const PAGE_CHUNK_MAX_CHARS = 4000;
 const PAGE_CONCURRENCY_CAP = 2;
 
+// Retry/backoff for batch translate calls — mirrors search.ts (the reliable path).
+// Free-tier providers transiently time out or rate-limit under the concurrent
+// page + image load; without retry a single hiccup permanently failed that chunk
+// (T-16: "all page sections fail, random images succeed"). Backoff also paces the
+// concurrent chunks so they ride out the provider's per-minute limit.
+const BATCH_MAX_ATTEMPTS = 3;
+const BATCH_BACKOFF_BASE_MS = 600;
+const batchSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 // MUST stay in sync with page-walk.ts chunkByBudget — groups node-text indices
 // into chunks under a character budget (oversized lone node gets its own chunk).
 function pageChunkByBudget(texts: string[], maxChars = PAGE_CHUNK_MAX_CHARS): number[][] {
@@ -1552,6 +1561,89 @@ function pageSendChunk(
 }
 
 /**
+ * Retry pageSendChunk up to maxAttempts with exponential backoff on TRANSIENT
+ * failures (network/timeout, rate_limit) — mirrors search.ts translateChunkWithRetry,
+ * the path that made search reliable. Backoff also spaces concurrent chunks to ride
+ * out the provider's per-minute rate limit. Permanent failures (auth/credits) throw
+ * immediately — retrying a bad key just wastes the backoff.
+ */
+async function pageSendChunkWithRetry(
+  items: Record<string, string>,
+  config: PageTranslationConfig,
+  maxAttempts: number,
+): Promise<Record<string, string>> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await pageSendChunk(items, config);
+    } catch (err) {
+      lastErr = err;
+      const kind = (err as { kind?: string })?.kind;
+      if (kind === 'auth' || kind === 'credits') throw err; // permanent — no retry
+      if (attempt < maxAttempts - 1) await batchSleep(BATCH_BACKOFF_BASE_MS * 2 ** attempt);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('page translate failed');
+}
+
+// Worker reply for one image's block translation (translateImageBlocks).
+interface ImageBlocksResponse {
+  blocks?: { box: { x: number; y: number }[]; original: string; translated: string }[];
+  submitted?: { w: number; h: number };
+  captureFallback?: boolean;
+  error?: string;
+  kind?: string;
+}
+
+/** Send one image to the worker for OCR+translate. Rejects (with .kind) on error. */
+function sendImageBlocks(
+  srcUrl: string,
+  dedupKey: string,
+  config: PageTranslationConfig,
+): Promise<ImageBlocksResponse> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { type: 'translateImageBlocks', payload: { srcUrl, dedupKey, config } } as Message,
+      (response: ImageBlocksResponse | undefined) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else if (!response) {
+          reject(new Error('No response from worker'));
+        } else if (response.error) {
+          const e = new Error(response.error);
+          (e as { kind?: string }).kind = response.kind ?? 'unknown';
+          reject(e);
+        } else {
+          resolve(response);
+        }
+      },
+    );
+  });
+}
+
+/** Retry sendImageBlocks with backoff on transient failures (same policy as the
+ * page path) so an image isn't permanently dropped by one free-tier hiccup. */
+async function sendImageBlocksWithRetry(
+  srcUrl: string,
+  dedupKey: string,
+  config: PageTranslationConfig,
+  maxAttempts: number,
+): Promise<ImageBlocksResponse> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await sendImageBlocks(srcUrl, dedupKey, config);
+    } catch (err) {
+      lastErr = err;
+      const kind = (err as { kind?: string })?.kind;
+      if (kind === 'auth' || kind === 'credits') throw err; // permanent — no retry
+      if (attempt < maxAttempts - 1) await batchSleep(BATCH_BACKOFF_BASE_MS * 2 ** attempt);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('image translate failed');
+}
+
+/**
  * Apply one chunk's translations to the snapshot (Pattern 3: nodeValue only,
  * NEVER innerHTML). For each GLOBAL snapshot index covered by this chunk:
  *  - key present  → capture original ONCE (Pitfall 7), set translated, write nodeValue,
@@ -1630,7 +1722,7 @@ async function pageTranslate(nodes?: Text[]): Promise<void> {
         const items: Record<string, string> = {};
         for (const idx of chunk) items[String(idx)] = texts[idx]; // GLOBAL snapshot index keys
 
-        const p = pageSendChunk(items, config)
+        const p = pageSendChunkWithRetry(items, config, BATCH_MAX_ATTEMPTS)
           .then((translations) => {
             const missing = pageApplyChunk(snapshot, chunk, translations);
             for (const node of missing) pageFailedNodes.add(node);
@@ -2411,37 +2503,24 @@ async function overlayTranslateImages(): Promise<void> {
         if (!budget.tryConsume()) { gate.release(); settle(); break; }
         seenThisPass.add(srcKey);
 
-        const p = new Promise<void>((resolveOne) => {
-          chrome.runtime.sendMessage(
-            {
-              type: 'translateImageBlocks',
-              payload: { srcUrl: img.src, dedupKey: srcKey, config },
-            } as Message,
-            (response: { blocks?: { box: { x: number; y: number }[]; original: string; translated: string }[]; submitted?: { w: number; h: number }; captureFallback?: boolean; error?: string; kind?: string } | undefined) => {
-              if (chrome.runtime.lastError || !response) {
-                resolveOne();
-                return;
-              }
-              // T-16-06 / Pitfall 2: skip capture-fallback images — boxes are in screenshot space.
-              if (response.captureFallback) {
-                resolveOne();
-                return;
-              }
-              if (response.error) {
-                errorCount++;
-                lastErrorKind = response.kind ?? lastErrorKind;
-                resolveOne();
-                return;
-              }
-              // Render the overlay for this image (Task 2).
+        const p = sendImageBlocksWithRetry(img.src, srcKey, config, BATCH_MAX_ATTEMPTS)
+          .then((response) => {
+            // T-16-06 / Pitfall 2: skip capture-fallback images — boxes are in screenshot space.
+            if (response.captureFallback) return;
+            // Render the overlay for this image (Task 2). Empty blocks → no-op.
+            if (response.blocks && response.blocks.length > 0) {
               overlayRenderImage(img, {
                 blocks: response.blocks,
                 submitted: response.submitted,
               });
-              resolveOne();
-            },
-          );
-        }).finally(() => {
+            }
+          })
+          .catch((err: unknown) => {
+            // All retries exhausted (or permanent auth/credits) → count one failure.
+            errorCount++;
+            lastErrorKind = (err as { kind?: string })?.kind ?? lastErrorKind;
+          })
+          .finally(() => {
           gate.release();
           inFlight.delete(p);
           launch();
